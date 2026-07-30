@@ -1,0 +1,77 @@
+'use strict';
+
+const express = require('express');
+const bcrypt = require('bcrypt');
+const { v4: uuidv4 } = require('uuid');
+const rateLimit = require('express-rate-limit');
+const db = require('../db');
+
+const router = express.Router();
+
+// Rate limit: 5 login attempts per 15 minutes per IP
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many login attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.ip,
+});
+
+/**
+ * POST /api/login
+ * Body: { passphrase: "..." }
+ * On success: sets httpOnly session cookie (90-day expiry)
+ */
+router.post('/api/login', loginLimiter, async (req, res) => {
+  try {
+    const { passphrase } = req.body;
+
+    if (!passphrase || typeof passphrase !== 'string') {
+      return res.status(400).json({ error: 'Passphrase is required' });
+    }
+
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'passphrase_hash'").get();
+
+    if (!row) {
+      return res.status(500).json({ error: 'No passphrase configured. Run: node src/lib/passphrase.js --set "your phrase"' });
+    }
+
+    const match = await bcrypt.compare(passphrase, row.value);
+
+    if (!match) {
+      return res.status(401).json({ error: 'Incorrect passphrase' });
+    }
+
+    // Generate session token and store it
+    const token = uuidv4();
+    db.prepare(
+      `INSERT INTO settings (key, value) VALUES ('session_token', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    ).run(token);
+
+    // Set httpOnly, SameSite=Strict cookie with 90-day expiry
+    res.cookie('endpaper_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 90 * 24 * 60 * 60 * 1000, // 90 days
+      path: '/',
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/session
+ * Returns 200 if the session cookie is valid (middleware already checked it).
+ */
+router.get('/api/session', (req, res) => {
+  res.json({ ok: true });
+});
+
+module.exports = router;

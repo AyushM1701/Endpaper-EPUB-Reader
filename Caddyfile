@@ -1,0 +1,5 @@
+# Replace books.yourdomain.com with your actual domain before deploying.
+# Caddy will automatically obtain and renew a Let's Encrypt certificate.
+books.yourdomain.com {
+  reverse_proxy app:3000
+}
