@@ -1647,6 +1647,8 @@ async function openBook(id){
 
   rendition.on('selected', (cfi, contents) => onTextSelected(entry, cfi, contents));
   rendition.on('markClicked', (cfi) => onHighlightClicked(entry, cfi));
+  rendition.on('mousedown', () => hideHighlightPopup());
+  rendition.on('touchstart', () => hideHighlightPopup());
 
   renderBookmarks();
   renderBookmarkTicks();
