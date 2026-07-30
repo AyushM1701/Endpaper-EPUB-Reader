@@ -1,10 +1,19 @@
 'use strict';
 
 const express = require('express');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const db = require('../db');
+const { validateUuidParam } = require('../lib/validation');
 
 const router = express.Router();
+
+function closeSession(session, endedAt) {
+  if (session.ended_at) return session;
+  const duration = Math.max(0, Math.floor((new Date(endedAt).getTime() - new Date(session.started_at).getTime()) / 1000));
+  db.prepare(`UPDATE reading_sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?`)
+    .run(endedAt, duration, session.id);
+  return { ...session, ended_at: endedAt, duration_seconds: duration };
+}
 
 /**
  * POST /api/sessions/start
@@ -18,12 +27,18 @@ router.post('/api/sessions/start', (req, res) => {
   const book = db.prepare('SELECT id FROM books WHERE id = ?').get(book_id);
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
-  const id = uuidv4();
   const started_at = new Date().toISOString();
+  const id = randomUUID();
 
-  db.prepare(`
-    INSERT INTO reading_sessions (id, book_id, started_at) VALUES (?, ?, ?)
-  `).run(id, book_id, started_at);
+  // A browser can be closed mid-read or a user can open a second book. Close
+  // any abandoned single-user sessions before starting the new one so stats do
+  // not silently lose that reading time.
+  db.transaction(() => {
+    const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL').all();
+    for (const session of openSessions) closeSession(session, started_at);
+    db.prepare('INSERT INTO reading_sessions (id, book_id, started_at) VALUES (?, ?, ?)')
+      .run(id, book_id, started_at);
+  })();
 
   res.status(201).json({ id, book_id, started_at });
 });
@@ -32,20 +47,13 @@ router.post('/api/sessions/start', (req, res) => {
  * POST /api/sessions/:id/end
  * Closes a reading session and computes duration.
  */
-router.post('/api/sessions/:id/end', (req, res) => {
+router.post('/api/sessions/:id/end', validateUuidParam('id'), (req, res) => {
   const session = db.prepare('SELECT * FROM reading_sessions WHERE id = ?').get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
-  const ended_at = new Date().toISOString();
-  const duration_seconds = Math.floor(
-    (new Date(ended_at).getTime() - new Date(session.started_at).getTime()) / 1000
-  );
-
-  db.prepare(`
-    UPDATE reading_sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?
-  `).run(ended_at, duration_seconds, req.params.id);
-
-  res.json({ ...session, ended_at, duration_seconds });
+  // This endpoint is intentionally idempotent: sendBeacon and a normal close
+  // can race during page unload.
+  res.json(closeSession(session, new Date().toISOString()));
 });
 
 /**
@@ -74,20 +82,29 @@ router.get('/api/stats', (req, res) => {
     SELECT COUNT(*) as total FROM books WHERE progress_percent >= 95
   `).get();
 
-  // Reading streak: count consecutive days with at least one session
+  // Reading streak: calculate distinct local calendar days in one query. The
+  // current day only counts if there has actually been a session today.
+  const readingDays = db.prepare(`
+    SELECT DISTINCT date(started_at, 'localtime') AS day
+    FROM reading_sessions
+    WHERE started_at >= date('now', 'localtime', '-365 days')
+    ORDER BY day DESC
+  `).all().map(row => row.day);
   let streak = 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  for (let i = 0; i < 365; i++) {
-    const dayStart = new Date(today.getTime() - i * 24 * 60 * 60 * 1000).toISOString();
-    const dayEnd = new Date(today.getTime() - (i - 1) * 24 * 60 * 60 * 1000).toISOString();
-    const row = db.prepare(`
-      SELECT COUNT(*) as n FROM reading_sessions
-      WHERE started_at >= ? AND started_at < ?
-    `).get(dayStart, dayEnd);
-    if (row.n > 0) streak++;
-    else break;
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  const dayKey = (date) => {
+    const offset = date.getTimezoneOffset() * 60_000;
+    return new Date(date.getTime() - offset).toISOString().slice(0, 10);
+  };
+  const todayKey = dayKey(cursor);
+  const expected = readingDays.includes(todayKey)
+    ? cursor
+    : new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
+  for (const day of readingDays) {
+    if (day !== dayKey(expected)) break;
+    streak++;
+    expected.setDate(expected.getDate() - 1);
   }
 
   res.json({

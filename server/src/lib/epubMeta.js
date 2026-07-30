@@ -12,6 +12,32 @@ const parser = new XMLParser({
   isArray: (name) => ['item', 'itemref', 'reference', 'meta', 'dc:creator', 'dc:identifier'].includes(name),
 });
 
+const MAX_XML_BYTES = 1 * 1024 * 1024;
+const MAX_COVER_BYTES = 20 * 1024 * 1024;
+const SUPPORTED_COVER_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
+
+function entryData(entry, maxBytes, label) {
+  const size = Number(entry && entry.header && entry.header.size);
+  if (!Number.isSafeInteger(size) || size < 0 || size > maxBytes) {
+    throw new Error(`${label} is too large or invalid`);
+  }
+  return entry.getData();
+}
+
+/**
+ * Check the minimum EPUB container structure before accepting an upload.
+ * This avoids saving arbitrary ZIP files that will fail only when opened later.
+ */
+function validateEpub(epubPath) {
+  const zip = new AdmZip(epubPath);
+  const mimetype = zip.getEntry('mimetype');
+  const container = zip.getEntry('META-INF/container.xml');
+  if (!container || !mimetype || entryData(mimetype, 128, 'EPUB mimetype').toString('utf8').trim() !== 'application/epub+zip') {
+    throw new Error('The uploaded file is not a valid EPUB');
+  }
+  entryData(container, MAX_XML_BYTES, 'EPUB container');
+}
+
 /**
  * Extract metadata and cover image from an EPUB file.
  *
@@ -28,7 +54,7 @@ function extractMeta(epubPath, coverId, coversDir) {
   const containerEntry = zip.getEntry('META-INF/container.xml');
   if (!containerEntry) return result;
 
-  const containerXml = containerEntry.getData().toString('utf8');
+  const containerXml = entryData(containerEntry, MAX_XML_BYTES, 'EPUB container').toString('utf8');
   const container = parser.parse(containerXml);
 
   let opfPath = '';
@@ -43,7 +69,7 @@ function extractMeta(epubPath, coverId, coversDir) {
   const opfEntry = zip.getEntry(opfPath);
   if (!opfEntry) return result;
 
-  const opfXml = opfEntry.getData().toString('utf8');
+  const opfXml = entryData(opfEntry, MAX_XML_BYTES, 'EPUB metadata').toString('utf8');
   const opf = parser.parse(opfXml);
   const pkg = opf['package'] || opf['opf:package'] || {};
   const metadata = pkg.metadata || pkg['opf:metadata'] || {};
@@ -117,8 +143,9 @@ function extractMeta(epubPath, coverId, coversDir) {
     }
 
     if (coverEntry) {
-      const coverData = coverEntry.getData();
       const ext = path.extname(coverHref).toLowerCase() || '.jpg';
+      if (!SUPPORTED_COVER_EXTENSIONS.has(ext)) return result;
+      const coverData = entryData(coverEntry, MAX_COVER_BYTES, 'EPUB cover');
       const coverFilename = coverId + ext;
       const coverOutPath = path.join(coversDir, coverFilename);
 
@@ -134,4 +161,4 @@ function extractMeta(epubPath, coverId, coversDir) {
   return result;
 }
 
-module.exports = { extractMeta };
+module.exports = { extractMeta, validateEpub };

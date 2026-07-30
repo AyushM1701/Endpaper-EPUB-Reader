@@ -2,11 +2,10 @@
 
 const db = require('../db');
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'endpaper-dev-secret-change-in-production';
-
 /**
  * Auth middleware: checks for a valid session cookie on all /api/* routes
- * except /api/login and /api/session.
+ * except /api/login and /api/session. The session token is a high-entropy,
+ * server-stored UUID; no additional signing secret is required.
  */
 function authMiddleware(req, res, next) {
   // When mounted at /api via app.use('/api', ...), req.path is relative to the mount.
@@ -39,4 +38,4 @@ function authMiddleware(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, SESSION_SECRET };
+module.exports = { authMiddleware };

@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="description" content="Endpaper is your private, self-hosted EPUB library and reader.">
+<meta name="theme-color" content="#F6F1E7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Endpaper">
+<link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
@@ -133,7 +139,10 @@
 
   #shelf{
     max-width: 1100px; margin: 0 auto;
-    display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:center; gap: 22px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+    gap: 22px;
+    justify-items: center;
   }
   .spine{
     width: 128px; cursor:pointer; user-select:none;
@@ -337,6 +346,7 @@
   .swatch-btn{ width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
   .swatch-btn:hover{ border-color: rgba(255,255,255,0.6); }
   #highlight-remove-btn{ background:none; border:none; color: #E8E3D8; font-size:11px; cursor:pointer; padding:0 4px; text-decoration:underline; }
+  html.dark-shell #highlight-remove-btn{ color: var(--ink-soft); }
 
   /* Shortcuts modal */
   #shortcuts-modal{
@@ -427,6 +437,11 @@
   .collection-list { max-height: 200px; overflow-y:auto; margin-bottom:16px; }
   .collection-item { display:flex; align-items:center; gap:8px; padding: 6px 0; font-size:13.5px; }
   .collection-item input { accent-color: var(--gold); }
+  .collection-item-manage { justify-content:space-between; }
+  .collection-actions { display:flex; gap:10px; margin-left:auto; }
+  .collection-delete { margin-left:auto; border:none; background:none; color:var(--ink-soft); cursor:pointer; font-size:12px; text-decoration:underline; }
+  .collection-actions .collection-delete { margin-left:0; }
+  .collection-delete:hover { color:#B04747; }
   .new-collection-row { display:flex; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
   .new-collection-input { flex:1; padding:6px 10px; border:1px solid var(--line); border-radius:var(--radius); font-size:13px; outline:none; }
   .new-collection-input:focus { border-color: var(--gold); }
@@ -559,6 +574,15 @@
   #login-error{
     color: #C14B4B; font-size:12.5px; margin-top:10px; min-height:18px;
   }
+  #toast{
+    position:fixed; z-index:120; left:50%; bottom:calc(24px + env(safe-area-inset-bottom));
+    transform:translate(-50%, 18px); opacity:0; pointer-events:none;
+    background:var(--ink); color:var(--paper-card); border-radius:var(--radius);
+    padding:10px 14px; max-width:min(420px, calc(100vw - 32px));
+    font-size:13px; line-height:1.4; box-shadow:0 8px 24px var(--shadow);
+    transition:opacity .18s ease, transform .18s ease;
+  }
+  #toast.show{ opacity:1; transform:translate(-50%, 0); }
   @media (max-width: 768px){
     #shelf-header { flex-direction: column; align-items: flex-start; gap: 16px; }
     .shelf-controls { flex-wrap: wrap; justify-content: flex-start; width: 100%; }
@@ -567,12 +591,44 @@
     #shortcuts-card { width: 100%; max-width: none; margin: 0 16px; }
   }
 
+  @media (max-width: 480px){
+    #shelf{ grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 14px; }
+    .spine{ width: 100px; }
+    .spine-book{ width: 100px; height: 148px; }
+    #shelf-view{ padding: 32px 4vw 60px; }
+  }
+
+  /* Upload progress overlay */
+  #upload-progress{
+    position:fixed; inset:0; z-index:80;
+    background: rgba(20,17,12,0.5);
+    display:none; align-items:center; justify-content:center;
+  }
+  #upload-progress.show{ display:flex; }
+  #upload-progress-card{
+    background: var(--paper-card); border-radius: var(--radius);
+    padding: 32px 36px; text-align:center;
+    box-shadow: 0 12px 32px var(--shadow); min-width: 240px;
+  }
+  #upload-progress-card .spinner{ margin: 0 auto 14px; }
+  #upload-progress-text{ font-size:14px; color: var(--ink-soft); }
+
+  /* Dark mode fixes for inputs */
+  html.dark-shell .shelf-select{ background-color: var(--paper-card); color: var(--ink); border-color: var(--line); }
+  html.dark-shell #shelf-search{ background-color: var(--paper-card); color: var(--ink); }
+  html.dark-shell .new-collection-input{ background: var(--paper); color: var(--ink); }
+  html.dark-shell #passphrase-input{ background: var(--paper-card); color: var(--ink); }
+  html.dark-shell #search-input{ background: var(--paper-card); color: var(--ink); }
+
+  /* Page turn animation */
+  #viewer iframe{ transition: opacity 0.15s ease; }
+
 </style>
 </head>
 <body>
 
 <!-- Login gate -->
-<div id="login-gate" class="hidden">
+<div id="login-gate" class="hidden" role="dialog" aria-label="Login">
   <div id="login-card">
     <div class="mark"></div>
     <h1>Endpaper</h1>
@@ -593,26 +649,29 @@
       <span>Endpaper</span>
     </div>
     <div id="topbar-actions">
-      <button class="icon-btn" id="toc-toggle" title="Contents" style="display:none;" onclick="toggleDrawer('toc')">
+      <button class="icon-btn" id="toc-toggle" title="Contents" aria-label="Table of contents" style="display:none;" onclick="toggleDrawer('toc')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
       </button>
-      <button class="icon-btn" id="search-toggle" title="Search this book" style="display:none;" onclick="toggleDrawer('search')">
+      <button class="icon-btn" id="search-toggle" title="Search this book" aria-label="Search this book" style="display:none;" onclick="toggleDrawer('search')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </button>
-      <button class="icon-btn" id="settings-toggle" title="Text & theme settings" style="display:none;" onclick="toggleDrawer('settings')">
+      <button class="icon-btn" id="settings-toggle" title="Text & theme settings" aria-label="Reading settings" style="display:none;" onclick="toggleDrawer('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>
       </button>
-      <button class="icon-btn" id="bookmarks-toggle" title="Bookmarks & highlights" style="display:none;" onclick="toggleDrawer('bookmarks')">
+      <button class="icon-btn" id="bookmarks-toggle" title="Bookmarks & highlights" aria-label="Bookmarks and highlights" style="display:none;" onclick="toggleDrawer('bookmarks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4.5 3h7a.5.5 0 0 1 .5.5v12l-4-2.5L4 15.5v-12a.5.5 0 0 1 .5-.5z"/><path d="M10.5 6.5H18a.5.5 0 0 1 .5.5v12l-4-2.5-1.5.94" stroke-opacity="0.5"/></svg>
       </button>
-      <button class="icon-btn" id="bookmark-toggle" title="Bookmark this page" style="display:none;" onclick="toggleBookmark()">
+      <button class="icon-btn" id="bookmark-toggle" title="Bookmark this page" aria-label="Bookmark this page" style="display:none;" onclick="toggleBookmark()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3.5h12a.5.5 0 0 1 .5.5v17l-6.5-4-6.5 4V4a.5.5 0 0 1 .5-.5z"/></svg>
       </button>
-      <button class="icon-btn" id="help-toggle" title="Keyboard shortcuts" onclick="openShortcutsModal()">
+      <button class="icon-btn" id="help-toggle" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onclick="openShortcutsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 1.7-2.3 3.3"/><line x1="12" y1="17" x2="12" y2="17.1"/></svg>
       </button>
-      <button class="icon-btn" title="Toggle app appearance" onclick="toggleShellTheme()">
+      <button class="icon-btn" title="Toggle app appearance" aria-label="Toggle dark mode" onclick="toggleShellTheme()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out" onclick="logout()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18H10"/></svg>
       </button>
       <button id="upload-btn" onclick="document.getElementById('file-input').click()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
@@ -643,6 +702,7 @@
         <span id="shelf-count"></span>
       </div>
       <div class="shelf-controls">
+        <input id="shelf-search" class="shelf-select" type="search" placeholder="Search library" aria-label="Search library" oninput="renderShelf()">
         <select id="shelf-filter" class="shelf-select" onchange="renderShelf()">
           <option value="all">All Books</option>
           <option value="unread">Unread</option>
@@ -657,6 +717,7 @@
           <option value="progress">Progress</option>
         </select>
         <button class="file-link-btn" onclick="openStatsModal()">Stats</button>
+        <button class="file-link-btn" onclick="openCollectionsManager()">Collections</button>
         <button class="file-link-btn" onclick="exportLibrary()">Export</button>
         <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import</button>
       </div>
@@ -810,7 +871,7 @@
   <button id="highlight-remove-btn" style="display:none;" onclick="removeCurrentHighlight()">Remove</button>
 </div>
 
-<div id="stats-modal">
+<div id="stats-modal" role="dialog" aria-label="Reading statistics">
   <div id="stats-card">
     <h3>Reading Stats</h3>
     <div class="stat-grid">
@@ -835,9 +896,9 @@
   </div>
 </div>
 
-<div id="collections-modal">
+<div id="collections-modal" role="dialog" aria-label="Manage collections">
   <div id="collections-card">
-    <h3>Organize Collections</h3>
+    <h3 id="collections-title">Organize Collections</h3>
     <div class="collection-list" id="collection-list"></div>
     <div class="new-collection-row">
       <input type="text" id="new-collection-input" class="new-collection-input" placeholder="New collection..." onkeydown="if(event.key==='Enter') createCollection()">
@@ -847,7 +908,9 @@
   </div>
 </div>
 
-<div id="shortcuts-modal">
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="shortcuts-modal" role="dialog" aria-label="Keyboard shortcuts">
   <div id="shortcuts-card">
     <h3>Keyboard shortcuts</h3>
     <div class="shortcut-row"><span>Previous / next page</span><span class="shortcut-key">← →</span></div>
@@ -858,9 +921,17 @@
     <div class="shortcut-row"><span>Bookmarks & highlights</span><span class="shortcut-key">M</span></div>
     <div class="shortcut-row"><span>Settings</span><span class="shortcut-key">S</span></div>
     <div class="shortcut-row"><span>Fullscreen</span><span class="shortcut-key">F</span></div>
+    <div class="shortcut-row"><span>Back to library</span><span class="shortcut-key">H</span></div>
     <div class="shortcut-row"><span>Close panel / exit fullscreen</span><span class="shortcut-key">Esc</span></div>
     <div class="shortcut-row"><span>Show/hide controls</span><span class="shortcut-key">Tap page</span></div>
     <div class="close-row"><button onclick="closeShortcutsModal()">Got it</button></div>
+  </div>
+</div>
+
+<div id="upload-progress">
+  <div id="upload-progress-card">
+    <div class="spinner"></div>
+    <div id="upload-progress-text">Uploading…</div>
   </div>
 </div>
 
@@ -875,15 +946,23 @@ let allCollections = [];
 
 const api = {
   async fetch(url, opts = {}) {
+    const headers = new Headers(opts.headers || {});
+    if (opts.body && !(opts.body instanceof FormData) && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
     const res = await fetch(url, {
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', ...opts.headers },
       ...opts,
+      headers,
     });
     if (res.status === 401) {
       // Session expired — show login gate
       showLoginGate();
       throw new Error('Session expired');
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Request failed (${res.status})`);
     }
     return res;
   },
@@ -897,6 +976,7 @@ const api = {
   },
 
   async endSession(sessionId) {
+    if (!sessionId) return;
     const res = await this.fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' });
     return res.json();
   },
@@ -909,12 +989,10 @@ const api = {
   async uploadBook(file) {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch('/api/books', {
+    const res = await this.fetch('/api/books', {
       method: 'POST',
-      credentials: 'same-origin',
       body: formData,
     });
-    if (res.status === 401) { showLoginGate(); throw new Error('Session expired'); }
     return res.json();
   },
 
@@ -951,6 +1029,19 @@ const api = {
   async createCollection(name) {
     const res = await this.fetch('/api/collections', {
       method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    return res.json();
+  },
+
+  async deleteCollection(id) {
+    const res = await this.fetch(`/api/collections/${id}`, { method: 'DELETE' });
+    return res.json();
+  },
+
+  async renameCollection(id, name) {
+    const res = await this.fetch(`/api/collections/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify({ name }),
     });
     return res.json();
@@ -1022,21 +1113,6 @@ const api = {
       body: JSON.stringify(data),
     });
   },
-
-  async startSession(bookId) {
-    const res = await this.fetch('/api/sessions/start', {
-      method: 'POST',
-      body: JSON.stringify({ book_id: bookId }),
-    });
-    return res.json();
-  },
-
-  async endSession(sessionId) {
-    if (!sessionId) return;
-    try {
-      await this.fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' });
-    } catch(e) { /* best effort */ }
-  },
 };
 
 /* ---------------- State ---------------- */
@@ -1046,6 +1122,15 @@ let rendition = null;
 let currentBookId = null;
 let locationsReady = false;
 var currentSessionId = null;
+let toastTimer = null;
+
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+}
 
 const settings = {
   theme: 'light',
@@ -1079,6 +1164,16 @@ const SPACING_VALUES = ['normal', '0.5px', '1px', '1.6px'];
 
 const spineColors = ['#3F5D4C','#7A3B32','#3B4A6B','#6B4C3B','#5B3F5D','#2C4237','#8A6A2F','#43506B'];
 
+function normalizeSettings() {
+  if (!THEMES[settings.theme]) settings.theme = 'light';
+  if (!FONTS.some(font => font.name === settings.font)) settings.font = FONTS[0].name;
+  settings.fontSize = Number.isFinite(settings.fontSize) ? Math.max(70, Math.min(220, Math.round(settings.fontSize / 10) * 10)) : 100;
+  settings.lineHeight = Number.isFinite(settings.lineHeight) ? Math.max(120, Math.min(220, Math.round(settings.lineHeight / 10) * 10)) : 150;
+  settings.marginIdx = Number.isInteger(settings.marginIdx) ? Math.max(0, Math.min(MARGIN_LABELS.length - 1, settings.marginIdx)) : 1;
+  settings.letterSpacingIdx = Number.isInteger(settings.letterSpacingIdx) ? Math.max(0, Math.min(SPACING_VALUES.length - 1, settings.letterSpacingIdx)) : 0;
+  if (!['paginated', 'scrolled'].includes(settings.layout)) settings.layout = 'paginated';
+}
+
 /* ---------------- Auth gate ---------------- */
 function showLoginGate() {
   document.getElementById('login-gate').classList.remove('hidden');
@@ -1109,6 +1204,7 @@ async function handleLogin(e) {
     });
 
     if (res.ok) {
+      input.value = '';
       hideLoginGate();
       boot();
     } else {
@@ -1121,6 +1217,24 @@ async function handleLogin(e) {
 
   btn.disabled = false;
   return false;
+}
+
+async function logout() {
+  if (rendition || currentSessionId) {
+    await showShelf();
+  }
+  try {
+    await api.fetch('/api/logout', { method: 'POST' });
+  } catch (err) {
+    // A stale session is already effectively logged out; show the gate either way.
+    console.error('Logout failed:', err);
+  }
+  if (currentSessionId) {
+    currentSessionId = null;
+  }
+  showLoginGate();
+  document.getElementById('passphrase-input').focus();
+  showToast('You have been logged out.');
 }
 
 /* ---------------- Font options UI ---------------- */
@@ -1153,8 +1267,20 @@ document.body.addEventListener('drop', e => {
 document.getElementById('file-input').addEventListener('change', e => handleFiles(e.target.files));
 
 async function handleFiles(fileList){
-  for (const file of Array.from(fileList)) {
-    if (!file.name.toLowerCase().endsWith('.epub')) continue;
+  const epubFiles = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.epub'));
+  if (epubFiles.length === 0) return;
+
+  const progressEl = document.getElementById('upload-progress');
+  const progressText = document.getElementById('upload-progress-text');
+  progressEl.classList.add('show');
+
+  let uploaded = 0;
+  let lastAddedBookId = null;
+  for (let i = 0; i < epubFiles.length; i++) {
+    const file = epubFiles[i];
+    progressText.textContent = epubFiles.length > 1
+      ? `Uploading ${i + 1} of ${epubFiles.length}…`
+      : `Uploading “${file.name}”…`;
     try {
       const bookData = await api.uploadBook(file);
       const entry = {
@@ -1164,18 +1290,27 @@ async function handleFiles(fileList){
         coverColor: bookData.cover_color,
         coverPath: bookData.cover_path,
         progress: bookData.progress_percent || 0,
+        status: bookData.status || 'unread',
         lastLocationCfi: bookData.last_location_cfi,
+        addedAt: bookData.added_at ? new Date(bookData.added_at).getTime() : Date.now(),
         lastOpenedAt: bookData.last_opened_at ? new Date(bookData.last_opened_at).getTime() : null,
         bookmarks: [],
         highlights: [],
       };
       library.push(entry);
       renderShelf();
-      openBook(entry.id);
+      lastAddedBookId = entry.id;
+      uploaded++;
     } catch(err) {
       console.error('Upload failed:', err);
+      showToast(`Could not add “${file.name}”: ${err.message}`);
     }
   }
+  progressEl.classList.remove('show');
+  if (uploaded === 1) showToast('Book added to your library.');
+  else if (uploaded > 1) showToast(`${uploaded} books added to your library.`);
+  document.getElementById('file-input').value = '';
+  if (lastAddedBookId) openBook(lastAddedBookId);
 }
 
 /* ---------------- Shelf rendering ---------------- */
@@ -1216,9 +1351,12 @@ function renderShelf(){
   header.style.display = 'flex';
   document.getElementById('shelf-count').textContent = library.length + (library.length === 1 ? ' book' : ' books');
 
-  // Filtering
+  // Search, filtering, and sorting
+  const searchQuery = document.getElementById('shelf-search').value.trim().toLocaleLowerCase();
   const filterVal = document.getElementById('shelf-filter').value;
-  let filtered = library;
+  let filtered = searchQuery
+    ? library.filter(b => `${b.name || ''} ${b.author || ''}`.toLocaleLowerCase().includes(searchQuery))
+    : library;
   if (filterVal === 'unread') filtered = filtered.filter(b => b.progress === 0);
   else if (filterVal === 'finished') filtered = filtered.filter(b => b.progress >= 95);
   else if (filterVal.startsWith('col_')) {
@@ -1230,7 +1368,7 @@ function renderShelf(){
   // Sorting
   const sortVal = document.getElementById('shelf-sort').value;
   filtered = [...filtered].sort((a, b) => {
-    if (sortVal === 'recent') return (b.id.localeCompare(a.id)); // approx chronological by uuid
+    if (sortVal === 'recent') return (b.addedAt || 0) - (a.addedAt || 0);
     if (sortVal === 'opened') return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0);
     if (sortVal === 'title') return a.name.localeCompare(b.name);
     if (sortVal === 'author') return (a.author || '').localeCompare(b.author || '');
@@ -1259,9 +1397,17 @@ function renderShelf(){
 }
 
 async function removeBook(id){
-  library = library.filter(b => b.id !== id);
-  renderShelf();
-  try { await api.deleteBook(id); } catch(e) { console.error('Delete failed:', e); }
+  const entry = library.find(b => b.id === id);
+  if (!entry || !confirm(`Remove “${entry.name}” and all of its bookmarks and highlights? This cannot be undone.`)) return;
+  try {
+    await api.deleteBook(id);
+    library = library.filter(b => b.id !== id);
+    renderShelf();
+    showToast('Book removed.');
+  } catch(e) {
+    console.error('Delete failed:', e);
+    showToast(`Could not remove the book: ${e.message}`);
+  }
 }
 
 function escapeHtml(str){
@@ -1278,9 +1424,13 @@ async function showShelf(){
   }
   // End reading session
   if (currentSessionId) {
-    api.endSession(currentSessionId);
+    try { await api.endSession(currentSessionId); } catch (e) { console.error('Could not end reading session:', e); }
     currentSessionId = null;
   }
+  // Clean up keyboard handler
+  window.onkeydown = null;
+  currentBookId = null;
+  document.title = 'Endpaper — an EPUB reader';
   document.getElementById('app').classList.remove('chrome-hidden');
   document.body.classList.remove('reader-active');
   document.getElementById('reader-view').classList.remove('active');
@@ -1306,13 +1456,6 @@ function renditionOptions(){
     };
   }
   return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto' };
-}
-
-function prefetchSections(){
-  if (!book || !book.spine) return;
-  book.spine.each(section => {
-    try { section.load(book.load.bind(book)); } catch (e) { /* ignore */ }
-  });
 }
 
 function setLayout(mode){
@@ -1432,12 +1575,6 @@ async function openBook(id){
   document.getElementById('app').classList.remove('chrome-hidden');
   document.body.classList.add('reader-active');
 
-  // Start reading session
-  try {
-    const session = await api.startSession(id);
-    currentSessionId = session.id;
-  } catch(e) { console.error('Failed to start session:', e); }
-
   document.getElementById('shelf-view').style.display = 'none';
   document.getElementById('reader-view').classList.add('active');
   document.getElementById('toc-toggle').style.display = 'flex';
@@ -1502,6 +1639,10 @@ async function openBook(id){
     tuneScrollContainer();
     updateBookmarkIcon();
     applySavedHighlights(entry);
+  }).catch(err => {
+    console.error('Failed to render book:', err);
+    overlay.classList.add('hidden');
+    showToast('This EPUB could not be displayed.');
   });
 
   rendition.on('selected', (cfi, contents) => onTextSelected(entry, cfi, contents));
@@ -1524,11 +1665,13 @@ async function openBook(id){
 
   book.ready.then(() => {
     document.getElementById('loading-text').textContent = 'Mapping pages…';
-    prefetchSections();
     return book.locations.generate(1500);
   }).then(() => {
     locationsReady = true;
     renderBookmarkTicks();
+  }).catch(err => {
+    console.error('Could not map book locations:', err);
+    showToast('Page mapping is unavailable for this book.');
   });
 
   bindRelocated(entry);
@@ -1540,14 +1683,13 @@ async function openBook(id){
     currentSessionId = session.id;
   } catch(e) { console.error('Failed to start reading session:', e); }
 
-  document.getElementById('progress-slider').oninput = null;
-  document.getElementById('progress-slider').addEventListener('change', (e) => {
+  document.getElementById('progress-slider').onchange = (e) => {
     const target = e.target.value / 1000;
     if (locationsReady){
       const cfi = book.locations.cfiFromPercentage(target);
       rendition.display(cfi);
     }
-  });
+  };
 
   window.onkeydown = (e) => {
     if (document.activeElement && document.activeElement.id === 'search-input') return;
@@ -1561,6 +1703,7 @@ async function openBook(id){
     else if (e.key === 's' || e.key === 'S') toggleDrawer('settings');
     else if (e.key === 'm' || e.key === 'M') toggleDrawer('bookmarks');
     else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+    else if (e.key === 'h' || e.key === 'H') showShelf();
     else if (e.key === '/'){ e.preventDefault(); toggleDrawer('search'); document.getElementById('search-input').focus(); }
     else if (e.key === '?') openShortcutsModal();
   };
@@ -1576,8 +1719,19 @@ function bindRelocated(entry){
       pct = Math.round(location.start.percentage * 100);
     }
     entry.progress = pct;
+
+    // Auto-update status
+    if (pct >= 95 && entry.status !== 'finished') {
+      entry.status = 'finished';
+    } else if (pct > 0 && entry.status === 'unread') {
+      entry.status = 'reading';
+    }
+
     document.getElementById('progress-pct').textContent = pct + '%';
     document.getElementById('progress-slider').value = pct * 10;
+
+    // Update browser tab title with progress
+    document.title = `${entry.name} — ${pct}% | Endpaper`;
 
     const chapter = book.navigation && book.navigation.get(location.start.href);
     document.getElementById('progress-chapter').textContent = chapter ? chapter.label.trim() : '';
@@ -2022,7 +2176,9 @@ async function loadLibraryFromStorage(){
       coverColor: b.cover_color,
       coverPath: b.cover_path,
       progress: b.progress_percent || 0,
+      status: b.status || 'unread',
       lastLocationCfi: b.last_location_cfi,
+      addedAt: b.added_at ? new Date(b.added_at).getTime() : 0,
       lastOpenedAt: b.last_opened_at ? new Date(b.last_opened_at).getTime() : null,
       bookmarks: [],
       highlights: [],
@@ -2033,9 +2189,10 @@ async function loadLibraryFromStorage(){
 
   try {
     const serverSettings = await api.getSettings();
-    if (serverSettings['reader-settings']) {
+    if (serverSettings['reader-settings'] && typeof serverSettings['reader-settings'] === 'object') {
       Object.assign(settings, serverSettings['reader-settings']);
     }
+    normalizeSettings();
     if (serverSettings['shell-theme'] === 'dark') {
       document.documentElement.classList.add('dark-shell');
     }
@@ -2067,24 +2224,28 @@ async function exportLibrary(){
 document.getElementById('import-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  if (!confirm('Import this backup into your current library? Existing books are kept and backup data is merged.')) {
+    e.target.value = '';
+    return;
+  }
   try {
     const formData = new FormData();
     formData.append('file', file);
-    const res = await fetch('/api/import', {
+    const res = await api.fetch('/api/import', {
       method: 'POST',
-      credentials: 'same-origin',
       body: formData,
     });
-    if (!res.ok) throw new Error('Import failed');
+    const result = await res.json();
 
     // Reload library from server
     await loadLibraryFromStorage();
     renderFontOptions();
     renderShelf();
     updateSettingsUI();
+    showToast(result.restored_files ? `Backup imported (${result.restored_files} files restored).` : 'Backup imported.');
   } catch(err){
     console.error('Import failed', err);
-    alert("Import failed. Make sure the file is a valid Endpaper backup.");
+    showToast(`Import failed: ${err.message}`);
   }
   e.target.value = '';
 });
@@ -2112,13 +2273,22 @@ window.addEventListener('beforeunload', () => {
 
 /* ---------------- Init ---------------- */
 async function boot(){
-  document.getElementById('shelf-empty').querySelector('p').textContent = 'Loading your library…';
-  await loadLibraryFromStorage();
+  const emptyP = document.getElementById('shelf-empty').querySelector('p');
+  emptyP.textContent = 'Loading your library…';
+  try {
+    await loadLibraryFromStorage();
+  } catch (e) {
+    console.error('Boot failed:', e);
+    emptyP.innerHTML = 'Could not load your library. <button class="file-link-btn" onclick="boot()">Retry</button>';
+    return;
+  }
   renderFontOptions();
   renderShelf();
   updateSettingsUI();
-  document.getElementById('shelf-empty').querySelector('p').textContent =
-    "Add an EPUB and it'll take its place here. Books, bookmarks, and settings are saved automatically, so they'll be right here next time you open this.";
+  emptyP.textContent =
+    "Add an EPUB and it\u2019ll take its place here. Books, bookmarks, and settings are saved automatically, so they\u2019ll be right here next time you open this.";
+  // Load collections after shelf is ready
+  await loadCollections();
 }
 
 // Check auth before boot
@@ -2180,6 +2350,7 @@ let activeOrganizeBookId = null;
 
 async function openBookCollectionsModal(bookId) {
   activeOrganizeBookId = bookId;
+  document.getElementById('collections-title').textContent = 'Organize Collections';
   const list = document.getElementById('collection-list');
   list.innerHTML = '';
   
@@ -2199,6 +2370,38 @@ async function openBookCollectionsModal(bookId) {
   document.getElementById('new-collection-input').value = '';
 }
 
+function openCollectionsManager() {
+  activeOrganizeBookId = null;
+  document.getElementById('collections-title').textContent = 'Manage Collections';
+  const list = document.getElementById('collection-list');
+  list.innerHTML = '';
+  if (allCollections.length === 0) {
+    list.innerHTML = '<div style="color:var(--ink-soft); font-size:13px; font-style:italic;">No collections yet.</div>';
+  } else {
+    allCollections.forEach(collection => {
+      const row = document.createElement('div');
+      row.className = 'collection-item collection-item-manage';
+      const name = document.createElement('span');
+      name.textContent = `${collection.name} (${collection.book_ids.length})`;
+      const actions = document.createElement('div');
+      actions.className = 'collection-actions';
+      const rename = document.createElement('button');
+      rename.className = 'collection-delete';
+      rename.textContent = 'Rename';
+      rename.onclick = () => renameCollection(collection.id, collection.name);
+      const remove = document.createElement('button');
+      remove.className = 'collection-delete';
+      remove.textContent = 'Delete';
+      remove.onclick = () => deleteCollection(collection.id, collection.name);
+      actions.append(rename, remove);
+      row.append(name, actions);
+      list.appendChild(row);
+    });
+  }
+  document.getElementById('collections-modal').classList.add('show');
+  document.getElementById('new-collection-input').value = '';
+}
+
 function closeCollectionsModal() {
   document.getElementById('collections-modal').classList.remove('show');
   activeOrganizeBookId = null;
@@ -2214,7 +2417,34 @@ async function toggleBookCollection(collectionId, isChecked) {
       await api.removeBookFromCollection(activeOrganizeBookId, collectionId);
     }
     await loadCollections();
-  } catch(e) { console.error('Failed to toggle collection:', e); }
+  } catch(e) { console.error('Failed to toggle collection:', e); showToast(`Could not update collection: ${e.message}`); }
+}
+
+async function deleteCollection(id, name) {
+  if (!confirm(`Delete the “${name}” collection? Its books will remain in your library.`)) return;
+  try {
+    await api.deleteCollection(id);
+    await loadCollections();
+    openCollectionsManager();
+    showToast('Collection deleted.');
+  } catch (e) {
+    console.error('Failed to delete collection:', e);
+    showToast(`Could not delete collection: ${e.message}`);
+  }
+}
+
+async function renameCollection(id, currentName) {
+  const name = prompt('Collection name', currentName);
+  if (name === null || name.trim() === currentName) return;
+  try {
+    await api.renameCollection(id, name.trim());
+    await loadCollections();
+    openCollectionsManager();
+    showToast('Collection renamed.');
+  } catch (e) {
+    console.error('Failed to rename collection:', e);
+    showToast(`Could not rename collection: ${e.message}`);
+  }
 }
 
 async function createCollection() {
@@ -2229,17 +2459,10 @@ async function createCollection() {
       await loadCollections();
       openBookCollectionsModal(activeOrganizeBookId); // refresh
     } else {
-      input.value = '';
+      openCollectionsManager();
     }
-  } catch(e) { console.error('Failed to create collection:', e); }
+  } catch(e) { console.error('Failed to create collection:', e); showToast(`Could not create collection: ${e.message}`); }
 }
-
-// Ensure collections are loaded on boot
-const oldBoot = boot;
-boot = async function() {
-  await oldBoot();
-  await loadCollections();
-};
 
 </script>
 </body>

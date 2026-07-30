@@ -2,7 +2,7 @@
 
 const express = require('express');
 const bcrypt = require('bcrypt');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const rateLimit = require('express-rate-limit');
 const db = require('../db');
 
@@ -27,8 +27,8 @@ router.post('/api/login', loginLimiter, async (req, res) => {
   try {
     const { passphrase } = req.body;
 
-    if (!passphrase || typeof passphrase !== 'string') {
-      return res.status(400).json({ error: 'Passphrase is required' });
+    if (!passphrase || typeof passphrase !== 'string' || passphrase.length > 1024) {
+      return res.status(400).json({ error: 'A valid passphrase is required' });
     }
 
     const row = db.prepare("SELECT value FROM settings WHERE key = 'passphrase_hash'").get();
@@ -44,7 +44,7 @@ router.post('/api/login', loginLimiter, async (req, res) => {
     }
 
     // Generate session token and store it
-    const token = uuidv4();
+    const token = randomUUID();
     db.prepare(
       `INSERT INTO settings (key, value) VALUES ('session_token', ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`
@@ -64,6 +64,25 @@ router.post('/api/login', loginLimiter, async (req, res) => {
     console.error('Login error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+/**
+ * POST /api/logout
+ * Invalidates the current session and removes its cookie.
+ */
+router.post('/api/logout', (req, res) => {
+  const token = req.cookies && req.cookies.endpaper_session;
+  const current = db.prepare("SELECT value FROM settings WHERE key = 'session_token'").get();
+  if (current && current.value === token) {
+    db.prepare("DELETE FROM settings WHERE key = 'session_token'").run();
+  }
+  res.clearCookie('endpaper_session', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/',
+  });
+  res.json({ ok: true });
 });
 
 /**

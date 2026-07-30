@@ -15,6 +15,13 @@ Endpaper is a self-hosted, single-user EPUB reader with a beautiful, premium boo
 - **Passphrase-Gated** — Single passphrase login via secure cookies, eliminating the need for complex user accounts.
 - **Responsive** — Dynamically adapts to tight mobile screens or large desktop monitors.
 
+## Reliability & security
+
+- Search the shelf by title or author, and manage collections without affecting the books in them.
+- Abandoned reading sessions are closed automatically when a new session begins, keeping reading statistics accurate.
+- EPUB uploads and backup imports are validated, size-limited, and restricted to safe library file paths.
+- Backups merge missing data and files into the current library; they never overwrite an existing EPUB.
+
 ## Architecture
 
 Endpaper is built for simplicity and portability:
@@ -50,6 +57,12 @@ npm run set-passphrase
 npm run start
 ```
 Open `http://localhost:3001` in your browser.
+
+Endpaper requires Node.js 20 or newer. `GET /healthz` is an unauthenticated health check for reverse proxies and uptime monitors.
+
+### Backups
+
+An export includes EPUBs, covers, progress, annotations, collections, and reader settings. Import is a safe merge: it adds missing records and files but does not overwrite an existing book. Export before importing a backup from another device.
 
 ---
 

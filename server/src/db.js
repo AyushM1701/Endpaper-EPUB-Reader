@@ -11,6 +11,7 @@ const DB_PATH = path.join(DATA_DIR, 'endpaper.db');
 fs.mkdirSync(path.join(DATA_DIR, 'books'), { recursive: true });
 fs.mkdirSync(path.join(DATA_DIR, 'covers'), { recursive: true });
 fs.mkdirSync(path.join(DATA_DIR, 'backups'), { recursive: true });
+fs.mkdirSync(path.join(DATA_DIR, 'tmp'), { recursive: true });
 
 const db = new Database(DB_PATH);
 
@@ -18,6 +19,8 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 // Enable foreign keys on every connection
 db.pragma('foreign_keys = ON');
+// Give concurrent readers and writers a chance to finish instead of failing immediately.
+db.pragma('busy_timeout = 5000');
 
 // ---------- Schema migration ----------
 db.exec(`
@@ -84,6 +87,45 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  CREATE INDEX IF NOT EXISTS idx_books_added_at ON books(added_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_books_last_opened_at ON books(last_opened_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_bookmarks_book_progress ON bookmarks(book_id, progress_percent);
+  CREATE INDEX IF NOT EXISTS idx_highlights_book_created ON highlights(book_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON reading_sessions(started_at);
+  CREATE INDEX IF NOT EXISTS idx_sessions_open ON reading_sessions(ended_at);
 `);
+
+// ---------- Automatic daily backup ----------
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+const MAX_BACKUPS = 5;
+const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+function runBackup() {
+  try {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const backupFile = path.join(BACKUP_DIR, `endpaper-${dateStr}.db`);
+    if (fs.existsSync(backupFile)) return; // already backed up today
+    db.backup(backupFile)
+      .then(() => {
+        console.log(`Database backed up to ${backupFile}`);
+        // Rotate: keep only the newest MAX_BACKUPS files
+        const files = fs.readdirSync(BACKUP_DIR)
+          .filter(f => f.startsWith('endpaper-') && f.endsWith('.db'))
+          .sort()
+          .reverse();
+        for (const old of files.slice(MAX_BACKUPS)) {
+          try { fs.unlinkSync(path.join(BACKUP_DIR, old)); } catch (e) { /* skip */ }
+        }
+      })
+      .catch(err => console.error('Database backup failed:', err));
+  } catch (e) {
+    console.error('Database backup error:', e);
+  }
+}
+
+// Run backup on startup (non-blocking) and schedule daily
+runBackup();
+setInterval(runBackup, BACKUP_INTERVAL_MS);
 
 module.exports = db;

@@ -1,8 +1,9 @@
 'use strict';
 
 const express = require('express');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const db = require('../db');
+const { text, validateUuidParam } = require('../lib/validation');
 
 const router = express.Router();
 
@@ -13,12 +14,16 @@ const router = express.Router();
 router.get('/api/collections', (req, res) => {
   const collections = db.prepare('SELECT * FROM collections ORDER BY name ASC').all();
 
-  const result = collections.map(c => {
-    const bookIds = db.prepare(
-      'SELECT book_id FROM book_collections WHERE collection_id = ?'
-    ).all(c.id).map(r => r.book_id);
-    return { ...c, book_ids: bookIds };
-  });
+  const memberships = db.prepare('SELECT collection_id, book_id FROM book_collections').all();
+  const bookIdsByCollection = new Map(collections.map(collection => [collection.id, []]));
+  for (const membership of memberships) {
+    const bookIds = bookIdsByCollection.get(membership.collection_id);
+    if (bookIds) bookIds.push(membership.book_id);
+  }
+  const result = collections.map(collection => ({
+    ...collection,
+    book_ids: bookIdsByCollection.get(collection.id),
+  }));
 
   res.json(result);
 });
@@ -28,14 +33,18 @@ router.get('/api/collections', (req, res) => {
  * Body: { name }
  */
 router.post('/api/collections', (req, res) => {
-  const { name } = req.body;
-  if (!name || typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'Collection name is required' });
+  let name;
+  try {
+    name = text(req.body.name, { required: true, max: 80, field: 'Collection name' });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
-  const id = uuidv4();
+  const id = randomUUID();
   try {
-    db.prepare('INSERT INTO collections (id, name) VALUES (?, ?)').run(id, name.trim());
+    const existing = db.prepare('SELECT id FROM collections WHERE lower(name) = lower(?)').get(name);
+    if (existing) return res.status(409).json({ error: 'A collection with that name already exists' });
+    db.prepare('INSERT INTO collections (id, name) VALUES (?, ?)').run(id, name);
   } catch (err) {
     if (err.message.includes('UNIQUE')) {
       return res.status(409).json({ error: 'A collection with that name already exists' });
@@ -48,10 +57,41 @@ router.post('/api/collections', (req, res) => {
 });
 
 /**
+ * PATCH /api/collections/:id
+ * Rename a collection without changing its memberships.
+ */
+router.patch('/api/collections/:id', validateUuidParam('id'), (req, res) => {
+  const collection = db.prepare('SELECT id FROM collections WHERE id = ?').get(req.params.id);
+  if (!collection) return res.status(404).json({ error: 'Collection not found' });
+
+  let name;
+  try {
+    name = text(req.body.name, { required: true, max: 80, field: 'Collection name' });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  const duplicate = db.prepare('SELECT id FROM collections WHERE lower(name) = lower(?) AND id != ?').get(name, req.params.id);
+  if (duplicate) return res.status(409).json({ error: 'A collection with that name already exists' });
+  db.prepare('UPDATE collections SET name = ? WHERE id = ?').run(name, req.params.id);
+  res.json(db.prepare('SELECT * FROM collections WHERE id = ?').get(req.params.id));
+});
+
+/**
+ * DELETE /api/collections/:id
+ * Deleting a collection only removes its grouping, never the books in it.
+ */
+router.delete('/api/collections/:id', validateUuidParam('id'), (req, res) => {
+  const result = db.prepare('DELETE FROM collections WHERE id = ?').run(req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Collection not found' });
+  res.json({ ok: true });
+});
+
+/**
  * POST /api/books/:id/collections/:collectionId
  * Add a book to a collection.
  */
-router.post('/api/books/:id/collections/:collectionId', (req, res) => {
+router.post('/api/books/:id/collections/:collectionId', validateUuidParam('id', 'collectionId'), (req, res) => {
   const book = db.prepare('SELECT id FROM books WHERE id = ?').get(req.params.id);
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
@@ -76,7 +116,7 @@ router.post('/api/books/:id/collections/:collectionId', (req, res) => {
  * DELETE /api/books/:id/collections/:collectionId
  * Remove a book from a collection.
  */
-router.delete('/api/books/:id/collections/:collectionId', (req, res) => {
+router.delete('/api/books/:id/collections/:collectionId', validateUuidParam('id', 'collectionId'), (req, res) => {
   db.prepare(
     'DELETE FROM book_collections WHERE book_id = ? AND collection_id = ?'
   ).run(req.params.id, req.params.collectionId);

@@ -7,6 +7,7 @@ const router = express.Router();
 
 // Keys that must never be exposed or overwritten via the API
 const SENSITIVE_KEYS = ['passphrase_hash', 'session_token'];
+const SETTING_KEY_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 
 /**
  * GET /api/settings
@@ -49,12 +50,18 @@ router.put('/api/settings', (req, res) => {
   const runAll = db.transaction((entries) => {
     for (const [key, value] of entries) {
       if (SENSITIVE_KEYS.includes(key)) continue;
+      if (!SETTING_KEY_RE.test(key)) throw new Error(`Invalid setting key: ${key}`);
       const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+      if (serialized === undefined || serialized.length > 100_000) throw new Error(`Setting ${key} is too large or unsupported`);
       upsert.run(key, serialized);
     }
   });
 
-  runAll(Object.entries(body));
+  try {
+    runAll(Object.entries(body));
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
 
   res.json({ ok: true });
 });
