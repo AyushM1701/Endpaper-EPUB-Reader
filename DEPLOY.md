@@ -91,6 +91,42 @@ docker compose up -d
 
 Your persistent data remains in the bind-mounted `data/` directory.
 
+## Native Deployment with PM2 (Alternative to Docker)
+
+If you prefer not to use Docker, you can run Endpaper natively on your VPS using Node.js and PM2.
+
+1. **Clone the repository:**
+   ```bash
+   git clone <your-repo-url> /opt/endpaper
+   cd /opt/endpaper/server
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Start the app with PM2:**
+   ```bash
+   npm install -g pm2
+   pm2 start src/index.js --name "endpaper"
+   pm2 save
+   pm2 startup
+   ```
+
+4. **Create the first admin account:**
+   Instead of using `docker compose exec`, you can run the script natively:
+   ```bash
+   node src/lib/passphrase.js --set "a long unique passphrase" admin
+   ```
+
+5. **Updating the app:**
+   ```bash
+   git pull origin main
+   npm install
+   pm2 restart endpaper
+   ```
+
 ## Backups
 
 > **Important:** The VPS may hold the only copy of your library. Back up the entire `data/` directory regularly; it contains the SQLite database, EPUBs, and covers.
