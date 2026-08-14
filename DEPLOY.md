@@ -1,28 +1,28 @@
 # Deploying Endpaper
 
-Step-by-step guide to get Endpaper running on a fresh VPS with automatic HTTPS.
+This guide deploys Endpaper to a VPS with Docker, Caddy, and automatic HTTPS. Endpaper is a multi-user shared library: every signed-in user sees the same books and collections, while each account has its own private reading state.
 
 ## Prerequisites
 
-- A VPS (e.g., DigitalOcean, Linode, Hetzner) with Docker and Docker Compose installed
-- A domain name you control (e.g., `books.yourdomain.com`)
+- A VPS (for example, DigitalOcean, Linode, or Hetzner) with Docker and Docker Compose installed
+- A domain name you control (for example, `books.yourdomain.com`)
 - SSH access to the VPS
 
-## 1. Point DNS at your VPS
+## 1. Point DNS at the VPS
 
 Create an **A record** for your chosen subdomain pointing to the VPS IP address:
 
-```
-books.yourdomain.com.  →  A  →  203.0.113.42
+```text
+books.yourdomain.com.  ->  A  ->  203.0.113.42
 ```
 
-Allow a few minutes for DNS propagation. You can verify with:
+Allow a few minutes for DNS propagation. You can verify it with:
 
 ```bash
 dig books.yourdomain.com +short
 ```
 
-## 2. Clone or copy the project to the VPS
+## 2. Copy the project to the VPS
 
 ```bash
 ssh your-user@your-vps-ip
@@ -30,64 +30,53 @@ git clone <your-repo-url> /opt/endpaper
 cd /opt/endpaper
 ```
 
-Or use `scp`/`rsync` to copy the files manually.
+Alternatively, use `scp` or `rsync` to copy the project files.
 
 ## 3. Configure the domain
 
-Edit the `Caddyfile` and replace `books.yourdomain.com` with your actual domain:
+Edit `Caddyfile` and replace `books.yourdomain.com` with your actual domain:
 
 ```bash
 nano Caddyfile
 ```
 
-```
+```caddyfile
 books.yourdomain.com {
   reverse_proxy app:3000
 }
 ```
 
-## 4. Set a session secret (optional but recommended)
-
-Create a `.env` file or set the `SESSION_SECRET` environment variable:
-
-```bash
-echo "SESSION_SECRET=$(openssl rand -hex 32)" > .env
-```
-
-Docker Compose will pick this up automatically.
-
-## 5. Start the stack
+## 4. Start the stack
 
 ```bash
 docker compose up -d
 ```
 
-On first boot:
-- The **app** container will initialize the SQLite database and create the `data/` directory structure
-- The **caddy** container will automatically obtain a Let's Encrypt TLS certificate for your domain
+On first boot, the app initializes its SQLite database and creates the `data/` directory structure. Caddy automatically obtains and renews a Let's Encrypt TLS certificate once DNS is correct and ports 80 and 443 are reachable.
 
-This typically takes 10–30 seconds.
+Endpaper stores random session tokens in its database; do not add a `SESSION_SECRET` environment variable. It is not used by the application.
 
-## 6. Set the passphrase
+## 5. Create the first admin account
 
-Run the passphrase-set CLI inside the running container:
+Run the account CLI inside the app container, replacing both values:
 
 ```bash
-docker compose exec app node src/lib/passphrase.js --set "your secret passphrase"
+docker compose exec app node src/lib/passphrase.js --set "a long unique passphrase" admin
 ```
 
-You should see:
-```
-✓ Passphrase set successfully.
-  You can now log in to Endpaper with this passphrase.
+The CLI syntax is:
+
+```bash
+node src/lib/passphrase.js --set "<passphrase>" [username]
 ```
 
-## 7. Verify
+The username defaults to `admin`. A new username creates an admin account; an existing username has its passphrase reset without changing its role and is signed out on all devices.
 
-Open `https://books.yourdomain.com` in your browser. You should see:
-1. The Endpaper login gate
-2. Enter your passphrase → you're in
-3. Upload an EPUB to verify the full flow works
+## 6. Verify and add household accounts
+
+Open `https://books.yourdomain.com` and sign in with the username and passphrase from the previous step.
+
+Your first account is an admin. Use **Admin Settings** to add friends and family as readers. Readers can browse and read the same shared books and collections, but their progress, annotations, ratings, sessions, and settings remain private. Only admins can manage users, upload or remove shared books, edit shared metadata, organize collections, or use backup import/export.
 
 ## Updating
 
@@ -100,11 +89,11 @@ docker compose build
 docker compose up -d
 ```
 
-Your data is safe in the `data/` directory (bind-mounted volume).
+Your persistent data remains in the bind-mounted `data/` directory.
 
 ## Backups
 
-> **Important**: The VPS holds the only copy of your library. Regular backups of the `data/` directory are essential.
+> **Important:** The VPS may hold the only copy of your library. Back up the entire `data/` directory regularly; it contains the SQLite database, EPUBs, and covers.
 
 ### Option 1: Manual backup
 
@@ -120,36 +109,41 @@ crontab -e
 ```
 
 Add a daily backup:
-```
+
+```text
 0 3 * * * cd /opt/endpaper && tar czf /backups/endpaper-$(date +\%Y\%m\%d).tar.gz data/
 ```
 
 ### Option 3: In-app export
 
-Use the "Export backup" button in the Endpaper UI to download a zip containing all books and metadata.
+An admin can use **Export backup** in Endpaper. The archive includes the shared library and supported per-user reading data, but excludes password hashes, admin flags, and login sessions.
 
-## Changing the passphrase
+On import, shared books and collections are merged. User accounts and roles are never created or changed. Personal data is restored only for an existing local account with an exact matching username, so import only backups you trust and keep a fresh export before importing.
+
+## Resetting an account passphrase
+
+Run the same CLI with the account's username:
 
 ```bash
-docker compose exec app node src/lib/passphrase.js --set "new passphrase"
+docker compose exec app node src/lib/passphrase.js --set "new passphrase" admin
 ```
 
-This invalidates any existing sessions — you'll need to log in again.
+For a reader account, replace `admin` with that reader's username. This command does not change whether the account is an admin or reader.
 
 ## Troubleshooting
 
-### Caddy won't start / no HTTPS
+### Caddy will not start or HTTPS is unavailable
 
-- Ensure ports 80 and 443 are open in your firewall
-- Ensure DNS A record is properly set and propagated
-- Check Caddy logs: `docker compose logs caddy`
+- Ensure ports 80 and 443 are open in the VPS firewall.
+- Ensure the DNS A record is correct and has propagated.
+- Check Caddy logs: `docker compose logs caddy`.
 
-### App won't start
+### The app will not start
 
-- Check app logs: `docker compose logs app`
-- Ensure `data/` directory exists and is writable
-- Rebuild: `docker compose build --no-cache`
+- Check app logs: `docker compose logs app`.
+- Ensure `data/` exists and is writable by Docker.
+- Rebuild if needed: `docker compose build --no-cache`.
 
-### "No passphrase configured" error
+### Login fails because no account exists
 
-Run the passphrase-set command (Step 6 above).
+Create the first admin account with the command in step 5, then sign in using both its username and passphrase.

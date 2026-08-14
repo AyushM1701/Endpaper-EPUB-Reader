@@ -13,8 +13,8 @@ const router = express.Router();
  */
 router.get('/api/books/:id/bookmarks', validateUuidParam('id'), (req, res) => {
   const bookmarks = db.prepare(
-    'SELECT * FROM bookmarks WHERE book_id = ? ORDER BY progress_percent ASC'
-  ).all(req.params.id);
+    'SELECT * FROM bookmarks WHERE book_id = ? AND user_id = ? ORDER BY progress_percent ASC'
+  ).all(req.params.id, req.user_id);
   res.json(bookmarks);
 });
 
@@ -38,9 +38,9 @@ router.post('/api/books/:id/bookmarks', validateUuidParam('id'), (req, res) => {
 
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO bookmarks (id, book_id, cfi, label, chapter, progress_percent)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, req.params.id, cfi, safeLabel, safeChapter, progress);
+    INSERT INTO bookmarks (id, user_id, book_id, cfi, label, chapter, progress_percent)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, req.user_id, req.params.id, cfi, safeLabel, safeChapter, progress);
 
   const bookmark = db.prepare('SELECT * FROM bookmarks WHERE id = ?').get(id);
   res.status(201).json(bookmark);
@@ -50,7 +50,7 @@ router.post('/api/books/:id/bookmarks', validateUuidParam('id'), (req, res) => {
  * DELETE /api/bookmarks/:id
  */
 router.delete('/api/bookmarks/:id', validateUuidParam('id'), (req, res) => {
-  const result = db.prepare('DELETE FROM bookmarks WHERE id = ?').run(req.params.id);
+  const result = db.prepare('DELETE FROM bookmarks WHERE id = ? AND user_id = ?').run(req.params.id, req.user_id);
   if (result.changes === 0) return res.status(404).json({ error: 'Bookmark not found' });
   res.json({ ok: true });
 });

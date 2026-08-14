@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="description" content="Endpaper is your private, self-hosted EPUB library and reader.">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="Endpaper is a shared, self-hosted EPUB library and reader.">
 <meta name="theme-color" content="#F6F1E7">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -38,8 +38,8 @@
     --line: #2A2F38;
     --gold: #C9973F;
     --gold-bright: #E0B15C;
-    --cloth: #6B9080;
-    --cloth-deep: #4C6B5C;
+    --cloth: #527A66;
+    --cloth-deep: #3D5E4E;
     --shadow: rgba(0,0,0,0.4);
   }
   *{box-sizing:border-box;}
@@ -53,11 +53,12 @@
     overflow: hidden;
   }
   #app{height:100vh; height:100dvh; width:100%; max-width:100vw; display:flex; flex-direction:column; overflow-x:hidden; padding-top: env(safe-area-inset-top);}
+  #app:fullscreen, #app:-webkit-full-screen{ height:100vh; background:var(--paper); }
 
   /* ---------- Top bar ---------- */
   #topbar{
     display:flex; align-items:center; justify-content:space-between;
-    padding: 14px 22px;
+    gap:12px; min-width:0; padding: 14px 22px;
     border-bottom: 1px solid var(--line);
     flex-shrink:0;
     z-index: 20;
@@ -72,15 +73,34 @@
     display:flex; align-items:center; gap:10px;
     font-family: var(--font-display);
     font-weight:600; font-size:20px; letter-spacing:0.2px;
-    cursor:pointer; user-select:none;
+    cursor:pointer; user-select:none; flex-shrink:0;
+    appearance:none; border:0; padding:0; color:var(--ink); background:transparent;
   }
+  #brand .brand-name{ white-space:nowrap; }
   #brand .mark{
     width:20px; height:26px;
     background: linear-gradient(160deg, var(--gold-bright), var(--gold));
     border-radius: 2px 5px 5px 2px;
     box-shadow: inset -3px 0 0 rgba(0,0,0,0.15);
   }
-  #topbar-actions{ display:flex; align-items:center; gap:10px; }
+  #current-user-context{
+    display:flex; align-items:center; gap:6px; min-width:0;
+    padding-left:10px; border-left:1px solid var(--line);
+    color:var(--ink-soft); font-family:var(--font-ui); font-size:12px; font-weight:400;
+    cursor:default;
+  }
+  #current-user-context[hidden]{ display:none; }
+  .account-context-name{
+    max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    color:var(--ink); font-weight:500;
+  }
+  #topbar-actions{
+    display:flex; align-items:center; gap:10px; flex:1; min-width:0;
+    flex-wrap:nowrap; justify-content:flex-end; overflow-x:auto; overflow-y:hidden;
+    scrollbar-width:none; -webkit-overflow-scrolling:touch;
+  }
+  #topbar-actions::-webkit-scrollbar{ display:none; }
+  #topbar-actions > *{ flex:0 0 auto; }
   .icon-btn{
     background:none; border:1px solid transparent; color: var(--ink);
     width:36px; height:36px; border-radius: var(--radius);
@@ -93,6 +113,14 @@
   .icon-btn:disabled:hover{ background:none; border-color:transparent; }
   #bookmark-toggle.active{ color: var(--gold); }
   #bookmark-toggle.active svg{ fill: var(--gold); }
+
+  :where(button, input, select, [tabindex]):focus-visible{
+    outline:3px solid var(--gold-bright); outline-offset:2px;
+  }
+  .sr-only{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
 
   #upload-btn{
     display:flex; align-items:center; gap:8px;
@@ -176,7 +204,7 @@
   .spine:hover .spine-remove{ opacity:0.8; }
 
   /* ---------- Reader ---------- */
-  #reader-view{ flex:1; display:none; position:relative; overflow:hidden; }
+  #reader-view{ flex:1; display:none; position:relative; overflow:hidden; background:var(--paper); }
   #reader-view.active{ display:flex; flex-direction:column; }
   #viewer-wrap{ flex:1; position:relative; min-height:0; }
   #viewer{ position:absolute; inset:0; }
@@ -189,6 +217,7 @@
     color: var(--ink-soft);
   }
   .nav-zone:hover{ opacity:1; }
+  .nav-zone:focus-visible{ opacity:1; background:var(--paper-card); outline-offset:-4px; }
   .nav-zone.left{ left:0; }
   .nav-zone.right{ right:0; }
   .nav-zone svg{ width:20px; height:20px; }
@@ -218,6 +247,7 @@
     height:3px; border-radius:2px; background: var(--line);
     outline:none; cursor:pointer;
   }
+  #progress-slider:focus-visible{ outline:3px solid var(--gold-bright); outline-offset:4px; }
   #progress-slider::-webkit-slider-thumb{
     -webkit-appearance:none; width:11px; height:11px; border-radius:50%;
     background: var(--gold); cursor:pointer; margin-top:-4px;
@@ -227,6 +257,8 @@
   #progress-chapter{ font-size:12.5px; color: var(--ink-soft); font-style:italic; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
   #progress-track{ position:relative; flex:1; display:flex; align-items:center; }
+  #mobile-fullscreen-toggle{ display:none; }
+  #mobile-fullscreen-toggle[aria-pressed="true"]{ color:var(--gold); border-color:var(--gold); }
   #bookmark-ticks{ position:absolute; left:0; right:0; top:50%; height:0; pointer-events:none; }
   .bookmark-tick{
     position:absolute; top:-4px; width:7px; height:7px; border-radius:50%;
@@ -280,7 +312,7 @@
     flex:1; height:52px; border-radius: var(--radius); cursor:pointer;
     border: 2px solid transparent; position:relative;
     display:flex; align-items:flex-end; justify-content:center; padding-bottom:5px;
-    font-size:10px; font-weight:600; letter-spacing:0.3px;
+    font-family:var(--font-ui); font-size:10px; font-weight:600; letter-spacing:0.3px;
   }
   .theme-swatch.active{ border-color: var(--gold); }
   .theme-swatch.light{ background:#F6F1E7; color:#3a332a; }
@@ -315,6 +347,7 @@
     outline:none;
   }
   #search-input:focus{ border-color: var(--gold); }
+  #search-input:focus-visible{ outline:3px solid var(--gold-bright); outline-offset:2px; }
   #search-status{ font-size:12px; color: var(--ink-soft); margin-bottom:10px; }
   .search-result{ padding:10px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
   .search-result:hover .search-excerpt{ color: var(--gold); }
@@ -327,6 +360,7 @@
   .marks-tab{
     flex:1; padding:8px; text-align:center; font-size:12.5px; font-weight:500;
     border:1px solid var(--line); border-radius: var(--radius); cursor:pointer; color: var(--ink-soft);
+    background:var(--paper-card); font-family:var(--font-ui);
   }
   .marks-tab.active{ border-color: var(--gold); color: var(--ink); background: rgba(169,128,63,0.08); }
   .marks-pane{ display:none; }
@@ -345,6 +379,7 @@
   #highlight-popup.show{ display:flex; }
   .swatch-btn{ width:20px; height:20px; border-radius:50%; cursor:pointer; border:2px solid transparent; }
   .swatch-btn:hover{ border-color: rgba(255,255,255,0.6); }
+  .swatch-btn:focus-visible{ outline:2px solid #fff; outline-offset:2px; }
   #highlight-remove-btn{ background:none; border:none; color: #E8E3D8; font-size:11px; cursor:pointer; padding:0 4px; text-decoration:underline; }
   html.dark-shell #highlight-remove-btn{ color: var(--ink-soft); }
 
@@ -370,7 +405,9 @@
     border-radius: var(--radius); cursor:pointer; font-family: var(--font-ui); font-size:13px;
   }
 
-  #topbar-actions{ flex-wrap: wrap; justify-content:flex-end; }
+  /* Keep the compact controls in one horizontal row. On very narrow screens the
+     action strip can be swiped horizontally instead of wrapping into the book. */
+  #topbar-actions{ flex-wrap:nowrap; justify-content:flex-end; }
   .file-link-btn{
     background:none; border:none; color: var(--ink-soft); font-size:12.5px;
     cursor:pointer; text-decoration:underline; padding:0;
@@ -385,6 +422,13 @@
 
   /* Shelf Controls */
   .shelf-controls{ display:flex; gap:10px; align-items:center; }
+  .admin-library-tools{
+    display:flex; align-items:center; gap:10px; padding-left:10px; border-left:1px solid var(--line);
+  }
+  .admin-tools-label{
+    color:var(--ink-soft); font-size:10.5px; font-weight:600; letter-spacing:.55px;
+    text-transform:uppercase; white-space:nowrap;
+  }
   .shelf-select{
     background: var(--paper-card); border: 1px solid var(--line);
     color: var(--ink-soft); font-family: var(--font-ui); font-size:12.5px;
@@ -447,16 +491,87 @@
   .new-collection-input:focus { border-color: var(--gold); }
   .new-collection-btn { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); padding:6px 12px; font-size:12px; cursor:pointer; }
   .new-collection-btn:hover { border-color:var(--gold); color:var(--gold); }
+  [data-admin-only][hidden]{ display:none !important; }
 
+  /* Admin Modal */
+  #admin-modal{
+    position:fixed; inset:0; background: rgba(20,17,12,0.5); z-index:100;
+    display:none; align-items:center; justify-content:center; padding: 20px;
+  }
+  #admin-modal.show{ display:flex; }
+  #admin-card{
+    background: var(--paper-card); border-radius: var(--radius); padding: 26px 28px;
+    width: 100%; max-width: 520px; max-height:calc(100dvh - 40px); overflow-y:auto; box-sizing: border-box;
+    box-shadow: 0 12px 32px var(--shadow);
+  }
+  .admin-modal-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:18px; }
+  .admin-eyebrow{
+    margin:0 0 4px; color:var(--gold); font-size:10.5px; font-weight:600;
+    letter-spacing:.65px; text-transform:uppercase;
+  }
+  #admin-card h3{ font-family: var(--font-display); font-size:20px; margin:0; }
+  .modal-close{
+    width:32px; height:32px; flex-shrink:0; border:1px solid transparent; border-radius:50%;
+    background:none; color:var(--ink-soft); display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .modal-close:hover, .modal-close:focus-visible{ border-color:var(--line); background:var(--paper); color:var(--ink); }
+  .modal-close svg{ width:17px; height:17px; }
+  .admin-description{ color:var(--ink-soft); font-size:13px; line-height:1.55; margin:10px 0 18px; }
+  .admin-section-title{
+    margin:0 0 8px; color:var(--ink-soft); font-size:11px; font-weight:600;
+    letter-spacing:.6px; text-transform:uppercase;
+  }
+  .admin-user-item{ padding:10px 0; }
+  .admin-user-identity{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; }
+  .admin-user-name{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+  .role-badge{
+    display:inline-flex; align-items:center; min-height:20px; padding:2px 7px; border:1px solid var(--line);
+    border-radius:999px; color:var(--ink-soft); font-family:var(--font-ui); font-size:10.5px; font-weight:600; line-height:1;
+    white-space:nowrap;
+  }
+  .role-badge.admin{ border-color:rgba(169,128,63,.55); background:rgba(169,128,63,.1); color:var(--gold); }
+  .role-badge.reader{ background:var(--paper); }
+  .current-user-badge{ color:var(--ink-soft); font-size:11px; }
+  .admin-self-note{ color:var(--ink-soft); font-size:11px; white-space:nowrap; }
+  .admin-empty{ color:var(--ink-soft); font-size:13px; font-style:italic; margin:4px 0; }
+  .admin-create-form{ margin-top:18px; padding-top:18px; border-top:1px solid var(--line); }
+  .admin-fields{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+  .admin-field{ min-width:0; }
+  .admin-field label{ display:block; color:var(--ink-soft); font-size:11.5px; font-weight:600; margin-bottom:6px; }
+  .admin-field .new-collection-input{ width:100%; padding:8px 10px; }
+  .admin-role-option{
+    display:flex; align-items:flex-start; gap:9px; grid-column:1 / -1; padding:10px;
+    border:1px solid var(--line); border-radius:var(--radius); color:var(--ink); cursor:pointer;
+  }
+  .admin-role-option:hover{ border-color:var(--gold); }
+  .admin-role-option input{ margin:2px 0 0; accent-color:var(--gold); }
+  .admin-role-option strong{ display:block; font-size:12.5px; font-weight:500; }
+  .admin-role-option small{ display:block; color:var(--ink-soft); font-size:11.5px; line-height:1.45; margin-top:2px; }
+  .admin-create-actions{ display:flex; justify-content:flex-end; margin-top:12px; }
+  .admin-create-actions .new-collection-btn{ padding:8px 14px; }
   #app{ padding-bottom: env(safe-area-inset-bottom); }
 
-  /* Touchscreens: hover can't reveal the page-turn zones, and targets need to be bigger */
+  /* Touch readers use a visible, compact pair of page buttons plus swipe.
+     This avoids the old 26%-wide invisible hit areas that swallowed selections. */
   @media (hover: none) and (pointer: coarse){
     .icon-btn{ width:38px; height:38px; }
-    .nav-zone{ width: 26%; opacity: 0.001; touch-action: manipulation; }
-    .nav-zone:active{ opacity: 0.5; }
+    .nav-zone{
+      top:auto; bottom:calc(14px + env(safe-area-inset-bottom)); width:48px; min-width:48px; height:48px;
+      opacity:.96; touch-action:manipulation; background:var(--paper-card); border:1px solid var(--line);
+      border-radius:50%; box-shadow:0 4px 14px var(--shadow); color:var(--ink);
+    }
+    .nav-zone.left{ left:14px; }
+    .nav-zone.right{ right:14px; }
+    .nav-zone:active{ opacity:1; background:var(--paper); border-color:var(--gold); }
+    #app.chrome-hidden .nav-zone{ opacity:0; pointer-events:none; }
     .drawer{ width: min(320px, 86vw); }
     #progress-chapter{ display:none; }
+    #mobile-fullscreen-toggle{
+      width:34px; height:34px; flex:0 0 34px; display:flex; align-items:center; justify-content:center;
+      border:1px solid var(--line); border-radius:var(--radius); background:var(--paper-card); color:var(--ink);
+      cursor:pointer;
+    }
+    #mobile-fullscreen-toggle svg{ width:17px; height:17px; }
     .spine{ width: 112px; }
     .spine-book{ width: 112px; height: 164px; }
     #upload-btn{ padding: 11px 16px; }
@@ -464,7 +579,14 @@
       touch-action: manipulation;
     }
     #topbar{ padding-left:14px; padding-right:14px; }
-    #topbar-actions{ gap:5px; }
+    #topbar-actions{ gap:5px; scroll-snap-type:x proximity; }
+    #topbar-actions > *{ scroll-snap-align:end; }
+    body.reader-active #topbar{ flex-wrap:nowrap; min-height:64px; max-height:64px; }
+    body.reader-active #topbar-actions{
+      flex:1 1 auto; min-width:0; flex-wrap:nowrap; justify-content:flex-start;
+      overflow-x:auto; overflow-y:hidden;
+    }
+    body.reader-active #topbar-actions .icon-btn{ flex:0 0 38px; }
     body.reader-active #brand span{ display:none; }
     body.reader-active #brand .mark{ margin-right:0; }
   }
@@ -474,7 +596,7 @@
     flex:1; padding:10px 8px; border:1px solid var(--line); border-radius: var(--radius);
     cursor:pointer; font-size:12.5px; text-align:center; color: var(--ink-soft);
     display:flex; flex-direction:column; align-items:center; gap:6px;
-    transition: border-color .15s ease, color .15s ease;
+    transition: border-color .15s ease, color .15s ease; background:var(--paper-card); font-family:var(--font-ui);
   }
   .layout-option svg{ width:18px; height:18px; }
   .layout-option.active{ border-color: var(--gold); color: var(--ink); background: rgba(169,128,63,0.08); }
@@ -491,7 +613,7 @@
   .font-option{
     padding:10px 12px; border:1px solid var(--line); border-radius: var(--radius);
     cursor:pointer; font-size:14px; display:flex; justify-content:space-between; align-items:center;
-    transition: border-color .15s ease;
+    transition: border-color .15s ease; color:var(--ink); background:var(--paper-card); font-family:var(--font-ui); text-align:left;
   }
   .font-option.active{ border-color: var(--gold); background: rgba(169,128,63,0.08); }
   .font-option .check{ opacity:0; color: var(--gold); }
@@ -586,9 +708,24 @@
   @media (max-width: 768px){
     #shelf-header { flex-direction: column; align-items: flex-start; gap: 16px; }
     .shelf-controls { flex-wrap: wrap; justify-content: flex-start; width: 100%; }
+    .admin-library-tools{ flex-wrap:wrap; }
     #stats-card { width: 100%; max-width: none; margin: 0 16px; }
     #collections-card { width: 100%; max-width: none; margin: 0 16px; }
     #shortcuts-card { width: 100%; max-width: none; margin: 0 16px; }
+  }
+
+  html.dark-shell{ color-scheme:dark; }
+  html.dark-shell #reader-view,
+  html.dark-shell #viewer-wrap,
+  html.dark-shell #progress-bar{ background:var(--paper); }
+  html.dark-shell .drawer,
+  html.dark-shell .nav-zone,
+  html.dark-shell #mobile-fullscreen-toggle{ box-shadow:0 5px 18px rgba(0,0,0,.34); }
+
+  @media (max-width: 640px){
+    #brand .brand-name{ display:none; }
+    #current-user-context{ padding-left:8px; }
+    .account-context-name{ max-width:112px; }
   }
 
   @media (max-width: 480px){
@@ -596,6 +733,13 @@
     .spine{ width: 100px; }
     .spine-book{ width: 100px; height: 148px; }
     #shelf-view{ padding: 32px 4vw 60px; }
+    #admin-modal{ align-items:flex-start; overflow-y:auto; padding:12px; }
+    #admin-card{ margin:auto 0; max-height:calc(100dvh - 24px); padding:20px 18px; }
+    .admin-fields{ grid-template-columns:1fr; }
+    .admin-create-actions .new-collection-btn{ width:100%; }
+    .admin-library-tools{ width:100%; padding:8px 0 0; border-left:0; border-top:1px solid var(--line); }
+    #current-user-context .role-badge{ display:none; }
+    .account-context-name{ max-width:94px; }
   }
 
   /* Upload progress overlay */
@@ -615,6 +759,9 @@
 
   /* Dark mode fixes for inputs */
   html.dark-shell .shelf-select{ background-color: var(--paper-card); color: var(--ink); border-color: var(--line); }
+  html.dark-shell .shelf-select{
+    background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2214%22%20height%3D%2214%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23DAD5C8%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E");
+  }
   html.dark-shell #shelf-search{ background-color: var(--paper-card); color: var(--ink); }
   html.dark-shell .new-collection-input{ background: var(--paper); color: var(--ink); }
   html.dark-shell #passphrase-input{ background: var(--paper-card); color: var(--ink); }
@@ -634,7 +781,8 @@
     <h1>Endpaper</h1>
     <p>Enter your passphrase to access your library.</p>
     <form id="login-form" onsubmit="return handleLogin(event)">
-      <input type="password" id="passphrase-input" placeholder="Passphrase" autocomplete="current-password" autofocus>
+      <input type="text" id="username-input" placeholder="Username" autocomplete="username" autofocus style="margin-bottom: 14px; width:100%; padding:11px 14px; border:1px solid var(--line); border-radius: var(--radius); background: var(--paper); color: var(--ink); font-family: var(--font-ui); font-size:14px; outline:none; text-align:center; letter-spacing:1px;">
+      <input type="password" id="passphrase-input" placeholder="Passphrase" autocomplete="current-password">
       <button type="submit" id="login-btn">Unlock</button>
       <div id="login-error"></div>
     </form>
@@ -644,21 +792,25 @@
 <div id="app">
 
   <div id="topbar">
-    <div id="brand" onclick="showShelf()">
+    <button id="brand" type="button" onclick="showShelf()" title="Back to shared library" aria-label="Back to shared library">
       <div class="mark"></div>
-      <span>Endpaper</span>
-    </div>
-    <div id="topbar-actions">
-      <button class="icon-btn" id="toc-toggle" title="Contents" aria-label="Table of contents" style="display:none;" onclick="toggleDrawer('toc')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
+      <span class="brand-name">Endpaper</span>
+      <span id="current-user-context" hidden aria-live="polite">
+        <span id="current-user-name" class="account-context-name"></span>
+        <span id="current-user-role" class="role-badge"></span>
+      </span>
+    </button>
+    <div id="topbar-actions" role="group" aria-label="Reader and library actions">
+      <button class="icon-btn" id="toc-toggle" title="Contents" aria-label="Table of contents" aria-controls="toc-drawer" aria-expanded="false" data-drawer-toggle="toc" style="display:none;" onclick="toggleDrawer('toc')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
       </button>
-      <button class="icon-btn" id="search-toggle" title="Search this book" aria-label="Search this book" style="display:none;" onclick="toggleDrawer('search')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <button class="icon-btn" id="search-toggle" title="Search this book" aria-label="Search this book" aria-controls="search-drawer" aria-expanded="false" data-drawer-toggle="search" style="display:none;" onclick="toggleDrawer('search')">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </button>
-      <button class="icon-btn" id="settings-toggle" title="Text & theme settings" aria-label="Reading settings" style="display:none;" onclick="toggleDrawer('settings')">
+      <button class="icon-btn" id="settings-toggle" title="Text & theme settings" aria-label="Reading settings" aria-controls="settings-drawer" aria-expanded="false" data-drawer-toggle="settings" style="display:none;" onclick="toggleDrawer('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>
       </button>
-      <button class="icon-btn" id="bookmarks-toggle" title="Bookmarks & highlights" aria-label="Bookmarks and highlights" style="display:none;" onclick="toggleDrawer('bookmarks')">
+      <button class="icon-btn" id="bookmarks-toggle" title="Bookmarks & highlights" aria-label="Bookmarks and highlights" aria-controls="bookmarks-drawer" aria-expanded="false" data-drawer-toggle="bookmarks" style="display:none;" onclick="toggleDrawer('bookmarks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4.5 3h7a.5.5 0 0 1 .5.5v12l-4-2.5L4 15.5v-12a.5.5 0 0 1 .5-.5z"/><path d="M10.5 6.5H18a.5.5 0 0 1 .5.5v12l-4-2.5-1.5.94" stroke-opacity="0.5"/></svg>
       </button>
       <button class="icon-btn" id="bookmark-toggle" title="Bookmark this page" aria-label="Bookmark this page" style="display:none;" onclick="toggleBookmark()">
@@ -667,18 +819,26 @@
       <button class="icon-btn" id="help-toggle" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onclick="openShortcutsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 1.7-2.3 3.3"/><line x1="12" y1="17" x2="12" y2="17.1"/></svg>
       </button>
-      <button class="icon-btn" title="Toggle app appearance" aria-label="Toggle dark mode" onclick="toggleShellTheme()">
+      <button class="icon-btn" id="shell-theme-toggle" title="Use dark app appearance" aria-label="Use dark app appearance" aria-pressed="false" onclick="toggleShellTheme()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       </button>
       <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out" onclick="logout()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18H10"/></svg>
       </button>
-      <button id="upload-btn" onclick="document.getElementById('file-input').click()">
+      <button class="icon-btn" id="admin-toggle" title="People and library settings" aria-label="People and library settings" data-admin-only hidden onclick="openAdminModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+      </button>
+      <button id="upload-btn" data-admin-only hidden onclick="document.getElementById('file-input').click()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
         Add book
       </button>
-      <input type="file" id="file-input" accept=".epub" multiple>
-      <input type="file" id="import-input" accept=".zip" style="display:none;">
+      <input type="file" id="file-input" accept=".epub" multiple data-admin-only hidden>
+      <input type="file" id="import-input" accept=".zip" style="display:none;" data-admin-only hidden>
     </div>
   </div>
 
@@ -690,15 +850,15 @@
         <path d="M4 4.5A2.5 2.5 0 0 0 6.5 7H20"/>
         <path d="M4 4.5v18"/>
       </svg>
-      <h1>An empty shelf</h1>
-      <p>Add an EPUB and it'll take its place here. Books, bookmarks, and settings are saved automatically, so they'll be right here next time you open this.</p>
-      <div id="dropzone">Drag an .epub file here, or use "Add book" above</div>
-      <p style="margin-top:18px; font-size:13px;">Already have a backup? <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import backup</button></p>
+      <h1>The shared shelf is empty</h1>
+      <p id="empty-shelf-copy">Loading the shared library…</p>
+      <div id="dropzone" data-admin-only hidden>Drag an .epub file here, or use "Add book" above</div>
+      <p id="empty-import-row" data-admin-only hidden style="margin-top:18px; font-size:13px;">Already have a backup? <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import backup</button></p>
     </div>
     <div id="continue-card" style="display:none;"></div>
     <div id="shelf-header" style="display:none;">
       <div style="display:flex; align-items:baseline; gap:16px;">
-        <h2>Your shelf</h2>
+        <h2>Shared library</h2>
         <span id="shelf-count"></span>
       </div>
       <div class="shelf-controls">
@@ -717,9 +877,12 @@
           <option value="progress">Progress</option>
         </select>
         <button class="file-link-btn" onclick="openStatsModal()">Stats</button>
-        <button class="file-link-btn" onclick="openCollectionsManager()">Collections</button>
-        <button class="file-link-btn" onclick="exportLibrary()">Export</button>
-        <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import</button>
+        <div class="admin-library-tools" data-admin-only hidden role="group" aria-label="Shared library tools">
+          <span class="admin-tools-label">Library tools</span>
+          <button id="collections-manager-btn" class="file-link-btn" onclick="openCollectionsManager()">Manage collections</button>
+          <button class="file-link-btn" onclick="exportLibrary()">Export backup</button>
+          <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import backup</button>
+        </div>
       </div>
     </div>
     <div id="shelf"></div>
@@ -730,18 +893,22 @@
     <div id="progress-bar">
       <span id="progress-chapter"></span>
       <div id="progress-track">
-        <input type="range" id="progress-slider" min="0" max="1000" value="0">
+        <label class="sr-only" for="progress-slider">Reading progress</label>
+        <input type="range" id="progress-slider" min="0" max="1000" value="0" aria-describedby="progress-chapter progress-pct">
         <div id="bookmark-ticks"></div>
       </div>
       <span id="progress-pct">0%</span>
+      <button type="button" id="mobile-fullscreen-toggle" title="Fullscreen reading" aria-label="Enter fullscreen reading" aria-pressed="false" onclick="toggleMobileReadingFullscreen()">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M8 21H4a1 1 0 0 1-1-1v-4M16 21h4a1 1 0 0 0 1-1v-4"/></svg>
+      </button>
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
-      <button class="nav-zone left" onclick="rendition && rendition.prev()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+      <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" onclick="rendition && rendition.prev()">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
-      <button class="nav-zone right" onclick="rendition && rendition.next()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      <button type="button" class="nav-zone right" title="Next page" aria-label="Next page" aria-controls="viewer" onclick="rendition && rendition.next()">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       </button>
       <div id="loading-overlay" class="hidden">
         <div class="spinner"></div>
@@ -751,124 +918,125 @@
     </div>
 
     <!-- Table of contents drawer -->
-    <div id="drawer-backdrop" onclick="closeDrawers()"></div>
-    <div class="drawer toc" id="toc-drawer">
+    <div id="drawer-backdrop" aria-hidden="true" onclick="closeDrawers()"></div>
+    <aside class="drawer toc" id="toc-drawer" aria-label="Table of contents" aria-hidden="true" inert>
       <div class="drawer-title">
         Contents
-        <button onclick="toggleDrawer('toc')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button type="button" aria-label="Close table of contents" title="Close" onclick="toggleDrawer('toc')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div id="toc-list"></div>
-    </div>
+    </aside>
 
     <!-- Search drawer -->
-    <div class="drawer toc" id="search-drawer">
+    <aside class="drawer toc" id="search-drawer" aria-label="Search this book" aria-hidden="true" inert>
       <div class="drawer-title">
         Search this book
-        <button onclick="toggleDrawer('search')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button type="button" aria-label="Close book search" title="Close" onclick="toggleDrawer('search')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="search-input-wrap">
+        <label class="sr-only" for="search-input">Search this book</label>
         <input type="text" id="search-input" placeholder="Search for a word or phrase…">
       </div>
       <div id="search-status"></div>
       <div id="search-results"></div>
-    </div>
+    </aside>
 
     <!-- Bookmarks & highlights drawer -->
-    <div class="drawer" id="bookmarks-drawer">
+    <aside class="drawer" id="bookmarks-drawer" aria-label="Bookmarks and highlights" aria-hidden="true" inert>
       <div class="drawer-title">
         Bookmarks & highlights
-        <button onclick="toggleDrawer('bookmarks')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button type="button" aria-label="Close bookmarks and highlights" title="Close" onclick="toggleDrawer('bookmarks')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
-      <div class="marks-tabs">
-        <div class="marks-tab active" data-tab="bookmarks-pane" onclick="setMarksTab('bookmarks-pane')">Bookmarks</div>
-        <div class="marks-tab" data-tab="highlights-pane" onclick="setMarksTab('highlights-pane')">Highlights</div>
+      <div class="marks-tabs" role="tablist" aria-label="Saved reading marks">
+        <button type="button" class="marks-tab active" id="bookmarks-tab" role="tab" aria-selected="true" aria-controls="bookmarks-pane" data-tab="bookmarks-pane" onclick="setMarksTab('bookmarks-pane')">Bookmarks</button>
+        <button type="button" class="marks-tab" id="highlights-tab" role="tab" aria-selected="false" aria-controls="highlights-pane" data-tab="highlights-pane" onclick="setMarksTab('highlights-pane')">Highlights</button>
       </div>
-      <div class="marks-pane active" id="bookmarks-pane">
+      <div class="marks-pane active" id="bookmarks-pane" role="tabpanel" aria-labelledby="bookmarks-tab">
         <div id="bookmarks-list"></div>
       </div>
-      <div class="marks-pane" id="highlights-pane">
+      <div class="marks-pane" id="highlights-pane" role="tabpanel" aria-labelledby="highlights-tab" hidden>
         <div id="highlights-list"></div>
       </div>
-    </div>
+    </aside>
 
     <!-- Settings drawer -->
-    <div class="drawer" id="settings-drawer">
+    <aside class="drawer" id="settings-drawer" aria-label="Reading settings" aria-hidden="true" inert>
       <div class="drawer-title">
         Reading settings
-        <button onclick="toggleDrawer('settings')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <button type="button" aria-label="Close reading settings" title="Close" onclick="toggleDrawer('settings')">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
 
-      <div class="setting-group">
+      <div class="setting-group" role="radiogroup" aria-label="Reading layout">
         <span class="setting-label">Layout</span>
         <div class="layout-options">
-          <div class="layout-option" data-layout="paginated" onclick="setLayout('paginated')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>
+          <button type="button" class="layout-option" role="radio" aria-checked="true" data-layout="paginated" onclick="setLayout('paginated')">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>
             Paginated
-          </div>
-          <div class="layout-option" data-layout="scrolled" onclick="setLayout('scrolled')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="13" y2="16"/></svg>
+          </button>
+          <button type="button" class="layout-option" role="radio" aria-checked="false" data-layout="scrolled" onclick="setLayout('scrolled')">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="13" y2="16"/></svg>
             Scrolled
-          </div>
+          </button>
         </div>
       </div>
 
-      <div class="setting-group">
+      <div class="setting-group" role="radiogroup" aria-label="Book page theme">
         <span class="setting-label">Page theme</span>
         <div class="theme-swatches">
-          <div class="theme-swatch light" data-theme="light" onclick="setReadingTheme('light')">Light</div>
-          <div class="theme-swatch sepia" data-theme="sepia" onclick="setReadingTheme('sepia')">Sepia</div>
-          <div class="theme-swatch dark" data-theme="dark" onclick="setReadingTheme('dark')">Dark</div>
-          <div class="theme-swatch night" data-theme="night" onclick="setReadingTheme('night')">Night</div>
+          <button type="button" class="theme-swatch light" role="radio" aria-checked="true" data-theme="light" onclick="setReadingTheme('light')">Light</button>
+          <button type="button" class="theme-swatch sepia" role="radio" aria-checked="false" data-theme="sepia" onclick="setReadingTheme('sepia')">Sepia</button>
+          <button type="button" class="theme-swatch dark" role="radio" aria-checked="false" data-theme="dark" onclick="setReadingTheme('dark')">Dark</button>
+          <button type="button" class="theme-swatch night" role="radio" aria-checked="false" data-theme="night" onclick="setReadingTheme('night')">Night</button>
         </div>
       </div>
 
       <div class="setting-group">
         <span class="setting-label">Typeface</span>
-        <div class="font-options" id="font-options"></div>
+        <div class="font-options" id="font-options" role="radiogroup" aria-label="Typeface"></div>
       </div>
 
       <div class="setting-group">
         <span class="setting-label">Font size</span>
         <div class="stepper">
-          <button onclick="stepFontSize(-1)">A−</button>
-          <span class="val" id="font-size-val">100%</span>
-          <button onclick="stepFontSize(1)">A+</button>
+          <button type="button" aria-label="Decrease font size" onclick="stepFontSize(-1)">A−</button>
+          <span class="val" id="font-size-val" aria-live="polite">100%</span>
+          <button type="button" aria-label="Increase font size" onclick="stepFontSize(1)">A+</button>
         </div>
       </div>
 
       <div class="setting-group">
-        <span class="setting-label">Line spacing — <span id="line-height-val">1.5</span></span>
-        <input type="range" class="mini" id="line-height-slider" min="120" max="220" step="10" value="150">
+        <label class="setting-label" for="line-height-slider">Line spacing — <span id="line-height-val">1.5</span></label>
+        <input type="range" class="mini" id="line-height-slider" min="120" max="220" step="10" value="150" aria-valuetext="1.5 line spacing">
       </div>
 
       <div class="setting-group">
-        <span class="setting-label">Page width — <span id="margin-val">Medium</span></span>
-        <input type="range" class="mini" id="margin-slider" min="0" max="2" step="1" value="1">
+        <label class="setting-label" for="margin-slider">Page width — <span id="margin-val">Medium</span></label>
+        <input type="range" class="mini" id="margin-slider" min="0" max="2" step="1" value="1" aria-valuetext="Medium page width">
       </div>
 
       <div class="setting-group">
-        <span class="setting-label">Letter spacing — <span id="letter-spacing-val">Normal</span></span>
-        <input type="range" class="mini" id="letter-spacing-slider" min="0" max="3" step="1" value="0">
+        <label class="setting-label" for="letter-spacing-slider">Letter spacing — <span id="letter-spacing-val">Normal</span></label>
+        <input type="range" class="mini" id="letter-spacing-slider" min="0" max="3" step="1" value="0" aria-valuetext="Normal letter spacing">
       </div>
-    </div>
+    </aside>
   </div>
 
 </div>
 
-<div id="highlight-popup">
-  <button class="swatch-btn" style="background:#F2D94E" onclick="applyHighlight('#F2D94E')"></button>
-  <button class="swatch-btn" style="background:#8FD19E" onclick="applyHighlight('#8FD19E')"></button>
-  <button class="swatch-btn" style="background:#8FC1E3" onclick="applyHighlight('#8FC1E3')"></button>
-  <button class="swatch-btn" style="background:#E8A0BF" onclick="applyHighlight('#E8A0BF')"></button>
-  <button id="highlight-remove-btn" style="display:none;" onclick="removeCurrentHighlight()">Remove</button>
+<div id="highlight-popup" role="dialog" aria-modal="false" aria-label="Choose highlight color" aria-hidden="true">
+  <button type="button" class="swatch-btn" style="background:#F2D94E" aria-label="Highlight in yellow" title="Highlight in yellow" onclick="applyHighlight('#F2D94E')"></button>
+  <button type="button" class="swatch-btn" style="background:#8FD19E" aria-label="Highlight in green" title="Highlight in green" onclick="applyHighlight('#8FD19E')"></button>
+  <button type="button" class="swatch-btn" style="background:#8FC1E3" aria-label="Highlight in blue" title="Highlight in blue" onclick="applyHighlight('#8FC1E3')"></button>
+  <button type="button" class="swatch-btn" style="background:#E8A0BF" aria-label="Highlight in pink" title="Highlight in pink" onclick="applyHighlight('#E8A0BF')"></button>
+  <button type="button" id="highlight-remove-btn" style="display:none;" onclick="removeCurrentHighlight()">Remove</button>
 </div>
 
 <div id="stats-modal" role="dialog" aria-label="Reading statistics">
@@ -908,9 +1076,53 @@
   </div>
 </div>
 
+<div id="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-title" aria-describedby="admin-description" aria-hidden="true">
+  <div id="admin-card" class="modal-card">
+    <div class="admin-modal-header">
+      <div>
+        <p class="admin-eyebrow">Shared library</p>
+        <h3 id="admin-title">People &amp; permissions</h3>
+      </div>
+      <button type="button" class="modal-close" aria-label="Close people and permissions" title="Close" onclick="closeAdminModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <p id="admin-description" class="admin-description">Readers can use every book in the shared library. Admins can add or remove books, manage collections and backups, and manage accounts.</p>
+
+    <section aria-labelledby="people-list-title">
+      <h4 id="people-list-title" class="admin-section-title">People</h4>
+      <div class="collection-list" id="user-list" role="list" aria-live="polite"></div>
+    </section>
+
+    <form id="add-user-form" class="admin-create-form" onsubmit="createUser(event); return false;">
+      <h4 class="admin-section-title">Add a person</h4>
+      <div class="admin-fields">
+        <div class="admin-field">
+          <label for="new-user-username">Username</label>
+          <input type="text" id="new-user-username" class="new-collection-input" autocomplete="username" required>
+        </div>
+        <div class="admin-field">
+          <label for="new-user-passphrase">Passphrase</label>
+          <input type="password" id="new-user-passphrase" class="new-collection-input" autocomplete="new-password" minlength="4" required>
+        </div>
+        <label class="admin-role-option" for="new-user-isadmin">
+          <input type="checkbox" id="new-user-isadmin">
+          <span>
+            <strong>Make this person an admin</strong>
+            <small>Admins can manage everyone’s shared library and accounts.</small>
+          </span>
+        </label>
+      </div>
+      <div class="admin-create-actions">
+        <button type="submit" class="new-collection-btn">Add account</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
-<div id="shortcuts-modal" role="dialog" aria-label="Keyboard shortcuts">
+<div id="shortcuts-modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" aria-hidden="true">
   <div id="shortcuts-card">
     <h3>Keyboard shortcuts</h3>
     <div class="shortcut-row"><span>Previous / next page</span><span class="shortcut-key">← →</span></div>
@@ -946,18 +1158,25 @@ let allCollections = [];
 
 const api = {
   async fetch(url, opts = {}) {
-    const headers = new Headers(opts.headers || {});
-    if (opts.body && !(opts.body instanceof FormData) && !headers.has('Content-Type')) {
+    const { expectedAccountVersion, ...requestOptions } = opts;
+    // Authenticated calls that do not need a custom guard still inherit the
+    // account that started them, so an old 401 cannot log out a newer login.
+    const requestAccountVersion = expectedAccountVersion == null ? accountVersion : expectedAccountVersion;
+    const headers = new Headers(requestOptions.headers || {});
+    if (requestOptions.body && !(requestOptions.body instanceof FormData) && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
     const res = await fetch(url, {
       credentials: 'same-origin',
-      ...opts,
+      ...requestOptions,
       headers,
     });
     if (res.status === 401) {
-      // Session expired — show login gate
-      showLoginGate();
+      if (requestAccountVersion === accountVersion) {
+        setCurrentUser(null);
+        // Session expired — show the gate after synchronously clearing reader state.
+        showLoginGate();
+      }
       throw new Error('Session expired');
     }
     if (!res.ok) {
@@ -967,22 +1186,23 @@ const api = {
     return res;
   },
 
-  async startSession(bookId) {
+  async startSession(bookId, opts = {}) {
     const res = await this.fetch('/api/sessions/start', {
+      ...opts,
       method: 'POST',
       body: JSON.stringify({ book_id: bookId }),
     });
     return res.json();
   },
 
-  async endSession(sessionId) {
+  async endSession(sessionId, opts = {}) {
     if (!sessionId) return;
-    const res = await this.fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' });
+    const res = await this.fetch(`/api/sessions/${sessionId}/end`, { ...opts, method: 'POST' });
     return res.json();
   },
 
-  async getBooks() {
-    const res = await this.fetch('/api/books');
+  async getBooks(opts = {}) {
+    const res = await this.fetch('/api/books?limit=10000', opts);
     return res.json();
   },
 
@@ -996,15 +1216,17 @@ const api = {
     return res.json();
   },
 
-  async getBookFile(id) {
+  async getBookFile(id, opts = {}) {
     const res = await this.fetch(`/api/books/${id}/file`, {
+      ...opts,
       headers: {},  // no Content-Type for binary
     });
     return res.arrayBuffer();
   },
 
-  async updateBook(id, data) {
+  async updateBook(id, data, opts = {}) {
     const res = await this.fetch(`/api/books/${id}`, {
+      ...opts,
       method: 'PATCH',
       body: JSON.stringify(data),
     });
@@ -1016,8 +1238,8 @@ const api = {
     return res.json();
   },
 
-  async getStats() {
-    const res = await this.fetch('/api/stats');
+  async getStats(opts = {}) {
+    const res = await this.fetch('/api/stats', opts);
     return res.json();
   },
 
@@ -1060,58 +1282,80 @@ const api = {
     });
     return res.json();
   },
-  async getBookmarks(bookId) {
-    const res = await this.fetch(`/api/books/${bookId}/bookmarks`);
+  async getBookmarks(bookId, opts = {}) {
+    const res = await this.fetch(`/api/books/${bookId}/bookmarks`, opts);
     return res.json();
   },
 
-  async addBookmark(bookId, data) {
+  async addBookmark(bookId, data, opts = {}) {
     const res = await this.fetch(`/api/books/${bookId}/bookmarks`, {
+      ...opts,
       method: 'POST',
       body: JSON.stringify(data),
     });
     return res.json();
   },
 
-  async removeBookmark(id) {
-    await this.fetch(`/api/bookmarks/${id}`, { method: 'DELETE' });
+  async removeBookmark(id, opts = {}) {
+    await this.fetch(`/api/bookmarks/${id}`, { ...opts, method: 'DELETE' });
   },
 
-  async getHighlights(bookId) {
-    const res = await this.fetch(`/api/books/${bookId}/highlights`);
+  async getHighlights(bookId, opts = {}) {
+    const res = await this.fetch(`/api/books/${bookId}/highlights`, opts);
     return res.json();
   },
 
-  async addHighlight(bookId, data) {
+  async addHighlight(bookId, data, opts = {}) {
     const res = await this.fetch(`/api/books/${bookId}/highlights`, {
+      ...opts,
       method: 'POST',
       body: JSON.stringify(data),
     });
     return res.json();
   },
 
-  async updateHighlight(id, data) {
+  async updateHighlight(id, data, opts = {}) {
     const res = await this.fetch(`/api/highlights/${id}`, {
+      ...opts,
       method: 'PATCH',
       body: JSON.stringify(data),
     });
     return res.json();
   },
 
-  async removeHighlight(id) {
-    await this.fetch(`/api/highlights/${id}`, { method: 'DELETE' });
+  async removeHighlight(id, opts = {}) {
+    await this.fetch(`/api/highlights/${id}`, { ...opts, method: 'DELETE' });
   },
 
-  async getSettings() {
-    const res = await this.fetch('/api/settings');
+  async getSettings(opts = {}) {
+    const res = await this.fetch('/api/settings', opts);
     return res.json();
   },
 
-  async saveSettings(data) {
+  async saveSettings(data, opts = {}) {
     await this.fetch('/api/settings', {
+      ...opts,
       method: 'PUT',
       body: JSON.stringify(data),
     });
+  },
+
+  async getUsers() {
+    const res = await this.fetch('/api/users');
+    return res.json();
+  },
+
+  async createUser(data) {
+    const res = await this.fetch('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+
+  async deleteUser(id) {
+    const res = await this.fetch(`/api/users/${id}`, { method: 'DELETE' });
+    return res.json();
   },
 };
 
@@ -1123,6 +1367,13 @@ let currentBookId = null;
 let locationsReady = false;
 var currentSessionId = null;
 let toastTimer = null;
+let currentUser = null;
+let adminModalReturnFocus = null;
+let shortcutsModalReturnFocus = null;
+let accountVersion = 0;
+let readerRequestVersion = 0;
+let readerAbortController = null;
+let activeReaderRequest = null;
 
 function showToast(message) {
   const toast = document.getElementById('toast');
@@ -1132,7 +1383,89 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
 }
 
-const settings = {
+function isCurrentUserAdmin() {
+  return Boolean(currentUser && currentUser.isAdmin);
+}
+
+function updateRoleAwareControls() {
+  const isAdmin = isCurrentUserAdmin();
+  document.querySelectorAll('[data-admin-only]').forEach(el => {
+    el.hidden = !isAdmin;
+    if (el.matches('input')) el.disabled = !isAdmin;
+  });
+
+  const accountContext = document.getElementById('current-user-context');
+  const accountName = document.getElementById('current-user-name');
+  const accountRole = document.getElementById('current-user-role');
+  if (accountContext && accountName && accountRole && currentUser && currentUser.username) {
+    accountName.textContent = currentUser.username;
+    accountRole.textContent = isAdmin ? 'Admin' : 'Reader';
+    accountRole.className = `role-badge ${isAdmin ? 'admin' : 'reader'}`;
+    accountContext.title = `Signed in as ${currentUser.username} (${isAdmin ? 'Admin' : 'Reader'})`;
+    accountContext.hidden = false;
+  } else if (accountContext) {
+    accountContext.hidden = true;
+  }
+
+  const adminModal = document.getElementById('admin-modal');
+  if (!isAdmin && adminModal && adminModal.classList.contains('show')) {
+    closeAdminModal({ returnFocus: false });
+  }
+
+  const uploadButton = document.getElementById('upload-btn');
+  const readerActive = document.getElementById('reader-view').classList.contains('active');
+  if (uploadButton) uploadButton.style.display = isAdmin && !readerActive ? 'flex' : 'none';
+
+  if (!isAdmin) document.getElementById('dropzone').classList.remove('drag-over');
+
+  const emptyCopy = document.getElementById('empty-shelf-copy');
+  if (emptyCopy) {
+    emptyCopy.textContent = isAdmin
+      ? 'Add an EPUB to the shared library. Everyone can read it, while bookmarks, progress, and settings stay personal.'
+      : 'This shared library is empty. Ask an admin to add a book for everyone to read.';
+  }
+}
+
+function userIdentity(user) {
+  return user && user.username ? `${user.username}\u0000${user.isAdmin ? 'admin' : 'reader'}` : null;
+}
+
+function isActiveAccount(version) {
+  return Boolean(currentUser) && version === accountVersion;
+}
+
+function setCurrentUser(session) {
+  const nextUser = session && session.ok !== false
+    ? { isAdmin: Boolean(session.is_admin), username: session.username || null }
+    : null;
+  if (userIdentity(currentUser) !== userIdentity(nextUser)) {
+    accountVersion += 1;
+    // Never leave one family member's active rendition or private metadata
+    // visible while the next account is being opened.
+    discardReaderState({ clearLibrary: true, resetPreferences: true });
+  }
+  currentUser = nextUser;
+  updateRoleAwareControls();
+}
+
+function requireAdmin(action) {
+  if (isCurrentUserAdmin()) return true;
+  showToast(`Only an admin can ${action}.`);
+  return false;
+}
+
+async function refreshCurrentUser() {
+  const res = await fetch('/api/session', { credentials: 'same-origin' });
+  if (!res.ok) {
+    setCurrentUser(null);
+    return null;
+  }
+  const session = await res.json();
+  setCurrentUser(session);
+  return session;
+}
+
+const DEFAULT_READER_SETTINGS = Object.freeze({
   theme: 'light',
   font: 'Serif (Georgia)',
   fontSize: 100,
@@ -1140,7 +1473,9 @@ const settings = {
   marginIdx: 1,
   letterSpacingIdx: 0,
   layout: 'paginated',
-};
+});
+
+const settings = { ...DEFAULT_READER_SETTINGS };
 
 const FONTS = [
   { name: 'Serif (Georgia)', css: 'Georgia, "Times New Roman", serif' },
@@ -1154,8 +1489,13 @@ const THEMES = {
   light: { body: '#F6F1E7', text: '#201C16', link: '#A9803F' },
   sepia: { body: '#EBDCC0', text: '#4A3A22', link: '#8A6A2F' },
   dark:  { body: '#22262C', text: '#DAD5C8', link: '#C9973F' },
-  night: { body: '#000000', text: '#7E7E7E', link: '#9C7A3F' },
+  night: { body: '#000000', text: '#B8B8B8', link: '#E0B15C' },
 };
+
+// Many EPUBs hard-code foreground colours on individual text elements. Keep
+// the override deliberately text-only so page art and SVG illustrations retain
+// their authored fills while Dark and Night pages remain readable.
+const EPUB_TEXT_SELECTORS = 'body, body p, body div, body span, body li, body dd, body dt, body blockquote, body figcaption, body caption, body td, body th, body h1, body h2, body h3, body h4, body h5, body h6, body em, body strong, body b, body i, body small, body cite, body q, body code, body pre, body [style*="color"]';
 
 const MARGIN_LABELS = ['Narrow', 'Medium', 'Wide'];
 const MARGIN_PADDING = ['4%', '10%', '18%'];
@@ -1187,9 +1527,12 @@ async function handleLogin(e) {
   e.preventDefault();
   const btn = document.getElementById('login-btn');
   const errEl = document.getElementById('login-error');
-  const input = document.getElementById('passphrase-input');
-  const passphrase = input.value.trim();
+  const userIn = document.getElementById('username-input');
+  const passIn = document.getElementById('passphrase-input');
+  const username = userIn.value.trim();
+  const passphrase = passIn.value.trim();
 
+  if (!username) { errEl.textContent = 'Please enter a username.'; return false; }
   if (!passphrase) { errEl.textContent = 'Please enter a passphrase.'; return false; }
 
   btn.disabled = true;
@@ -1200,13 +1543,19 @@ async function handleLogin(e) {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passphrase }),
+      body: JSON.stringify({ username, passphrase }),
     });
 
     if (res.ok) {
-      input.value = '';
-      hideLoginGate();
-      boot();
+      userIn.value = '';
+      passIn.value = '';
+      const session = await refreshCurrentUser();
+      if (!session) {
+        errEl.textContent = 'Your session could not be started. Please try again.';
+      } else {
+        hideLoginGate();
+        boot();
+      }
     } else {
       const data = await res.json().catch(() => ({}));
       errEl.textContent = data.error || 'Incorrect passphrase.';
@@ -1220,8 +1569,12 @@ async function handleLogin(e) {
 }
 
 async function logout() {
-  if (rendition || currentSessionId) {
+  if (currentBookId || rendition || currentSessionId) {
     await showShelf();
+  }
+  if (!currentUser) {
+    showLoginGate();
+    return;
   }
   try {
     await api.fetch('/api/logout', { method: 'POST' });
@@ -1232,8 +1585,9 @@ async function logout() {
   if (currentSessionId) {
     currentSessionId = null;
   }
+  setCurrentUser(null);
   showLoginGate();
-  document.getElementById('passphrase-input').focus();
+  document.getElementById('username-input').focus();
   showToast('You have been logged out.');
 }
 
@@ -1242,9 +1596,13 @@ function renderFontOptions(){
   const wrap = document.getElementById('font-options');
   wrap.innerHTML = '';
   FONTS.forEach(f => {
-    const el = document.createElement('div');
-    el.className = 'font-option' + (settings.font === f.name ? ' active' : '');
+    const selected = settings.font === f.name;
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'font-option' + (selected ? ' active' : '');
     el.style.fontFamily = f.css;
+    el.setAttribute('role', 'radio');
+    el.setAttribute('aria-checked', String(selected));
     el.innerHTML = `<span>${f.name}</span><span class="check">✓</span>`;
     el.onclick = () => { settings.font = f.name; renderFontOptions(); applyTheme(); };
     wrap.appendChild(el);
@@ -1255,19 +1613,32 @@ renderFontOptions();
 /* ---------------- Drag & drop / upload ---------------- */
 const dropzone = document.getElementById('dropzone');
 ['dragover','dragenter'].forEach(evt => document.body.addEventListener(evt, e => {
-  e.preventDefault(); dropzone.classList.add('drag-over');
+  e.preventDefault();
+  if (isCurrentUserAdmin()) dropzone.classList.add('drag-over');
 }));
 ['dragleave','drop'].forEach(evt => document.body.addEventListener(evt, e => {
   e.preventDefault(); dropzone.classList.remove('drag-over');
 }));
 document.body.addEventListener('drop', e => {
   e.preventDefault();
+  if (!isCurrentUserAdmin()) {
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      showToast('Only an admin can add books to the shared library.');
+    }
+    return;
+  }
   handleFiles(e.dataTransfer.files);
 });
 document.getElementById('file-input').addEventListener('change', e => handleFiles(e.target.files));
 
 async function handleFiles(fileList){
-  const epubFiles = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.epub'));
+  const files = Array.from(fileList || []);
+  if (files.length === 0) return;
+  if (!requireAdmin('add books to the shared library')) {
+    document.getElementById('file-input').value = '';
+    return;
+  }
+  const epubFiles = files.filter(f => f.name.toLowerCase().endsWith('.epub'));
   if (epubFiles.length === 0) return;
 
   const progressEl = document.getElementById('upload-progress');
@@ -1382,13 +1753,16 @@ function renderShelf(){
     const coverStyle = b.coverPath
       ? `background-image:url('/api/books/${b.id}/cover'); background-size:cover; background-position:center;`
       : `background:${b.coverColor};`;
+    const adminActions = isCurrentUserAdmin() ? `
+      <div class="spine-actions">
+        <button class="spine-action-btn" title="Organize shared collections" onclick="event.stopPropagation(); openBookCollectionsModal('${b.id}')">Organize</button>
+        <button class="spine-action-btn" title="Remove from shared library" onclick="event.stopPropagation(); removeBook('${b.id}')">Remove</button>
+      </div>
+    ` : '';
     spine.innerHTML = `
       <div class="spine-book" style="${coverStyle}">${b.coverPath ? '' : `<span class="spine-title">${escapeHtml(b.name)}</span>`}</div>
       <span class="spine-progress-label">${b.progress > 0 ? b.progress + '% read' : 'Not started'}</span>
-      <div class="spine-actions">
-        <button class="spine-action-btn" title="Organize" onclick="event.stopPropagation(); openBookCollectionsModal('${b.id}')">Organize</button>
-        <button class="spine-action-btn" title="Remove" onclick="event.stopPropagation(); removeBook('${b.id}')">Remove</button>
-      </div>
+      ${adminActions}
     `;
     spine.querySelector('.spine-book').onclick = () => openBook(b.id);
     spine.querySelector('.spine-progress-label').onclick = () => openBook(b.id);
@@ -1397,6 +1771,7 @@ function renderShelf(){
 }
 
 async function removeBook(id){
+  if (!requireAdmin('remove books from the shared library')) return;
   const entry = library.find(b => b.id === id);
   if (!entry || !confirm(`Remove “${entry.name}” and all of its bookmarks and highlights? This cannot be undone.`)) return;
   try {
@@ -1418,32 +1793,25 @@ function escapeHtml(str){
 
 async function showShelf(){
   const entry = getCurrentEntry();
-  if (entry) {
-    clearTimeout(metaSaveTimer);
-    await saveBookMeta(entry);
-  }
-  // End reading session
-  if (currentSessionId) {
-    try { await api.endSession(currentSessionId); } catch (e) { console.error('Could not end reading session:', e); }
-    currentSessionId = null;
-  }
-  // Clean up keyboard handler
-  window.onkeydown = null;
-  currentBookId = null;
-  document.title = 'Endpaper — an EPUB reader';
-  document.getElementById('app').classList.remove('chrome-hidden');
-  document.body.classList.remove('reader-active');
-  document.getElementById('reader-view').classList.remove('active');
-  document.getElementById('shelf-view').style.display = 'block';
-  document.getElementById('toc-toggle').style.display = 'none';
-  document.getElementById('search-toggle').style.display = 'none';
-  document.getElementById('settings-toggle').style.display = 'none';
-  document.getElementById('bookmarks-toggle').style.display = 'none';
-  document.getElementById('bookmark-toggle').style.display = 'none';
-  document.getElementById('upload-btn').style.display = 'flex';
-  closeDrawers();
-  if (book) { book.destroy(); book = null; rendition = null; }
+  const sessionId = currentSessionId;
+  const saveAccountVersion = accountVersion;
+  // Tear down first, so a late EPUB/network callback cannot revive this reader.
+  discardReaderState();
   renderShelf();
+  updateRoleAwareControls();
+
+  if (!isActiveAccount(saveAccountVersion)) return;
+  if (entry) {
+    const saved = await saveBookMeta(entry, { expectedAccountVersion: saveAccountVersion, allowInactiveReader: true });
+    if (!saved || !isActiveAccount(saveAccountVersion)) return;
+  }
+  if (sessionId && isActiveAccount(saveAccountVersion)) {
+    try {
+      await api.endSession(sessionId, { expectedAccountVersion: saveAccountVersion });
+    } catch (e) {
+      if (isActiveAccount(saveAccountVersion)) console.error('Could not end reading session:', e);
+    }
+  }
 }
 
 /* ---------------- Layout (paginated vs scrolled) ---------------- */
@@ -1462,19 +1830,56 @@ function setLayout(mode){
   if (settings.layout === mode || !book) { settings.layout = mode; updateSettingsUI(); saveSettings(); return; }
   settings.layout = mode;
   const entry = library.find(b => b.id === currentBookId);
-  const resumeCfi = entry ? entry.lastLocationCfi : null;
+  const targetBook = book;
+  const request = activeReaderRequest;
+  if (!entry || !request) { updateSettingsUI(); saveSettings(); return; }
+  const currentLocation = rendition && rendition.currentLocation ? rendition.currentLocation() : null;
+  const resumeCfi = (currentLocation && currentLocation.start && currentLocation.start.cfi) || entry.lastLocationCfi;
+  if (resumeCfi) entry.lastLocationCfi = resumeCfi;
 
+  hideHighlightPopup();
   rendition.destroy();
   document.getElementById('viewer').innerHTML = '';
   document.getElementById('reader-view').classList.toggle('scrolled', mode === 'scrolled');
 
   rendition = book.renderTo('viewer', renditionOptions());
+  const targetRendition = rendition;
   registerThemes();
   registerSwipeGestures();
   applyTheme();
-  bindRelocated(entry);
-  rendition.display(resumeCfi || undefined).then(tuneScrollContainer);
+  bindRenditionInteractions(entry, targetRendition, request);
+  bindRelocated(entry, targetRendition, targetBook, request);
+  targetRendition.display(resumeCfi || undefined).then(() => {
+    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+    tuneScrollContainer(targetRendition);
+    applySavedHighlights(entry, targetRendition);
+    updateBookmarkIcon();
+  }).catch(err => {
+    if (isReaderRequestCurrent(request, targetBook, targetRendition)) console.error('Could not switch reading layout:', err);
+  });
   updateSettingsUI();
+}
+
+function applyReaderContentStyles(contents) {
+  const doc = contents && contents.document;
+  if (!doc || doc.getElementById('endpaper-reader-content-style')) return;
+  const style = doc.createElement('style');
+  style.id = 'endpaper-reader-content-style';
+  // Limit only continuous layouts on wider screens. Paginated EPUBs keep their
+  // original column geometry, while phones avoid distracting justified gaps.
+  style.textContent = `
+    @media (max-width: 699px) {
+      p, li, blockquote { text-align: start !important; hyphens: auto; -webkit-hyphens: auto; }
+    }
+    ${settings.layout === 'scrolled' ? `@media (min-width: 700px) {
+      body { max-width: 70ch !important; margin-left: auto !important; margin-right: auto !important; }
+    }` : ''}
+  `;
+  (doc.head || doc.documentElement).appendChild(style);
+}
+
+function isInteractiveReaderTarget(target) {
+  return Boolean(target && target.closest && target.closest('a, button, input, textarea, select, summary, [contenteditable="true"]'));
 }
 
 function registerSwipeGestures(){
@@ -1482,8 +1887,10 @@ function registerSwipeGestures(){
   rendition.hooks.content.register((contents) => {
     const doc = contents.document;
     const win = contents.window || doc.defaultView;
+    applyReaderContentStyles(contents);
+    doc.addEventListener('keydown', handleReaderShortcut);
 
-    let sx = 0, sy = 0, st = 0, moved = false;
+    let sx = 0, sy = 0, st = 0, moved = false, lastTouchAt = 0;
     doc.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1) return;
       sx = e.touches[0].clientX; sy = e.touches[0].clientY; st = Date.now(); moved = false;
@@ -1493,7 +1900,8 @@ function registerSwipeGestures(){
       if (Math.abs(e.touches[0].clientX - sx) > 10 || Math.abs(e.touches[0].clientY - sy) > 10) moved = true;
     }, { passive: true });
     doc.addEventListener('touchend', (e) => {
-      if (!rendition) return;
+      lastTouchAt = Date.now();
+      if (!rendition || !e.changedTouches.length || isInteractiveReaderTarget(e.target)) return;
       const t = e.changedTouches[0];
       const dx = t.clientX - sx, dy = t.clientY - sy, dt = Date.now() - st;
       if (settings.layout === 'paginated' && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4 && dt < 600){
@@ -1508,6 +1916,9 @@ function registerSwipeGestures(){
     let mdx = 0, mdy = 0;
     doc.addEventListener('mousedown', (e) => { mdx = e.clientX; mdy = e.clientY; });
     doc.addEventListener('click', (e) => {
+      // Touch browsers dispatch a synthetic click after touchend. Ignoring it
+      // keeps one tap from immediately undoing the reader-chrome toggle.
+      if (Date.now() - lastTouchAt < 550 || isInteractiveReaderTarget(e.target)) return;
       const sel = win.getSelection();
       const hasSelection = sel && sel.toString().length > 0;
       const dragged = Math.abs(e.clientX - mdx) > 6 || Math.abs(e.clientY - mdy) > 6;
@@ -1517,22 +1928,114 @@ function registerSwipeGestures(){
 }
 
 let chromeHintShown = false;
+let chromeResizeTimer = null;
+
+function isTouchReader(){
+  return Boolean(
+    document.body.classList.contains('reader-active') &&
+    window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches
+  );
+}
+
+function readerFullscreenElement(){
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function scheduleReaderResize(){
+  clearTimeout(chromeResizeTimer);
+  chromeResizeTimer = setTimeout(() => {
+    if (rendition) { try { rendition.resize(); } catch (e) {} }
+  }, 280);
+}
+
+function syncReaderChromeAccessibility(){
+  const app = document.getElementById('app');
+  const hidden = app.classList.contains('chrome-hidden');
+  ['topbar', 'progress-bar'].forEach(id => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.setAttribute('aria-hidden', String(hidden));
+    element.toggleAttribute('inert', hidden);
+  });
+}
+
+function updateMobileFullscreenControl(){
+  const control = document.getElementById('mobile-fullscreen-toggle');
+  const app = document.getElementById('app');
+  if (!control || !app) return;
+  const immersive = app.classList.contains('chrome-hidden') || readerFullscreenElement() === app;
+  control.setAttribute('aria-pressed', String(immersive));
+  control.setAttribute('aria-label', immersive ? 'Exit fullscreen reading' : 'Enter fullscreen reading');
+  control.title = immersive ? 'Exit fullscreen reading' : 'Enter fullscreen reading';
+}
+
+function requestReaderFullscreen(){
+  const app = document.getElementById('app');
+  if (!isTouchReader() || !app || readerFullscreenElement()) return;
+  const request = app.requestFullscreen || app.webkitRequestFullscreen;
+  if (!request) return;
+  try {
+    const result = request.call(app, { navigationUI: 'hide' });
+    if (result && result.catch) result.catch(() => {});
+  } catch (e) {
+    // The chrome-hidden state remains a useful immersive fallback on browsers
+    // that do not permit the Fullscreen API for embedded EPUB interactions.
+  }
+}
+
+function exitReaderFullscreen(){
+  const app = document.getElementById('app');
+  if (!app || readerFullscreenElement() !== app) return;
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (!exit) return;
+  try {
+    const result = exit.call(document);
+    if (result && result.catch) result.catch(() => {});
+  } catch (e) {}
+}
+
+function toggleMobileReadingFullscreen(){
+  if (!isTouchReader()) { toggleFullscreen(); return; }
+  const app = document.getElementById('app');
+  const entering = !app.classList.contains('chrome-hidden');
+  app.classList.toggle('chrome-hidden', entering);
+  closeDrawers();
+  syncReaderChromeAccessibility();
+  if (entering) requestReaderFullscreen();
+  else exitReaderFullscreen();
+  updateMobileFullscreenControl();
+  scheduleReaderResize();
+}
+
 function toggleReaderChrome(){
   const app = document.getElementById('app');
   const hidden = app.classList.toggle('chrome-hidden');
   closeDrawers();
+  syncReaderChromeAccessibility();
+  if (isTouchReader()) {
+    if (hidden) requestReaderFullscreen();
+    else exitReaderFullscreen();
+  }
+  updateMobileFullscreenControl();
+  scheduleReaderResize();
   if (hidden && !chromeHintShown){
     chromeHintShown = true;
     const hint = document.getElementById('chrome-hint');
+    hint.textContent = isTouchReader()
+      ? 'Full-screen reading — tap the page to show controls'
+      : 'Tap the page to show controls again';
     hint.classList.add('show');
     setTimeout(() => hint.classList.remove('show'), 1800);
   }
 }
 
 let scrollFadeObserver = null;
-function tuneScrollContainer(){
-  if (settings.layout !== 'scrolled' || !rendition || !rendition.manager) return;
-  const el = rendition.manager.container;
+function tuneScrollContainer(targetRendition = rendition){
+  if (settings.layout !== 'scrolled' || !targetRendition || !targetRendition.manager) {
+    if (scrollFadeObserver) { scrollFadeObserver.disconnect(); scrollFadeObserver = null; }
+    return;
+  }
+  const el = targetRendition.manager.container;
   if (!el) return;
   el.style.scrollBehavior = 'auto';
   el.style.webkitOverflowScrolling = 'touch';
@@ -1565,15 +2068,71 @@ function pageScroll(direction){
   return true;
 }
 
+function createReaderRequest(bookId) {
+  abortReaderRequests();
+  readerAbortController = new AbortController();
+  const request = {
+    version: readerRequestVersion,
+    accountVersion,
+    bookId,
+    controller: readerAbortController,
+  };
+  activeReaderRequest = request;
+  return request;
+}
+
+function readerRequestOptions(request) {
+  return { signal: request.controller.signal, expectedAccountVersion: request.accountVersion };
+}
+
+function isReaderRequestCurrent(request, targetBook = book, targetRendition = rendition) {
+  return Boolean(
+    request && activeReaderRequest === request && readerRequestVersion === request.version &&
+    accountVersion === request.accountVersion && currentBookId === request.bookId &&
+    readerAbortController === request.controller && !request.controller.signal.aborted &&
+    targetBook === book && targetRendition === rendition
+  );
+}
+
+function isAbortError(error) {
+  return error && (error.name === 'AbortError' || error.message === 'The user aborted a request.');
+}
+
+async function recoverFromReaderFailure(request, message, targetBook = null, targetRendition = null){
+  const current = isReaderRequestCurrent(request, targetBook, targetRendition);
+  if (!current) return;
+  await showShelf();
+  if (isActiveAccount(request.accountVersion)) showToast(message);
+}
+
+function bindRenditionInteractions(entry, targetRendition, request) {
+  if (!targetRendition) return;
+  const active = () => isReaderRequestCurrent(request, book, targetRendition);
+  targetRendition.on('selected', (cfi, contents) => { if (active()) onTextSelected(entry, cfi, contents); });
+  targetRendition.on('markClicked', (cfi) => { if (active()) onHighlightClicked(entry, cfi); });
+  targetRendition.on('mousedown', () => { if (active()) hideHighlightPopup(); });
+  targetRendition.on('touchstart', () => { if (active()) hideHighlightPopup(); });
+}
+
 /* ---------------- Opening a book ---------------- */
 async function openBook(id){
   const entry = library.find(b => b.id === id);
-  if (!entry) return;
+  if (!entry || !currentUser) return;
+  if (currentBookId === id && rendition) return;
+  if (currentBookId && (book || rendition || currentSessionId)) {
+    await showShelf();
+    if (!currentUser) return;
+  }
+
+  const request = createReaderRequest(id);
+  const requestOptions = readerRequestOptions(request);
   currentBookId = id;
   locationsReady = false;
   entry.lastOpenedAt = Date.now();
   document.getElementById('app').classList.remove('chrome-hidden');
   document.body.classList.add('reader-active');
+  syncReaderChromeAccessibility();
+  updateMobileFullscreenControl();
 
   document.getElementById('shelf-view').style.display = 'none';
   document.getElementById('reader-view').classList.add('active');
@@ -1592,31 +2151,49 @@ async function openBook(id){
   document.getElementById('search-status').textContent = '';
   document.getElementById('search-results').innerHTML = '';
 
-  if (book) book.destroy();
-
   // Fetch the EPUB file from the server
+  let targetBook;
   try {
-    const arrayBuffer = await api.getBookFile(id);
-    book = ePub(arrayBuffer.slice(0));
+    const arrayBuffer = await api.getBookFile(id, requestOptions);
+    if (!isReaderRequestCurrent(request, null, null)) return;
+    targetBook = ePub(arrayBuffer.slice(0));
   } catch(err) {
-    console.error('Failed to load book file:', err);
-    overlay.classList.add('hidden');
+    if (isReaderRequestCurrent(request, null, null) && !isAbortError(err)) {
+      console.error('Failed to load book file:', err);
+      await recoverFromReaderFailure(request, 'This book could not be opened. Please try again.', null, null);
+    }
     return;
   }
 
-  rendition = book.renderTo('viewer', renditionOptions());
+  if (!isReaderRequestCurrent(request, null, null)) {
+    try { targetBook.destroy(); } catch (e) {}
+    return;
+  }
+  book = targetBook;
+
+  try {
+    rendition = book.renderTo('viewer', renditionOptions());
+  } catch (err) {
+    if (!isAbortError(err)) console.error('Failed to prepare EPUB reader:', err);
+    await recoverFromReaderFailure(request, 'This EPUB could not be prepared. Please try again.', targetBook, null);
+    return;
+  }
+  const targetRendition = rendition;
   document.getElementById('reader-view').classList.toggle('scrolled', settings.layout === 'scrolled');
 
   registerThemes();
   registerSwipeGestures();
   applyTheme();
+  bindRenditionInteractions(entry, targetRendition, request);
+  bindRelocated(entry, targetRendition, targetBook, request);
 
   // Load bookmarks and highlights from server
   try {
     const [bookmarks, highlights] = await Promise.all([
-      api.getBookmarks(id),
-      api.getHighlights(id),
+      api.getBookmarks(id, requestOptions),
+      api.getHighlights(id, requestOptions),
     ]);
+    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     entry.bookmarks = bookmarks.map(bm => ({
       id: bm.id,
       cfi: bm.cfi,
@@ -1632,94 +2209,105 @@ async function openBook(id){
       chapter: hl.chapter || 'Untitled section',
       addedAt: hl.created_at ? new Date(hl.created_at).getTime() : Date.now(),
     }));
-  } catch(e) { console.error('Failed to load bookmarks/highlights:', e); }
+  } catch(e) {
+    if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(e)) {
+      console.error('Failed to load bookmarks/highlights:', e);
+    }
+    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+  }
 
-  rendition.display(entry.lastLocationCfi || undefined).then(() => {
+  targetRendition.display(entry.lastLocationCfi || undefined).then(() => {
+    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     overlay.classList.add('hidden');
-    tuneScrollContainer();
+    tuneScrollContainer(targetRendition);
     updateBookmarkIcon();
-    applySavedHighlights(entry);
+    applySavedHighlights(entry, targetRendition);
   }).catch(err => {
-    console.error('Failed to render book:', err);
-    overlay.classList.add('hidden');
-    showToast('This EPUB could not be displayed.');
+    if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(err)) {
+      console.error('Failed to render book:', err);
+      recoverFromReaderFailure(request, 'This EPUB could not be displayed. Please try again.', targetBook, targetRendition);
+    }
   });
-
-  rendition.on('selected', (cfi, contents) => onTextSelected(entry, cfi, contents));
-  rendition.on('markClicked', (cfi) => onHighlightClicked(entry, cfi));
-  rendition.on('mousedown', () => hideHighlightPopup());
-  rendition.on('touchstart', () => hideHighlightPopup());
 
   renderBookmarks();
   renderBookmarkTicks();
   renderHighlights();
 
-  book.loaded.navigation.then(nav => renderToc(nav.toc));
+  targetBook.loaded.navigation.then(nav => {
+    if (isReaderRequestCurrent(request, targetBook, targetRendition)) renderToc(nav.toc);
+  }).catch(() => {});
 
-  // Update title from metadata if better than filename
-  book.loaded.metadata.then(meta => {
-    if (meta && meta.title && meta.title.trim() && meta.title.trim() !== entry.name){
+  // Only admins may change shared book metadata.
+  if (isCurrentUserAdmin()) targetBook.loaded.metadata.then(meta => {
+    if (isReaderRequestCurrent(request, targetBook, targetRendition) && meta && meta.title && meta.title.trim() && meta.title.trim() !== entry.name){
       entry.name = meta.title.trim();
-      api.updateBook(id, { title: entry.name }).catch(() => {});
+      api.updateBook(id, { title: entry.name }, requestOptions).catch(() => {});
       renderShelf();
     }
   }).catch(() => {});
 
-  book.ready.then(() => {
+  targetBook.ready.then(() => {
+    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return false;
     document.getElementById('loading-text').textContent = 'Mapping pages…';
-    return book.locations.generate(1500);
-  }).then(() => {
+    return targetBook.locations.generate(1500).then(() => true);
+  }).then(mapped => {
+    if (!mapped || !isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     locationsReady = true;
     renderBookmarkTicks();
+    syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
   }).catch(err => {
-    console.error('Could not map book locations:', err);
-    showToast('Page mapping is unavailable for this book.');
+    if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(err)) {
+      console.error('Could not map book locations:', err);
+      showToast('Page mapping is unavailable for this book.');
+    }
   });
 
-  bindRelocated(entry);
-  api.updateBook(id, { last_opened_at: new Date().toISOString() }).catch(() => {});
+  api.updateBook(id, { last_opened_at: new Date().toISOString() }, requestOptions).catch(() => {});
 
   // Start reading session
   try {
-    const session = await api.startSession(id);
-    currentSessionId = session.id;
-  } catch(e) { console.error('Failed to start reading session:', e); }
+    const session = await api.startSession(id, requestOptions);
+    if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
+      currentSessionId = session.id;
+    } else if (session && session.id) {
+      api.endSession(session.id, requestOptions).catch(() => {});
+    }
+  } catch(e) {
+    if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(e)) console.error('Failed to start reading session:', e);
+  }
+
+  if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
 
   document.getElementById('progress-slider').onchange = (e) => {
     const target = e.target.value / 1000;
-    if (locationsReady){
-      const cfi = book.locations.cfiFromPercentage(target);
-      rendition.display(cfi);
+    if (isReaderRequestCurrent(request, targetBook, targetRendition) && locationsReady){
+      const cfi = targetBook.locations.cfiFromPercentage(target);
+      targetRendition.display(cfi);
     }
   };
 
-  window.onkeydown = (e) => {
-    if (document.activeElement && document.activeElement.id === 'search-input') return;
-    if (e.key === 'Escape'){ closeDrawers(); closeShortcutsModal(); hideHighlightPopup(); document.getElementById('app').classList.remove('chrome-hidden'); if (document.fullscreenElement) document.exitFullscreen(); return; }
-    if (!rendition) return;
-    if (e.key === 'ArrowLeft') rendition.prev();
-    else if (e.key === 'ArrowRight') rendition.next();
-    else if (e.key === ' '){ e.preventDefault(); if (!pageScroll(e.shiftKey ? -1 : 1)) (e.shiftKey ? rendition.prev() : rendition.next()); }
-    else if (e.key === 'b' || e.key === 'B') toggleBookmark();
-    else if (e.key === 't' || e.key === 'T') toggleDrawer('toc');
-    else if (e.key === 's' || e.key === 'S') toggleDrawer('settings');
-    else if (e.key === 'm' || e.key === 'M') toggleDrawer('bookmarks');
-    else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
-    else if (e.key === 'h' || e.key === 'H') showShelf();
-    else if (e.key === '/'){ e.preventDefault(); toggleDrawer('search'); document.getElementById('search-input').focus(); }
-    else if (e.key === '?') openShortcutsModal();
-  };
+  window.onkeydown = handleReaderShortcut;
 }
 
-function bindRelocated(entry){
-  rendition.on('relocated', (location) => {
+function bindRelocated(entry, targetRendition = rendition, targetBook = book, request = activeReaderRequest){
+  if (!targetRendition) return;
+  targetRendition.on('relocated', (location) => {
+    if (!isReaderRequestCurrent(request, targetBook, targetRendition) || !location || !location.start) return;
+    updateReaderLocation(entry, location, targetBook, targetRendition, request);
+  });
+}
+
+function updateReaderLocation(entry, location, targetBook, targetRendition, request) {
+    if (!location || !location.start || !isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     entry.lastLocationCfi = location.start.cfi;
-    let pct = 0;
-    if (locationsReady){
-      pct = Math.round(book.locations.percentageFromCfi(location.start.cfi) * 100);
-    } else if (location.start.percentage != null) {
+    let pct = entry.progress || 0;
+    if (locationsReady && targetBook.locations && location.start.cfi) {
+      const percentage = targetBook.locations.percentageFromCfi(location.start.cfi);
+      if (Number.isFinite(percentage)) pct = Math.round(percentage * 100);
+    } else if (location.start.percentage != null && Number.isFinite(location.start.percentage) && location.start.percentage > 0) {
       pct = Math.round(location.start.percentage * 100);
     }
+    pct = Math.max(0, Math.min(100, pct));
     entry.progress = pct;
 
     // Auto-update status
@@ -1735,11 +2323,16 @@ function bindRelocated(entry){
     // Update browser tab title with progress
     document.title = `${entry.name} — ${pct}% | Endpaper`;
 
-    const chapter = book.navigation && book.navigation.get(location.start.href);
+    const chapter = targetBook.navigation && targetBook.navigation.get(location.start.href);
     document.getElementById('progress-chapter').textContent = chapter ? chapter.label.trim() : '';
     updateBookmarkIcon();
-    scheduleSaveMeta(entry);
-  });
+    scheduleSaveMeta(entry, request);
+}
+
+function syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request) {
+  if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+  const location = targetRendition.currentLocation && targetRendition.currentLocation();
+  if (location) updateReaderLocation(entry, location, targetBook, targetRendition, request);
 }
 
 /* ---------------- Bookmarks ---------------- */
@@ -1747,21 +2340,51 @@ function getCurrentEntry(){
   return library.find(b => b.id === currentBookId);
 }
 
+function createReaderMutationContext(entry = getCurrentEntry()){
+  const request = activeReaderRequest;
+  const targetBook = book;
+  const targetRendition = rendition;
+  if (!entry || !isReaderRequestCurrent(request, targetBook, targetRendition)) return null;
+  return {
+    entry,
+    request,
+    targetBook,
+    targetRendition,
+    requestOptions: readerRequestOptions(request),
+  };
+}
+
+function isReaderMutationCurrent(context){
+  return Boolean(
+    context && getCurrentEntry() === context.entry &&
+    isReaderRequestCurrent(context.request, context.targetBook, context.targetRendition)
+  );
+}
+
 async function toggleBookmark(){
   const entry = getCurrentEntry();
-  if (!entry || !rendition) return;
-  const loc = rendition.currentLocation();
+  const context = createReaderMutationContext(entry);
+  if (!context) return;
+  const { targetBook, targetRendition, requestOptions } = context;
+  const loc = targetRendition.currentLocation();
   if (!loc || !loc.start) return;
   const cfi = loc.start.cfi;
 
   const existingIdx = entry.bookmarks.findIndex(bm => bm.cfi === cfi);
   if (existingIdx > -1){
     const removed = entry.bookmarks.splice(existingIdx, 1)[0];
-    if (removed.id) api.removeBookmark(removed.id).catch(e => console.error('Remove bookmark failed:', e));
+    if (removed.id) {
+      api.removeBookmark(removed.id, requestOptions).catch(e => {
+        if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Remove bookmark failed:', e);
+      });
+    }
   } else {
-    const chapter = book.navigation && book.navigation.get(loc.start.href);
+    const pending = entry.__pendingBookmarks || (entry.__pendingBookmarks = new Set());
+    if (pending.has(cfi)) return;
+    pending.add(cfi);
+    const chapter = targetBook.navigation && targetBook.navigation.get(loc.start.href);
     let pct = 0;
-    if (locationsReady) pct = Math.round(book.locations.percentageFromCfi(cfi) * 100);
+    if (locationsReady) pct = Math.round(targetBook.locations.percentageFromCfi(cfi) * 100);
     else if (loc.start.percentage != null) pct = Math.round(loc.start.percentage * 100);
 
     const chapterLabel = chapter ? chapter.label.trim() : 'Untitled section';
@@ -1772,17 +2395,25 @@ async function toggleBookmark(){
         chapter: chapterLabel,
         label: chapterLabel,
         progress_percent: pct,
-      });
-      entry.bookmarks.push({
-        id: saved.id,
-        cfi,
-        chapter: chapterLabel,
-        pct,
-        addedAt: Date.now(),
-      });
-      entry.bookmarks.sort((a, b) => a.pct - b.pct);
-    } catch(e) { console.error('Add bookmark failed:', e); }
+      }, requestOptions);
+      if (!isReaderMutationCurrent(context)) return;
+      if (!entry.bookmarks.some(bookmark => bookmark.cfi === cfi)) {
+        entry.bookmarks.push({
+          id: saved.id,
+          cfi,
+          chapter: chapterLabel,
+          pct,
+          addedAt: Date.now(),
+        });
+        entry.bookmarks.sort((a, b) => a.pct - b.pct);
+      }
+    } catch(e) {
+      if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Add bookmark failed:', e);
+    } finally {
+      pending.delete(cfi);
+    }
   }
+  if (!isReaderMutationCurrent(context)) return;
   updateBookmarkIcon();
   renderBookmarks();
   renderBookmarkTicks();
@@ -1819,13 +2450,21 @@ function renderBookmarks(){
     `;
     item.querySelector('.bookmark-chapter').onclick =
       item.querySelector('.bookmark-pct').onclick = () => {
+        if (getCurrentEntry() !== entry || !rendition) return;
         rendition.display(bm.cfi);
         toggleDrawer('bookmarks', true);
       };
     item.querySelector('.bookmark-remove').onclick = (e) => {
       e.stopPropagation();
+      const context = createReaderMutationContext(entry);
+      if (!context) return;
       entry.bookmarks = entry.bookmarks.filter(b => b.cfi !== bm.cfi);
-      if (bm.id) api.removeBookmark(bm.id).catch(err => console.error('Remove bookmark failed:', err));
+      if (bm.id) {
+        api.removeBookmark(bm.id, context.requestOptions).catch(err => {
+          if (isReaderMutationCurrent(context) && !isAbortError(err)) console.error('Remove bookmark failed:', err);
+        });
+      }
+      if (!isReaderMutationCurrent(context)) return;
       renderBookmarks();
       renderBookmarkTicks();
       updateBookmarkIcon();
@@ -1850,20 +2489,73 @@ function renderBookmarkTicks(){
 }
 
 function setMarksTab(paneId){
-  document.querySelectorAll('.marks-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === paneId));
-  document.querySelectorAll('.marks-pane').forEach(p => p.classList.toggle('active', p.id === paneId));
+  document.querySelectorAll('.marks-tab').forEach(t => {
+    const selected = t.dataset.tab === paneId;
+    t.classList.toggle('active', selected);
+    t.setAttribute('aria-selected', String(selected));
+  });
+  document.querySelectorAll('.marks-pane').forEach(p => {
+    const selected = p.id === paneId;
+    p.classList.toggle('active', selected);
+    p.hidden = !selected;
+  });
 }
+
+function moveRadioOption(event, selector){
+  const option = event.target && event.target.closest && event.target.closest(selector);
+  if (!option || !['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Home', 'End'].includes(event.key)) return false;
+  const options = Array.from(option.closest('[role="radiogroup"]').querySelectorAll(selector));
+  const currentIndex = options.indexOf(option);
+  if (currentIndex < 0 || options.length === 0) return false;
+  let nextIndex = currentIndex;
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + options.length) % options.length;
+  else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % options.length;
+  else if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = options.length - 1;
+  event.preventDefault();
+  options[nextIndex].focus();
+  options[nextIndex].click();
+  return true;
+}
+
+function handleReaderSettingsKeydown(event){
+  if (moveRadioOption(event, '.layout-option')) return;
+  if (moveRadioOption(event, '.theme-swatch')) return;
+  if (moveRadioOption(event, '.font-option')) return;
+  const tab = event.target && event.target.closest && event.target.closest('.marks-tab');
+  if (!tab || !['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+  const tabs = Array.from(tab.closest('[role="tablist"]').querySelectorAll('.marks-tab'));
+  const index = tabs.indexOf(tab);
+  let nextIndex = index;
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + tabs.length) % tabs.length;
+  else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % tabs.length;
+  else if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = tabs.length - 1;
+  event.preventDefault();
+  tabs[nextIndex].focus();
+  tabs[nextIndex].click();
+}
+document.addEventListener('keydown', handleReaderSettingsKeydown);
 
 /* ---------------- Highlights ---------------- */
 let pendingHighlightCfi = null;
+let pendingHighlightContext = null;
+let highlightReturnFocus = null;
 
 function onTextSelected(entry, cfi, contents){
   if (!contents) return;
+  const context = createReaderMutationContext(entry);
+  if (!context) return;
   const win = contents.window || (contents.document && contents.document.defaultView);
   if (!win) return;
   const sel = win.getSelection();
   const text = sel ? sel.toString().trim() : '';
   if (!text) return;
+  context.cfi = cfi;
+  context.excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
+  context.returnFocus = contents.document.defaultView && contents.document.defaultView.frameElement;
+  pendingHighlightContext = context;
+  highlightReturnFocus = context.returnFocus;
   pendingHighlightCfi = cfi;
 
   try {
@@ -1873,13 +2565,18 @@ function onTextSelected(entry, cfi, contents){
     const iframeRect = iframe ? iframe.getBoundingClientRect() : { left: 0, top: 0 };
     showHighlightPopup(iframeRect.left + rect.left + rect.width / 2, iframeRect.top + rect.top, false);
   } catch(e){ showHighlightPopup(window.innerWidth / 2, 90, false); }
-
-  entry.__pendingExcerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
 }
 
 function onHighlightClicked(entry, cfi){
+  const context = createReaderMutationContext(entry);
+  if (!context) return;
   const hl = entry.highlights.find(h => h.cfi === cfi);
   if (!hl) return;
+  context.cfi = cfi;
+  context.excerpt = hl.excerpt || '';
+  context.returnFocus = document.querySelector('#viewer iframe');
+  pendingHighlightContext = context;
+  highlightReturnFocus = context.returnFocus;
   pendingHighlightCfi = cfi;
   showHighlightPopup(window.innerWidth / 2, 90, true);
 }
@@ -1890,72 +2587,138 @@ function showHighlightPopup(x, y, isExisting){
   popup.style.top = Math.max(70, y - 46) + 'px';
   popup.style.transform = 'translateX(-50%)';
   document.getElementById('highlight-remove-btn').style.display = isExisting ? 'inline' : 'none';
+  popup.setAttribute('aria-hidden', 'false');
   popup.classList.add('show');
+  const context = pendingHighlightContext;
+  requestAnimationFrame(() => {
+    if (popup.classList.contains('show') && pendingHighlightContext === context) {
+      const target = popup.querySelector('.swatch-btn');
+      if (target) target.focus({ preventScroll: true });
+    }
+  });
 }
-function hideHighlightPopup(){
-  document.getElementById('highlight-popup').classList.remove('show');
+function hideHighlightPopup({ returnFocus = false } = {}){
+  const popup = document.getElementById('highlight-popup');
+  const focusTarget = highlightReturnFocus;
+  popup.classList.remove('show');
+  popup.setAttribute('aria-hidden', 'true');
   pendingHighlightCfi = null;
+  pendingHighlightContext = null;
+  highlightReturnFocus = null;
+  if (returnFocus && focusTarget && focusTarget.isConnected) {
+    setTimeout(() => {
+      try { focusTarget.focus({ preventScroll: true }); } catch (e) {}
+    }, 0);
+  }
+}
+
+function finishPendingHighlight(context, returnFocus = true){
+  if (pendingHighlightContext === context) hideHighlightPopup({ returnFocus });
+}
+
+function highlightStyle(color){
+  const isDarkPage = settings.theme === 'dark' || settings.theme === 'night';
+  return {
+    fill: color,
+    'fill-opacity': isDarkPage ? '0.62' : '0.4',
+    // Multiply makes coloured SVG highlights almost disappear on black pages.
+    'mix-blend-mode': isDarkPage ? 'screen' : 'multiply',
+  };
+}
+
+function refreshHighlightStyles(){
+  const entry = getCurrentEntry();
+  if (!entry || !rendition || !entry.highlights) return;
+  entry.highlights.forEach(highlight => {
+    try { rendition.annotations.remove(highlight.cfi, 'highlight'); } catch (e) {}
+    try {
+      rendition.annotations.add('highlight', highlight.cfi, {}, null, 'epub-highlight', highlightStyle(highlight.color));
+    } catch (e) {}
+  });
 }
 
 async function applyHighlight(color){
-  const entry = getCurrentEntry();
-  if (!entry || !pendingHighlightCfi || !rendition) { hideHighlightPopup(); return; }
-  const existing = entry.highlights.find(h => h.cfi === pendingHighlightCfi);
+  const context = pendingHighlightContext;
+  if (!context || !pendingHighlightCfi || !isReaderMutationCurrent(context)) { hideHighlightPopup(); return; }
+  if (context.saving) return;
+  context.saving = true;
+  const { entry, targetBook, targetRendition, requestOptions } = context;
+  const cfi = context.cfi;
+  const existing = entry.highlights.find(h => h.cfi === cfi);
   if (existing){
-    try { rendition.annotations.remove(existing.cfi, 'highlight'); } catch(e){}
+    try { targetRendition.annotations.remove(existing.cfi, 'highlight'); } catch(e){}
     existing.color = color;
-    if (existing.id) api.updateHighlight(existing.id, { color }).catch(e => console.error('Update highlight failed:', e));
+    if (existing.id) {
+      api.updateHighlight(existing.id, { color }, requestOptions).catch(e => {
+        if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Update highlight failed:', e);
+      });
+    }
   } else {
-    const chapter = book.navigation && rendition.currentLocation && book.navigation.get(rendition.currentLocation().start.href);
+    const location = targetRendition.currentLocation && targetRendition.currentLocation();
+    const chapter = targetBook.navigation && location && location.start && targetBook.navigation.get(location.start.href);
     const chapterLabel = chapter ? chapter.label.trim() : 'Untitled section';
-    const excerpt = entry.__pendingExcerpt || '';
+    const excerpt = context.excerpt || '';
 
     try {
       const saved = await api.addHighlight(entry.id, {
-        cfi_range: pendingHighlightCfi,
+        cfi_range: cfi,
         color,
         excerpt,
         chapter: chapterLabel,
-      });
+      }, requestOptions);
+      if (!isReaderMutationCurrent(context)) return;
       entry.highlights.push({
         id: saved.id,
-        cfi: pendingHighlightCfi,
+        cfi,
         color,
         excerpt,
         chapter: chapterLabel,
         addedAt: Date.now(),
       });
-    } catch(e) { console.error('Add highlight failed:', e); }
+    } catch(e) {
+      if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Add highlight failed:', e);
+      finishPendingHighlight(context);
+      return;
+    } finally {
+      context.saving = false;
+    }
   }
-  rendition.annotations.add('highlight', pendingHighlightCfi, {}, null, 'epub-highlight',
-    { fill: color, 'fill-opacity': '0.4', 'mix-blend-mode': 'multiply' });
+  context.saving = false;
+  if (!isReaderMutationCurrent(context)) return;
+  targetRendition.annotations.add('highlight', cfi, {}, null, 'epub-highlight', highlightStyle(color));
   try {
-    rendition.getContents().forEach(c => {
+    targetRendition.getContents().forEach(c => {
       const win = c.window || (c.document && c.document.defaultView);
       if (win) win.getSelection().removeAllRanges();
     });
   } catch(e){}
-  hideHighlightPopup();
+  finishPendingHighlight(context);
   renderHighlights();
 }
 
 async function removeCurrentHighlight(){
-  const entry = getCurrentEntry();
-  if (!entry || !pendingHighlightCfi) { hideHighlightPopup(); return; }
-  try { rendition.annotations.remove(pendingHighlightCfi, 'highlight'); } catch(e){}
-  const removed = entry.highlights.find(h => h.cfi === pendingHighlightCfi);
-  entry.highlights = entry.highlights.filter(h => h.cfi !== pendingHighlightCfi);
-  if (removed && removed.id) api.removeHighlight(removed.id).catch(e => console.error('Remove highlight failed:', e));
-  hideHighlightPopup();
+  const context = pendingHighlightContext;
+  if (!context || !pendingHighlightCfi || !isReaderMutationCurrent(context)) { hideHighlightPopup(); return; }
+  const { entry, targetRendition, requestOptions } = context;
+  const cfi = context.cfi;
+  try { targetRendition.annotations.remove(cfi, 'highlight'); } catch(e){}
+  const removed = entry.highlights.find(h => h.cfi === cfi);
+  entry.highlights = entry.highlights.filter(h => h.cfi !== cfi);
+  if (removed && removed.id) {
+    api.removeHighlight(removed.id, requestOptions).catch(e => {
+      if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Remove highlight failed:', e);
+    });
+  }
+  if (!isReaderMutationCurrent(context)) return;
+  finishPendingHighlight(context);
   renderHighlights();
 }
 
-function applySavedHighlights(entry){
-  if (!rendition || !entry.highlights) return;
+function applySavedHighlights(entry, targetRendition = rendition){
+  if (!targetRendition || !entry.highlights) return;
   entry.highlights.forEach(h => {
     try {
-      rendition.annotations.add('highlight', h.cfi, {}, null, 'epub-highlight',
-        { fill: h.color, 'fill-opacity': '0.4', 'mix-blend-mode': 'multiply' });
+      targetRendition.annotations.add('highlight', h.cfi, {}, null, 'epub-highlight', highlightStyle(h.color));
     } catch(e){}
   });
 }
@@ -1981,56 +2744,191 @@ function renderHighlights(){
 
 /* ---------------- Search ---------------- */
 let searchDebounce = null;
+let searchRequestVersion = 0;
 document.getElementById('search-input').addEventListener('input', (e) => {
   clearTimeout(searchDebounce);
+  const requestVersion = ++searchRequestVersion;
   const q = e.target.value.trim();
   if (q.length < 3){
     document.getElementById('search-status').textContent = q.length ? 'Keep typing…' : '';
     document.getElementById('search-results').innerHTML = '';
     return;
   }
-  searchDebounce = setTimeout(() => runSearch(q), 300);
+  searchDebounce = setTimeout(() => runSearch(q, requestVersion), 300);
 });
 
-async function runSearch(query){
-  if (!book) return;
+async function runSearch(query, requestVersion = ++searchRequestVersion){
+  const targetBook = book;
+  const targetRendition = rendition;
+  const isCurrentSearch = () => (
+    requestVersion === searchRequestVersion &&
+    targetBook === book &&
+    targetRendition === rendition &&
+    Boolean(currentBookId)
+  );
+  if (!targetBook || !isCurrentSearch()) return;
   document.getElementById('search-status').textContent = 'Searching…';
   const resultsEl = document.getElementById('search-results');
   resultsEl.innerHTML = '';
   let results = [];
   const sections = [];
-  book.spine.each(s => sections.push(s));
+  targetBook.spine.each(s => sections.push(s));
   for (const section of sections){
     try {
-      await section.load(book.load.bind(book));
+      await section.load(targetBook.load.bind(targetBook));
+      if (!isCurrentSearch()) return;
       const matches = section.find(query) || [];
       matches.forEach(m => results.push({ cfi: m.cfi, excerpt: m.excerpt, href: section.href }));
     } catch(e){ /* skip unreadable section */ }
     if (results.length > 60) break;
   }
+  if (!isCurrentSearch()) return;
   document.getElementById('search-status').textContent =
     results.length === 0 ? 'No matches found.' : results.length + ' match' + (results.length === 1 ? '' : 'es');
   const re = new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
   results.forEach(r => {
-    const chapter = book.navigation && book.navigation.get(r.href);
+    const chapter = targetBook.navigation && targetBook.navigation.get(r.href);
     const item = document.createElement('div');
     item.className = 'search-result';
     item.innerHTML = `
       <div class="search-chapter">${chapter ? escapeHtml(chapter.label.trim()) : ''}</div>
       <div class="search-excerpt">${escapeHtml(r.excerpt).replace(re, '<mark>$1</mark>')}</div>
     `;
-    item.onclick = () => { rendition.display(r.cfi); toggleDrawer('search', true); };
+    item.onclick = () => {
+      if (!isCurrentSearch()) return;
+      rendition.display(r.cfi);
+      toggleDrawer('search', true);
+    };
     resultsEl.appendChild(item);
   });
 }
 
 /* ---------------- Fullscreen & shortcuts modal ---------------- */
 function toggleFullscreen(){
-  if (document.fullscreenElement) document.exitFullscreen();
-  else document.getElementById('app').requestFullscreen().catch(() => {});
+  if (isTouchReader()) { toggleMobileReadingFullscreen(); return; }
+  const app = document.getElementById('app');
+  if (readerFullscreenElement()) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) {
+      try {
+        const result = exit.call(document);
+        if (result && result.catch) result.catch(() => {});
+      } catch (e) {}
+    }
+  } else {
+    const request = app.requestFullscreen || app.webkitRequestFullscreen;
+    if (request) {
+      try {
+        const result = request.call(app);
+        if (result && result.catch) result.catch(() => {});
+      } catch (e) {}
+    }
+  }
+  updateMobileFullscreenControl();
+  scheduleReaderResize();
 }
-function openShortcutsModal(){ document.getElementById('shortcuts-modal').classList.add('show'); }
-function closeShortcutsModal(){ document.getElementById('shortcuts-modal').classList.remove('show'); }
+
+function isEditableShortcutTarget(target){
+  const element = target && target.nodeType === Node.ELEMENT_NODE ? target : target && target.parentElement;
+  return Boolean(element && (element.matches('input, textarea, select, [contenteditable="true"]') || element.closest('[contenteditable="true"]')));
+}
+
+function handleReaderShortcut(e){
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Escape'){
+    e.preventDefault();
+    closeDrawers();
+    closeShortcutsModal();
+    hideHighlightPopup({ returnFocus: true });
+    document.getElementById('app').classList.remove('chrome-hidden');
+    syncReaderChromeAccessibility();
+    exitReaderFullscreen();
+    updateMobileFullscreenControl();
+    scheduleReaderResize();
+    return;
+  }
+  if (isEditableShortcutTarget(e.target)) return;
+  // Preserve native text selection/caret movement in the EPUB document.
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.shiftKey) return;
+  if (!rendition) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); rendition.prev(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); rendition.next(); }
+  else if (e.key === ' '){ e.preventDefault(); if (!pageScroll(e.shiftKey ? -1 : 1)) (e.shiftKey ? rendition.prev() : rendition.next()); }
+  else if (e.key === 'b' || e.key === 'B') { e.preventDefault(); toggleBookmark(); }
+  else if (e.key === 't' || e.key === 'T') { e.preventDefault(); toggleDrawer('toc'); }
+  else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleDrawer('settings'); }
+  else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); toggleDrawer('bookmarks'); }
+  else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
+  else if (e.key === 'h' || e.key === 'H') { e.preventDefault(); showShelf(); }
+  else if (e.key === '/'){ e.preventDefault(); toggleDrawer('search'); document.getElementById('search-input').focus(); }
+  else if (e.key === '?') { e.preventDefault(); openShortcutsModal(); }
+}
+
+function syncReaderFullscreenState(){
+  const app = document.getElementById('app');
+  if (!readerFullscreenElement() && document.body.classList.contains('reader-active')) {
+    app.classList.remove('chrome-hidden');
+  }
+  syncReaderChromeAccessibility();
+  updateMobileFullscreenControl();
+  scheduleReaderResize();
+}
+document.addEventListener('fullscreenchange', syncReaderFullscreenState);
+document.addEventListener('webkitfullscreenchange', syncReaderFullscreenState);
+
+function getShortcutsFocusableElements(){
+  const modal = document.getElementById('shortcuts-modal');
+  return Array.from(modal.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+    .filter(element => element.getClientRects().length > 0);
+}
+
+function openShortcutsModal(){
+  const modal = document.getElementById('shortcuts-modal');
+  const active = document.activeElement;
+  shortcutsModalReturnFocus = active instanceof HTMLElement ? active : document.getElementById('help-toggle');
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => {
+    const first = getShortcutsFocusableElements()[0];
+    if (first) first.focus({ preventScroll: true });
+  });
+}
+
+function closeShortcutsModal({ returnFocus = true } = {}){
+  const modal = document.getElementById('shortcuts-modal');
+  if (!modal.classList.contains('show')) return;
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden', 'true');
+  const target = shortcutsModalReturnFocus;
+  shortcutsModalReturnFocus = null;
+  if (returnFocus && target && target.isConnected && !target.hidden) {
+    target.focus({ preventScroll: true });
+  }
+}
+
+function handleShortcutsModalKeydown(event){
+  const modal = document.getElementById('shortcuts-modal');
+  if (!modal.classList.contains('show')) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closeShortcutsModal();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = getShortcutsFocusableElements();
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+document.addEventListener('keydown', handleShortcutsModalKeydown);
 document.addEventListener('mousedown', (e) => {
   const popup = document.getElementById('highlight-popup');
   if (popup.classList.contains('show') && !popup.contains(e.target)) hideHighlightPopup();
@@ -2060,7 +2958,8 @@ function registerThemes(){
     const t = THEMES[key];
     rendition.themes.register(key, {
       'body': { 'background': t.body + ' !important', 'color': t.text + ' !important' },
-      'a, a:link': { 'color': t.link + ' !important' },
+      [EPUB_TEXT_SELECTORS]: { 'color': t.text + ' !important' },
+      'a, a:link, a:visited': { 'color': t.link + ' !important' },
       '::selection': { 'background': 'rgba(169,128,63,0.35)' },
     });
   });
@@ -2073,30 +2972,43 @@ function applyTheme(){
   rendition.themes.font(fontCss);
   rendition.themes.fontSize(settings.fontSize + '%');
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString());
-  rendition.themes.override('padding', '0 ' + MARGIN_PADDING[settings.marginIdx] + ' !important');
+  rendition.themes.override('padding', '0 ' + MARGIN_PADDING[settings.marginIdx], true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx]);
-  document.body.style.background = THEMES[settings.theme].body;
+  // Page appearance belongs inside the EPUB iframe; never tint the library shell.
+  document.body.style.removeProperty('background');
   updateSettingsUI();
   saveSettings();
 }
 
 function updateSettingsUI(){
   document.querySelectorAll('.layout-option').forEach(el => {
-    el.classList.toggle('active', el.dataset.layout === settings.layout);
+    const selected = el.dataset.layout === settings.layout;
+    el.classList.toggle('active', selected);
+    el.setAttribute('aria-checked', String(selected));
   });
   document.querySelectorAll('.theme-swatch').forEach(el => {
-    el.classList.toggle('active', el.dataset.theme === settings.theme);
+    const selected = el.dataset.theme === settings.theme;
+    el.classList.toggle('active', selected);
+    el.setAttribute('aria-checked', String(selected));
   });
   document.getElementById('font-size-val').textContent = settings.fontSize + '%';
   document.getElementById('line-height-val').textContent = (settings.lineHeight/100).toFixed(1);
   document.getElementById('line-height-slider').value = settings.lineHeight;
+  document.getElementById('line-height-slider').setAttribute('aria-valuetext', (settings.lineHeight / 100).toFixed(1) + ' line spacing');
   document.getElementById('margin-val').textContent = MARGIN_LABELS[settings.marginIdx];
   document.getElementById('margin-slider').value = settings.marginIdx;
+  document.getElementById('margin-slider').setAttribute('aria-valuetext', MARGIN_LABELS[settings.marginIdx] + ' page width');
   document.getElementById('letter-spacing-val').textContent = SPACING_LABELS[settings.letterSpacingIdx];
   document.getElementById('letter-spacing-slider').value = settings.letterSpacingIdx;
+  document.getElementById('letter-spacing-slider').setAttribute('aria-valuetext', SPACING_LABELS[settings.letterSpacingIdx] + ' letter spacing');
 }
 
-function setReadingTheme(name){ settings.theme = name; applyTheme(); }
+function setReadingTheme(name){
+  if (!THEMES[name]) return;
+  settings.theme = name;
+  applyTheme();
+  refreshHighlightStyles();
+}
 function stepFontSize(dir){
   settings.fontSize = Math.max(70, Math.min(220, settings.fontSize + dir * 10));
   applyTheme();
@@ -2129,48 +3041,95 @@ function closeDrawers(){
 function updateDrawerBackdrop(){
   const anyOpen = DRAWER_IDS.some(id => document.getElementById(id + '-drawer').classList.contains('open'));
   document.getElementById('drawer-backdrop').classList.toggle('show', anyOpen);
+  DRAWER_IDS.forEach(id => {
+    const drawer = document.getElementById(id + '-drawer');
+    const open = drawer.classList.contains('open');
+    drawer.setAttribute('aria-hidden', String(!open));
+    drawer.toggleAttribute('inert', !open);
+    document.querySelectorAll(`[data-drawer-toggle="${id}"]`).forEach(toggle => {
+      toggle.setAttribute('aria-expanded', String(open));
+    });
+  });
 }
 
 /* ---------------- App shell (chrome) dark mode ---------------- */
+function updateShellThemeControl(){
+  const control = document.getElementById('shell-theme-toggle');
+  if (!control) return;
+  const dark = document.documentElement.classList.contains('dark-shell');
+  control.setAttribute('aria-pressed', String(dark));
+  control.setAttribute('aria-label', dark ? 'Use light app appearance' : 'Use dark app appearance');
+  control.title = dark ? 'Use light app appearance' : 'Use dark app appearance';
+}
+
 function toggleShellTheme(){
   document.documentElement.classList.toggle('dark-shell');
   const theme = document.documentElement.classList.contains('dark-shell') ? 'dark' : 'light';
-  api.saveSettings({ 'shell-theme': theme }).catch(e => console.error('Could not save shell theme', e));
+  updateShellThemeControl();
+  const expectedAccountVersion = accountVersion;
+  api.saveSettings({ 'shell-theme': theme }, { expectedAccountVersion }).catch(e => console.error('Could not save shell theme', e));
 }
 
 /* ---------------- Persistence (API-backed) ---------------- */
 
 let metaSaveTimer = null;
-function scheduleSaveMeta(entry){
+let metaSaveAbortController = null;
+function scheduleSaveMeta(entry, request = activeReaderRequest){
   clearTimeout(metaSaveTimer);
-  metaSaveTimer = setTimeout(() => saveBookMeta(entry), 1200);
+  const expectedAccountVersion = request ? request.accountVersion : accountVersion;
+  metaSaveTimer = setTimeout(() => saveBookMeta(entry, { expectedAccountVersion, request }), 1200);
 }
 
-async function saveBookMeta(entry){
+async function saveBookMeta(entry, { expectedAccountVersion = accountVersion, request = null, allowInactiveReader = false } = {}){
+  if (!entry || !isActiveAccount(expectedAccountVersion)) return false;
+  if (!allowInactiveReader && !isReaderRequestCurrent(request)) return false;
+  if (metaSaveAbortController) metaSaveAbortController.abort();
+  const controller = new AbortController();
+  metaSaveAbortController = controller;
   try {
     await api.updateBook(entry.id, {
       progress_percent: entry.progress,
       last_location_cfi: entry.lastLocationCfi,
       last_opened_at: new Date().toISOString(),
-    });
-  } catch(e){ console.error('Could not save book meta', e); }
+    }, { signal: controller.signal, expectedAccountVersion });
+    return true;
+  } catch(e){
+    if (!isAbortError(e) && isActiveAccount(expectedAccountVersion)) console.error('Could not save book meta', e);
+    return false;
+  } finally {
+    if (metaSaveAbortController === controller) metaSaveAbortController = null;
+  }
 }
 
 let settingsSaveTimer = null;
+let settingsSaveAbortController = null;
 async function saveSettings(){
   clearTimeout(settingsSaveTimer);
+  const expectedAccountVersion = accountVersion;
+  const settingsSnapshot = { ...settings };
   settingsSaveTimer = setTimeout(async () => {
+    if (!isActiveAccount(expectedAccountVersion)) return;
+    if (settingsSaveAbortController) settingsSaveAbortController.abort();
+    const controller = new AbortController();
+    settingsSaveAbortController = controller;
     try {
       await api.saveSettings({
-        'reader-settings': settings,
-      });
-    } catch(e){ console.error('Could not save settings', e); }
+        'reader-settings': settingsSnapshot,
+      }, { signal: controller.signal, expectedAccountVersion });
+    } catch(e){
+      if (!isAbortError(e) && isActiveAccount(expectedAccountVersion)) console.error('Could not save settings', e);
+    } finally {
+      if (settingsSaveAbortController === controller) settingsSaveAbortController = null;
+    }
   }, 500);
 }
 
-async function loadLibraryFromStorage(){
+async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
+  if (!isActiveAccount(expectedAccountVersion)) return false;
   try {
-    const books = await api.getBooks();
+    const data = await api.getBooks({ expectedAccountVersion });
+    if (!isActiveAccount(expectedAccountVersion)) return false;
+    const books = Array.isArray(data) ? data : (data.books || []);
     library = books.map(b => ({
       id: b.id,
       name: b.title,
@@ -2190,19 +3149,21 @@ async function loadLibraryFromStorage(){
   }
 
   try {
-    const serverSettings = await api.getSettings();
+    const serverSettings = await api.getSettings({ expectedAccountVersion });
+    if (!isActiveAccount(expectedAccountVersion)) return false;
     if (serverSettings['reader-settings'] && typeof serverSettings['reader-settings'] === 'object') {
       Object.assign(settings, serverSettings['reader-settings']);
     }
     normalizeSettings();
-    if (serverSettings['shell-theme'] === 'dark') {
-      document.documentElement.classList.add('dark-shell');
-    }
+    document.documentElement.classList.toggle('dark-shell', serverSettings['shell-theme'] === 'dark');
+    updateShellThemeControl();
   } catch(e){ /* defaults are fine */ }
+  return isActiveAccount(expectedAccountVersion);
 }
 
 /* ---------------- Export / Import ---------------- */
 async function exportLibrary(){
+  if (!requireAdmin('create a library backup')) return;
   try {
     const res = await api.fetch('/api/export', {
       method: 'POST',
@@ -2226,7 +3187,11 @@ async function exportLibrary(){
 document.getElementById('import-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  if (!confirm('Import this backup into your current library? Existing books are kept and backup data is merged.')) {
+  if (!requireAdmin('restore a library backup')) {
+    e.target.value = '';
+    return;
+  }
+  if (!confirm('Import this backup into the shared library? Existing books are kept and backup data is merged.')) {
     e.target.value = '';
     return;
   }
@@ -2275,10 +3240,13 @@ window.addEventListener('beforeunload', () => {
 
 /* ---------------- Init ---------------- */
 async function boot(){
-  const emptyP = document.getElementById('shelf-empty').querySelector('p');
-  emptyP.textContent = 'Loading your library…';
+  const bootAccountVersion = accountVersion;
+  if (!isActiveAccount(bootAccountVersion)) return;
+  const emptyP = document.getElementById('empty-shelf-copy');
+  emptyP.textContent = 'Loading the shared library…';
   try {
-    await loadLibraryFromStorage();
+    const loaded = await loadLibraryFromStorage(bootAccountVersion);
+    if (!loaded || !isActiveAccount(bootAccountVersion)) return;
   } catch (e) {
     console.error('Boot failed:', e);
     emptyP.innerHTML = 'Could not load your library. <button class="file-link-btn" onclick="boot()">Retry</button>';
@@ -2287,30 +3255,112 @@ async function boot(){
   renderFontOptions();
   renderShelf();
   updateSettingsUI();
-  emptyP.textContent =
-    "Add an EPUB and it\u2019ll take its place here. Books, bookmarks, and settings are saved automatically, so they\u2019ll be right here next time you open this.";
   // Load collections after shelf is ready
   await loadCollections();
+  if (!isActiveAccount(bootAccountVersion)) return;
+  updateRoleAwareControls();
+}
+
+function abortReaderRequests() {
+  readerRequestVersion += 1;
+  if (readerAbortController) {
+    readerAbortController.abort();
+    readerAbortController = null;
+  }
+  activeReaderRequest = null;
+}
+
+function resetReaderPreferences() {
+  Object.assign(settings, DEFAULT_READER_SETTINGS);
+  document.documentElement.classList.remove('dark-shell');
+  document.body.style.removeProperty('background');
+  updateShellThemeControl();
+}
+
+/* Dispose immediately and without API calls. This is deliberately used by
+   expiry/account-change paths, where another request could attach stale
+   reader data to the wrong person. */
+function discardReaderState({ clearLibrary = false, resetPreferences = false } = {}) {
+  abortReaderRequests();
+  searchRequestVersion += 1;
+  clearTimeout(searchDebounce);
+  clearTimeout(metaSaveTimer);
+  clearTimeout(settingsSaveTimer);
+  if (typeof metaSaveAbortController !== 'undefined' && metaSaveAbortController) metaSaveAbortController.abort();
+  if (typeof settingsSaveAbortController !== 'undefined' && settingsSaveAbortController) settingsSaveAbortController.abort();
+  currentSessionId = null;
+  currentBookId = null;
+  locationsReady = false;
+  pendingHighlightCfi = null;
+  pendingHighlightContext = null;
+  highlightReturnFocus = null;
+  window.onkeydown = null;
+
+  if (typeof scrollFadeObserver !== 'undefined' && scrollFadeObserver) {
+    scrollFadeObserver.disconnect();
+    scrollFadeObserver = null;
+  }
+  const oldBook = book;
+  book = null;
+  rendition = null;
+  try { if (oldBook) oldBook.destroy(); } catch (e) { /* already disposed */ }
+
+  document.getElementById('viewer').replaceChildren();
+  document.getElementById('loading-overlay').classList.add('hidden');
+  hideHighlightPopup();
+  closeShortcutsModal({ returnFocus: false });
+  closeStatsModal();
+  document.getElementById('collections-modal').classList.remove('show');
+  closeAdminModal({ returnFocus: false });
+  document.getElementById('app').classList.remove('chrome-hidden');
+  syncReaderChromeAccessibility();
+  exitReaderFullscreen();
+  updateMobileFullscreenControl();
+  document.body.classList.remove('reader-active');
+  document.body.style.removeProperty('background');
+  document.getElementById('reader-view').classList.remove('active', 'scrolled');
+  document.getElementById('shelf-view').style.display = 'block';
+  ['toc-toggle', 'search-toggle', 'settings-toggle', 'bookmarks-toggle', 'bookmark-toggle'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  document.getElementById('progress-slider').onchange = null;
+  closeDrawers();
+  document.title = 'Endpaper — an EPUB reader';
+
+  if (clearLibrary) {
+    library = [];
+    allCollections = [];
+    renderShelf();
+  }
+  if (resetPreferences) {
+    resetReaderPreferences();
+    renderFontOptions();
+    updateSettingsUI();
+  }
 }
 
 // Check auth before boot
 (async function(){
   try {
-    const res = await fetch('/api/session', { credentials: 'same-origin' });
-    if (res.ok) {
+    const session = await refreshCurrentUser();
+    if (session) {
       boot();
     } else {
       showLoginGate();
     }
   } catch(e) {
+    setCurrentUser(null);
     showLoginGate();
   }
 })();
 
 /* ---------------- Stats UI ---------------- */
 async function openStatsModal() {
+  const expectedAccountVersion = accountVersion;
+  if (!isActiveAccount(expectedAccountVersion)) return;
   try {
-    const stats = await api.getStats();
+    const stats = await api.getStats({ expectedAccountVersion });
+    if (!isActiveAccount(expectedAccountVersion)) return;
     document.getElementById('stat-streak').textContent = stats.reading_streak_days;
     document.getElementById('stat-finished').textContent = stats.books_finished;
     
@@ -2321,11 +3371,16 @@ async function openStatsModal() {
     document.getElementById('stat-total').textContent = totalHours.replace('.0', '') + 'h';
 
     document.getElementById('stats-modal').classList.add('show');
-  } catch(e) { console.error('Failed to load stats:', e); }
+  } catch(e) {
+    if (isActiveAccount(expectedAccountVersion) && !isAbortError(e)) console.error('Failed to load stats:', e);
+  }
 }
 
 function closeStatsModal() {
   document.getElementById('stats-modal').classList.remove('show');
+  ['stat-streak', 'stat-finished', 'stat-week', 'stat-total'].forEach(id => {
+    document.getElementById(id).textContent = '—';
+  });
 }
 
 /* ---------------- Collections UI ---------------- */
@@ -2351,6 +3406,7 @@ function renderCollectionsFilter() {
 let activeOrganizeBookId = null;
 
 async function openBookCollectionsModal(bookId) {
+  if (!requireAdmin('organize shared collections')) return;
   activeOrganizeBookId = bookId;
   document.getElementById('collections-title').textContent = 'Organize Collections';
   const list = document.getElementById('collection-list');
@@ -2373,6 +3429,7 @@ async function openBookCollectionsModal(bookId) {
 }
 
 function openCollectionsManager() {
+  if (!requireAdmin('manage shared collections')) return;
   activeOrganizeBookId = null;
   document.getElementById('collections-title').textContent = 'Manage Collections';
   const list = document.getElementById('collection-list');
@@ -2411,6 +3468,7 @@ function closeCollectionsModal() {
 }
 
 async function toggleBookCollection(collectionId, isChecked) {
+  if (!requireAdmin('organize shared collections')) return;
   if (!activeOrganizeBookId) return;
   try {
     if (isChecked) {
@@ -2423,6 +3481,7 @@ async function toggleBookCollection(collectionId, isChecked) {
 }
 
 async function deleteCollection(id, name) {
+  if (!requireAdmin('manage shared collections')) return;
   if (!confirm(`Delete the “${name}” collection? Its books will remain in your library.`)) return;
   try {
     await api.deleteCollection(id);
@@ -2436,6 +3495,7 @@ async function deleteCollection(id, name) {
 }
 
 async function renameCollection(id, currentName) {
+  if (!requireAdmin('manage shared collections')) return;
   const name = prompt('Collection name', currentName);
   if (name === null || name.trim() === currentName) return;
   try {
@@ -2450,6 +3510,7 @@ async function renameCollection(id, currentName) {
 }
 
 async function createCollection() {
+  if (!requireAdmin('manage shared collections')) return;
   const input = document.getElementById('new-collection-input');
   const name = input.value.trim();
   if (!name) return;
@@ -2465,6 +3526,175 @@ async function createCollection() {
     }
   } catch(e) { console.error('Failed to create collection:', e); showToast(`Could not create collection: ${e.message}`); }
 }
+
+async function openAdminModal() {
+  if (!requireAdmin('manage users')) return;
+  const modal = document.getElementById('admin-modal');
+  const activeElement = document.activeElement;
+  adminModalReturnFocus = activeElement instanceof HTMLElement
+    ? activeElement
+    : document.getElementById('admin-toggle');
+  modal.classList.add('show');
+  modal.setAttribute('aria-hidden', 'false');
+  await renderAdminUsers();
+  if (modal.classList.contains('show')) {
+    document.getElementById('new-user-username').focus({ preventScroll: true });
+  }
+}
+
+function closeAdminModal({ returnFocus = true } = {}) {
+  const modal = document.getElementById('admin-modal');
+  if (!modal.classList.contains('show')) return;
+  modal.classList.remove('show');
+  modal.setAttribute('aria-hidden', 'true');
+  const returnTarget = adminModalReturnFocus;
+  adminModalReturnFocus = null;
+  if (returnFocus && returnTarget && returnTarget.isConnected && !returnTarget.hidden) {
+    returnTarget.focus({ preventScroll: true });
+  }
+}
+
+function getAdminModalFocusableElements() {
+  const modal = document.getElementById('admin-modal');
+  return Array.from(modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+    .filter(el => el.getClientRects().length > 0 && !el.hasAttribute('hidden'));
+}
+
+function handleAdminModalKeydown(event) {
+  const modal = document.getElementById('admin-modal');
+  if (!modal.classList.contains('show')) return;
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    closeAdminModal();
+    return;
+  }
+
+  if (event.key !== 'Tab') return;
+  const focusable = getAdminModalFocusableElements();
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+async function renderAdminUsers() {
+  if (!requireAdmin('manage users')) return;
+  const list = document.getElementById('user-list');
+  list.innerHTML = '';
+  try {
+    const users = await api.getUsers();
+    if (!users.length) {
+      const empty = document.createElement('p');
+      empty.className = 'admin-empty';
+      empty.textContent = 'No accounts yet.';
+      list.appendChild(empty);
+      return;
+    }
+    users.forEach(u => {
+      const row = document.createElement('div');
+      row.className = 'collection-item collection-item-manage admin-user-item';
+      row.setAttribute('role', 'listitem');
+
+      const identity = document.createElement('div');
+      identity.className = 'admin-user-identity';
+      const name = document.createElement('span');
+      name.className = 'admin-user-name';
+      name.textContent = u.username;
+      const role = document.createElement('span');
+      role.className = `role-badge ${u.is_admin ? 'admin' : 'reader'}`;
+      role.textContent = u.is_admin ? 'Admin' : 'Reader';
+      identity.append(name, role);
+
+      const isCurrentUser = Boolean(currentUser && currentUser.username === u.username);
+      if (isCurrentUser) {
+        const current = document.createElement('span');
+        current.className = 'current-user-badge';
+        current.textContent = 'You';
+        identity.appendChild(current);
+      }
+      row.appendChild(identity);
+
+      const actions = document.createElement('div');
+      actions.className = 'collection-actions';
+      if (isCurrentUser) {
+        const protectedNote = document.createElement('span');
+        protectedNote.className = 'admin-self-note';
+        protectedNote.textContent = 'Current account';
+        actions.appendChild(protectedNote);
+      } else {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'collection-delete';
+        remove.textContent = 'Remove';
+        remove.setAttribute('aria-label', `Remove ${u.username}`);
+        remove.onclick = () => deleteUser(u.id, u.username);
+        actions.appendChild(remove);
+      }
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+  } catch (e) {
+    const error = document.createElement('div');
+    error.style.cssText = 'color:#C14B4B; font-size:13px;';
+    error.textContent = `Error loading users: ${e.message}`;
+    list.appendChild(error);
+  }
+}
+
+async function createUser(event) {
+  if (event) event.preventDefault();
+  if (!requireAdmin('manage users')) return;
+  const userIn = document.getElementById('new-user-username');
+  const passIn = document.getElementById('new-user-passphrase');
+  const username = userIn.value.trim();
+  const passphrase = passIn.value.trim();
+  const isAdmin = document.getElementById('new-user-isadmin').checked;
+  if (!username || !passphrase) {
+    showToast('Please enter a username and passphrase.');
+    (!username ? userIn : passIn).focus();
+    return false;
+  }
+  try {
+    await api.createUser({ username, passphrase, is_admin: isAdmin });
+    userIn.value = '';
+    passIn.value = '';
+    document.getElementById('new-user-isadmin').checked = false;
+    await renderAdminUsers();
+    userIn.focus();
+    showToast('User added.');
+  } catch(e) {
+    console.error('Failed to create user:', e);
+    showToast(`Could not create user: ${e.message}`);
+  }
+  return false;
+}
+
+async function deleteUser(id, username) {
+  if (!requireAdmin('manage users')) return;
+  const accountName = username ? `“${username}”` : 'this account';
+  if (!confirm(`Remove ${accountName} from Endpaper? Their reading progress, bookmarks, highlights, and preferences will be permanently deleted. The shared library and everyone else’s data will remain. This cannot be undone.`)) return;
+  try {
+    await api.deleteUser(id);
+    await renderAdminUsers();
+    showToast(username ? `${username} was removed.` : 'User removed.');
+  } catch(e) {
+    console.error('Failed to delete user:', e);
+    showToast(`Could not delete user: ${e.message}`);
+  }
+}
+
+document.getElementById('admin-modal').addEventListener('mousedown', (event) => {
+  if (event.target === event.currentTarget) closeAdminModal();
+});
+document.addEventListener('keydown', handleAdminModalKeydown);
 
 </script>
 </body>

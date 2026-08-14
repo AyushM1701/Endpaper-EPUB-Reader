@@ -2,6 +2,30 @@
 
 const db = require('../db');
 
+const pruneExpiredSessions = db.prepare(`
+  DELETE FROM sessions
+  WHERE expires_at IS NULL
+     OR datetime(expires_at) IS NULL
+     OR datetime(expires_at) <= CURRENT_TIMESTAMP
+`);
+const findValidSession = db.prepare(`
+  SELECT user_id
+  FROM sessions
+  WHERE token = ?
+    AND expires_at IS NOT NULL
+    AND datetime(expires_at) > CURRENT_TIMESTAMP
+`);
+const deleteSession = db.prepare('DELETE FROM sessions WHERE token = ?');
+
+function clearSessionCookie(res) {
+  res.clearCookie('endpaper_session', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/',
+  });
+}
+
 /**
  * Auth middleware: checks for a valid session cookie on all /api/* routes
  * except /api/login and /api/session. The session token is a high-entropy,
@@ -25,15 +49,27 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  // Validate the token against stored session
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'session_token'").get();
+  let row;
+  try {
+    // Pruning during authenticated requests handles expired sessions even if
+    // the server stays up for months without another login.
+    pruneExpiredSessions.run();
+    row = findValidSession.get(token);
+  } catch (err) {
+    return next(err);
+  }
 
-  if (!row || row.value !== token) {
+  if (!row) {
+    // Avoid repeatedly sending an unusable token after expiry or logout.
+    try { deleteSession.run(token); } catch (err) { return next(err); }
+    clearSessionCookie(res);
     if (fullPath === '/api/session') {
       return res.status(401).json({ error: 'Invalid session' });
     }
     return res.status(401).json({ error: 'Invalid or expired session' });
   }
+
+  req.user_id = row.user_id;
 
   next();
 }

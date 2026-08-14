@@ -14,7 +14,7 @@ const SETTING_KEY_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
  * Returns all non-sensitive settings as a JSON object.
  */
 router.get('/api/settings', (req, res) => {
-  const rows = db.prepare('SELECT key, value FROM settings').all();
+  const rows = db.prepare('SELECT key, value FROM settings WHERE user_id = ?').all(req.user_id);
   const settings = {};
   for (const row of rows) {
     if (!SENSITIVE_KEYS.includes(row.key)) {
@@ -43,8 +43,8 @@ router.put('/api/settings', (req, res) => {
   }
 
   const upsert = db.prepare(`
-    INSERT INTO settings (key, value) VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    INSERT INTO settings (user_id, key, value) VALUES (?, ?, ?)
+    ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value
   `);
 
   const runAll = db.transaction((entries) => {
@@ -53,7 +53,7 @@ router.put('/api/settings', (req, res) => {
       if (!SETTING_KEY_RE.test(key)) throw new Error(`Invalid setting key: ${key}`);
       const serialized = typeof value === 'string' ? value : JSON.stringify(value);
       if (serialized === undefined || serialized.length > 100_000) throw new Error(`Setting ${key} is too large or unsupported`);
-      upsert.run(key, serialized);
+      upsert.run(req.user_id, key, serialized);
     }
   });
 

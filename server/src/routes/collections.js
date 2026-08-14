@@ -4,6 +4,7 @@ const express = require('express');
 const { randomUUID } = require('crypto');
 const db = require('../db');
 const { text, validateUuidParam } = require('../lib/validation');
+const { requireAdmin } = require('./users');
 
 const router = express.Router();
 
@@ -32,7 +33,10 @@ router.get('/api/collections', (req, res) => {
  * POST /api/collections
  * Body: { name }
  */
-router.post('/api/collections', (req, res) => {
+// Collections and their memberships are global shared-library metadata.
+// Only admins may change them; every authenticated user can still browse and
+// filter by them.
+router.post('/api/collections', requireAdmin, (req, res) => {
   let name;
   try {
     name = text(req.body.name, { required: true, max: 80, field: 'Collection name' });
@@ -60,7 +64,7 @@ router.post('/api/collections', (req, res) => {
  * PATCH /api/collections/:id
  * Rename a collection without changing its memberships.
  */
-router.patch('/api/collections/:id', validateUuidParam('id'), (req, res) => {
+router.patch('/api/collections/:id', validateUuidParam('id'), requireAdmin, (req, res) => {
   const collection = db.prepare('SELECT id FROM collections WHERE id = ?').get(req.params.id);
   if (!collection) return res.status(404).json({ error: 'Collection not found' });
 
@@ -81,7 +85,7 @@ router.patch('/api/collections/:id', validateUuidParam('id'), (req, res) => {
  * DELETE /api/collections/:id
  * Deleting a collection only removes its grouping, never the books in it.
  */
-router.delete('/api/collections/:id', validateUuidParam('id'), (req, res) => {
+router.delete('/api/collections/:id', validateUuidParam('id'), requireAdmin, (req, res) => {
   const result = db.prepare('DELETE FROM collections WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Collection not found' });
   res.json({ ok: true });
@@ -91,7 +95,7 @@ router.delete('/api/collections/:id', validateUuidParam('id'), (req, res) => {
  * POST /api/books/:id/collections/:collectionId
  * Add a book to a collection.
  */
-router.post('/api/books/:id/collections/:collectionId', validateUuidParam('id', 'collectionId'), (req, res) => {
+router.post('/api/books/:id/collections/:collectionId', validateUuidParam('id', 'collectionId'), requireAdmin, (req, res) => {
   const book = db.prepare('SELECT id FROM books WHERE id = ?').get(req.params.id);
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
@@ -116,7 +120,7 @@ router.post('/api/books/:id/collections/:collectionId', validateUuidParam('id', 
  * DELETE /api/books/:id/collections/:collectionId
  * Remove a book from a collection.
  */
-router.delete('/api/books/:id/collections/:collectionId', validateUuidParam('id', 'collectionId'), (req, res) => {
+router.delete('/api/books/:id/collections/:collectionId', validateUuidParam('id', 'collectionId'), requireAdmin, (req, res) => {
   db.prepare(
     'DELETE FROM book_collections WHERE book_id = ? AND collection_id = ?'
   ).run(req.params.id, req.params.collectionId);

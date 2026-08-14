@@ -7,55 +7,75 @@ const rateLimit = require('express-rate-limit');
 const db = require('../db');
 
 const router = express.Router();
+const SESSION_TTL_DAYS = 90;
+const SESSION_TTL_MS = SESSION_TTL_DAYS * 24 * 60 * 60 * 1000;
 
-// Rate limit: 5 login attempts per 15 minutes per IP
+const pruneExpiredSessions = db.prepare(`
+  DELETE FROM sessions
+  WHERE expires_at IS NULL
+     OR datetime(expires_at) IS NULL
+     OR datetime(expires_at) <= CURRENT_TIMESTAMP
+`);
+const createSession = db.prepare(`
+  INSERT INTO sessions (token, user_id, expires_at)
+  VALUES (?, ?, datetime('now', '+90 days'))
+`);
+const createSessionAndPrune = db.transaction((token, userId) => {
+  pruneExpiredSessions.run();
+  createSession.run(token, userId);
+});
+
+// Rate limit failed login attempts without blocking a household that shares
+// one public IP and signs in successfully from several devices.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
   message: { error: 'Too many login attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
   keyGenerator: (req) => req.ip,
 });
 
 /**
  * POST /api/login
- * Body: { passphrase: "..." }
+ * Body: { username: "...", passphrase: "..." }
  * On success: sets httpOnly session cookie (90-day expiry)
  */
 router.post('/api/login', loginLimiter, async (req, res) => {
   try {
-    const { passphrase } = req.body;
+    const { username, passphrase } = req.body;
 
+    if (!username || typeof username !== 'string' || username.length > 255) {
+      return res.status(400).json({ error: 'A valid username is required' });
+    }
     if (!passphrase || typeof passphrase !== 'string' || passphrase.length > 1024) {
       return res.status(400).json({ error: 'A valid passphrase is required' });
     }
 
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'passphrase_hash'").get();
+    const user = db.prepare("SELECT id, passphrase_hash FROM users WHERE username = ?").get(username);
 
-    if (!row) {
-      return res.status(500).json({ error: 'No passphrase configured. Run: node src/lib/passphrase.js --set "your phrase"' });
+    if (!user) {
+      return res.status(401).json({ error: 'Incorrect username or passphrase' });
     }
 
-    const match = await bcrypt.compare(passphrase, row.value);
+    const match = await bcrypt.compare(passphrase, user.passphrase_hash);
 
     if (!match) {
-      return res.status(401).json({ error: 'Incorrect passphrase' });
+      return res.status(401).json({ error: 'Incorrect username or passphrase' });
     }
 
-    // Generate session token and store it
+    // Generate a token with a matching server-side and browser-side 90-day
+    // expiry. Pruning here keeps unused records bounded even on low traffic.
     const token = randomUUID();
-    db.prepare(
-      `INSERT INTO settings (key, value) VALUES ('session_token', ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-    ).run(token);
+    createSessionAndPrune(token, user.id);
 
     // Set httpOnly, SameSite=Strict cookie with 90-day expiry
     res.cookie('endpaper_session', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 90 * 24 * 60 * 60 * 1000, // 90 days
+      maxAge: SESSION_TTL_MS,
       path: '/',
     });
 
@@ -72,9 +92,8 @@ router.post('/api/login', loginLimiter, async (req, res) => {
  */
 router.post('/api/logout', (req, res) => {
   const token = req.cookies && req.cookies.endpaper_session;
-  const current = db.prepare("SELECT value FROM settings WHERE key = 'session_token'").get();
-  if (current && current.value === token) {
-    db.prepare("DELETE FROM settings WHERE key = 'session_token'").run();
+  if (token) {
+    db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
   }
   res.clearCookie('endpaper_session', {
     httpOnly: true,
@@ -88,9 +107,11 @@ router.post('/api/logout', (req, res) => {
 /**
  * GET /api/session
  * Returns 200 if the session cookie is valid (middleware already checked it).
+ * We will return whether the current user is an admin.
  */
 router.get('/api/session', (req, res) => {
-  res.json({ ok: true });
+  const user = db.prepare("SELECT is_admin, username FROM users WHERE id = ?").get(req.user_id);
+  res.json({ ok: true, is_admin: !!(user && user.is_admin), username: user ? user.username : null });
 });
 
 module.exports = router;

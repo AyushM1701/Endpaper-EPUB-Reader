@@ -34,10 +34,10 @@ router.post('/api/sessions/start', (req, res) => {
   // any abandoned single-user sessions before starting the new one so stats do
   // not silently lose that reading time.
   db.transaction(() => {
-    const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL').all();
+    const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL AND user_id = ?').all(req.user_id);
     for (const session of openSessions) closeSession(session, started_at);
-    db.prepare('INSERT INTO reading_sessions (id, book_id, started_at) VALUES (?, ?, ?)')
-      .run(id, book_id, started_at);
+    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at) VALUES (?, ?, ?, ?)')
+      .run(id, req.user_id, book_id, started_at);
   })();
 
   res.status(201).json({ id, book_id, started_at });
@@ -48,7 +48,7 @@ router.post('/api/sessions/start', (req, res) => {
  * Closes a reading session and computes duration.
  */
 router.post('/api/sessions/:id/end', validateUuidParam('id'), (req, res) => {
-  const session = db.prepare('SELECT * FROM reading_sessions WHERE id = ?').get(req.params.id);
+  const session = db.prepare('SELECT * FROM reading_sessions WHERE id = ? AND user_id = ?').get(req.params.id, req.user_id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
   // This endpoint is intentionally idempotent: sendBeacon and a normal close
@@ -69,27 +69,27 @@ router.get('/api/stats', (req, res) => {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const weekRow = db.prepare(`
     SELECT COALESCE(SUM(duration_seconds), 0) as total
-    FROM reading_sessions WHERE started_at >= ?
-  `).get(weekAgo);
+    FROM reading_sessions WHERE started_at >= ? AND user_id = ?
+  `).get(weekAgo, req.user_id);
 
   // Total time read all-time
   const totalRow = db.prepare(`
-    SELECT COALESCE(SUM(duration_seconds), 0) as total FROM reading_sessions
-  `).get();
+    SELECT COALESCE(SUM(duration_seconds), 0) as total FROM reading_sessions WHERE user_id = ?
+  `).get(req.user_id);
 
   // Books finished (progress >= 95%)
   const finishedRow = db.prepare(`
-    SELECT COUNT(*) as total FROM books WHERE progress_percent >= 95
-  `).get();
+    SELECT COUNT(*) as total FROM user_books WHERE progress_percent >= 95 AND user_id = ?
+  `).get(req.user_id);
 
   // Reading streak: calculate distinct local calendar days in one query. The
   // current day only counts if there has actually been a session today.
   const readingDays = db.prepare(`
     SELECT DISTINCT date(started_at, 'localtime') AS day
     FROM reading_sessions
-    WHERE started_at >= date('now', 'localtime', '-365 days')
+    WHERE started_at >= date('now', 'localtime', '-365 days') AND user_id = ?
     ORDER BY day DESC
-  `).all().map(row => row.day);
+  `).all(req.user_id).map(row => row.day);
   let streak = 0;
   const cursor = new Date();
   cursor.setHours(0, 0, 0, 0);

@@ -21,8 +21,8 @@ const router = express.Router();
  */
 router.get('/api/books/:id/highlights', validateUuidParam('id'), (req, res) => {
   const highlights = db.prepare(
-    'SELECT * FROM highlights WHERE book_id = ? ORDER BY created_at ASC'
-  ).all(req.params.id);
+    'SELECT * FROM highlights WHERE book_id = ? AND user_id = ? ORDER BY created_at ASC'
+  ).all(req.params.id, req.user_id);
   res.json(highlights);
 });
 
@@ -47,9 +47,9 @@ router.post('/api/books/:id/highlights', validateUuidParam('id'), (req, res) => 
 
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO highlights (id, book_id, cfi_range, excerpt, note, color, chapter)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, req.params.id, cfiRange, safeExcerpt, safeNote, safeColor, safeChapter);
+    INSERT INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, req.user_id, req.params.id, cfiRange, safeExcerpt, safeNote, safeColor, safeChapter);
 
   const highlight = db.prepare('SELECT * FROM highlights WHERE id = ?').get(id);
   res.status(201).json(highlight);
@@ -60,7 +60,7 @@ router.post('/api/books/:id/highlights', validateUuidParam('id'), (req, res) => 
  * Body: { color, note }
  */
 router.patch('/api/highlights/:id', validateUuidParam('id'), (req, res) => {
-  const existing = db.prepare('SELECT id FROM highlights WHERE id = ?').get(req.params.id);
+  const existing = db.prepare('SELECT id FROM highlights WHERE id = ? AND user_id = ?').get(req.params.id, req.user_id);
   if (!existing) return res.status(404).json({ error: 'Highlight not found' });
 
   const updates = [];
@@ -84,7 +84,8 @@ router.patch('/api/highlights/:id', validateUuidParam('id'), (req, res) => {
   }
 
   values.id = req.params.id;
-  db.prepare(`UPDATE highlights SET ${updates.join(', ')} WHERE id = @id`).run(values);
+  values.user_id = req.user_id;
+  db.prepare(`UPDATE highlights SET ${updates.join(', ')} WHERE id = @id AND user_id = @user_id`).run(values);
 
   const updated = db.prepare('SELECT * FROM highlights WHERE id = ?').get(req.params.id);
   res.json(updated);
@@ -94,7 +95,7 @@ router.patch('/api/highlights/:id', validateUuidParam('id'), (req, res) => {
  * DELETE /api/highlights/:id
  */
 router.delete('/api/highlights/:id', validateUuidParam('id'), (req, res) => {
-  const result = db.prepare('DELETE FROM highlights WHERE id = ?').run(req.params.id);
+  const result = db.prepare('DELETE FROM highlights WHERE id = ? AND user_id = ?').run(req.params.id, req.user_id);
   if (result.changes === 0) return res.status(404).json({ error: 'Highlight not found' });
   res.json({ ok: true });
 });
