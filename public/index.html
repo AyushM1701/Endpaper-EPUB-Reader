@@ -1872,9 +1872,6 @@ function applyReaderContentStyles(contents) {
       p, li, blockquote { text-align: start !important; hyphens: auto; -webkit-hyphens: auto; }
     }
     body { padding-bottom: 24px !important; }
-    ${settings.layout === 'scrolled' ? `@media (min-width: 700px) {
-      body { max-width: 70ch !important; margin-left: auto !important; margin-right: auto !important; }
-    }` : ''}
   `;
   (doc.head || doc.documentElement).appendChild(style);
 }
