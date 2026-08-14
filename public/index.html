@@ -2961,6 +2961,7 @@ function registerThemes(){
       '::selection': { 'background': 'rgba(169,128,63,0.35)' },
     });
   });
+  });
 }
 
 function applyTheme(){
@@ -2969,9 +2970,9 @@ function applyTheme(){
   const fontCss = FONTS.find(f => f.name === settings.font).css;
   rendition.themes.font(fontCss);
   rendition.themes.fontSize(settings.fontSize + '%');
-  rendition.themes.override('line-height', (settings.lineHeight / 100).toString());
+  rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('padding', '0 ' + MARGIN_PADDING[settings.marginIdx], true);
-  rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx]);
+  rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
   // Page appearance belongs inside the EPUB iframe; never tint the library shell.
   document.body.style.removeProperty('background');
   updateSettingsUI();
