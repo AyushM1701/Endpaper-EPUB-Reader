@@ -949,13 +949,14 @@ function applyReaderContentStyles(contents) {
       background-color: ${theme.body} !important;
       color: ${theme.text} !important;
       box-sizing: border-box !important;
-      touch-action: pan-y !important;
-      overscroll-behavior: none !important;
       -webkit-user-select: auto;
+      ${isScrolled 
+        ? 'touch-action: auto !important; overscroll-behavior: auto !important; -webkit-overflow-scrolling: touch;' 
+        : 'touch-action: pan-y !important; overscroll-behavior: none !important;'}
     }
     body {
       margin: 0 !important;
-      ${isScrolled ? 'padding-bottom: 48px !important;' : 'padding-top: 0 !important; padding-bottom: 0 !important;'}
+      ${isScrolled ? 'padding-top: 14px !important; padding-bottom: 80px !important;' : 'padding-top: 0 !important; padding-bottom: 0 !important;'}
     }
     body p, body div, body span, body li, body dd, body dt, body blockquote, body figcaption, body td, body th, body h1, body h2, body h3, body h4, body h5, body h6 {
       color: inherit !important;

@@ -323,6 +323,11 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
 #viewer{
   width:100%; height:100%;
 }
+#viewer .epub-container,
+#epub-scroll-container{
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
 
 .nav-zone{
   position:absolute; top:0; bottom:0; width: var(--nav-zone-width, 10%);
