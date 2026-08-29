@@ -317,9 +317,8 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
 }
 #reader-view.active{ display:flex; }
 #viewer-wrap{
-  flex:1; position:relative; overflow:hidden;
+  flex:1; position:relative; overflow:hidden; min-height:0;
   background: var(--paper);
-  padding-top: env(safe-area-inset-top);
 }
 #viewer{
   width:100%; height:100%;
@@ -348,12 +347,12 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
 }
 
 #progress-bar{
-  flex-shrink:0; padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
+  flex-shrink:0; padding: 10px 22px;
   display:flex; align-items:center; gap:14px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
   z-index: 10;
-  max-height: 60px; overflow:hidden;
+  max-height: 54px; overflow:hidden;
   transition: max-height .25s ease, padding .25s ease, opacity .2s ease, border-color .2s ease;
 }
 #app.chrome-hidden #progress-bar{
@@ -440,8 +439,6 @@ html.dark-shell #fullscreen-exit-control:focus-visible{
 #progress-chapter{ font-size:12.5px; color: var(--ink-soft); font-style:italic; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 #progress-track{ position:relative; flex:1; display:flex; align-items:center; }
-#mobile-fullscreen-toggle{ display:none; }
-#mobile-fullscreen-toggle[aria-pressed="true"]{ color:var(--gold); border-color:var(--gold); }
 #bookmark-ticks{ position:absolute; left:0; right:0; top:50%; height:0; pointer-events:none; }
 .bookmark-tick{
   position:absolute; top:-4px; width:7px; height:7px; border-radius:50%;
@@ -1122,8 +1119,7 @@ html.dark-shell #reader-view,
 html.dark-shell #viewer-wrap{ background: var(--reader-page-bg, var(--paper)); }
 html.dark-shell #progress-bar{ background:var(--paper); }
 html.dark-shell .drawer,
-html.dark-shell .nav-zone,
-html.dark-shell #mobile-fullscreen-toggle{ box-shadow:0 5px 18px rgba(0,0,0,.34); }
+html.dark-shell .nav-zone{ box-shadow:0 5px 18px rgba(0,0,0,.34); }
 
 @media (max-width: 640px){
   #shelf{ grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap:20px 14px; }
@@ -1407,18 +1403,11 @@ html.dark-shell .admin-btn-sm:hover {
   color: var(--gold);
 }
 
-/* Touch readers use a visible, compact pair of page buttons plus swipe. */
+/* Touch readers use swipe gestures and topbar buttons. */
 @media (hover: none) and (pointer: coarse){
   .nav-zone{ display: none; }
   .drawer{ width: min(320px, 86vw); }
   #progress-chapter{ display:none; }
-  #mobile-fullscreen-toggle{
-    display:flex; align-items:center; justify-content:center;
-    width:44px; height:44px; border-radius:var(--radius);
-    border:1px solid var(--line); background:none; color:var(--ink-soft);
-    cursor:pointer; flex-shrink:0;
-  }
-  #mobile-fullscreen-toggle svg{ width:18px; height:18px; }
 }
 
 @media (pointer: coarse) {

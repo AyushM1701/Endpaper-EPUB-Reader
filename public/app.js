@@ -940,14 +940,22 @@ function applyReaderContentStyles(contents) {
     (doc.head || doc.documentElement).appendChild(style);
   }
   const theme = THEMES[settings.theme] || THEMES.light;
+  const isScrolled = settings.layout === 'scrolled';
   style.textContent = `
     @media (max-width: 699px) {
       p, li, blockquote { text-align: start !important; hyphens: auto; -webkit-hyphens: auto; }
     }
-    body {
+    html, body {
       background-color: ${theme.body} !important;
       color: ${theme.text} !important;
-      padding-bottom: 24px !important;
+      box-sizing: border-box !important;
+      touch-action: pan-y !important;
+      overscroll-behavior: none !important;
+      -webkit-user-select: auto;
+    }
+    body {
+      margin: 0 !important;
+      ${isScrolled ? 'padding-bottom: 48px !important;' : 'padding-top: 0 !important; padding-bottom: 0 !important;'}
     }
     body p, body div, body span, body li, body dd, body dt, body blockquote, body figcaption, body td, body th, body h1, body h2, body h3, body h4, body h5, body h6 {
       color: inherit !important;
@@ -973,7 +981,81 @@ function isInteractiveReaderTarget(target) {
   return Boolean(target && target.closest && target.closest('a, button, input, textarea, select, summary, [contenteditable="true"]'));
 }
 
+function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel) {
+  if (!rendition) return false;
+  const dx = ex - sx;
+  const dy = ey - sy;
+
+  // If user has an active text selection in the window, do not trigger page turns
+  if (win && win.getSelection && !win.getSelection().isCollapsed) return false;
+
+  // 1. Horizontal swipe gesture in paginated mode
+  if (settings.layout === 'paginated') {
+    const swipeThreshold = 30; // Responsive threshold for mobile swipe
+    if (Math.abs(dx) >= swipeThreshold && Math.abs(dx) > Math.abs(dy) * 1.1 && dt < 800) {
+      if (dx < 0) rendition.next();
+      else rendition.prev();
+      return true;
+    }
+  }
+
+  // 2. Clean tap: tap-to-turn zones (left 25% = prev, right 25% = next, center = toggle controls)
+  if (!isCancel && !moved && Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 450) {
+    if (settings.layout === 'paginated') {
+      if (ex < width * 0.25) {
+        rendition.prev();
+        return true;
+      } else if (ex > width * 0.75) {
+        rendition.next();
+        return true;
+      }
+    }
+    toggleReaderChrome();
+    return true;
+  }
+  return false;
+}
+
+function initViewerWrapGestures() {
+  const wrap = document.getElementById('viewer-wrap');
+  if (!wrap || wrap.__gestureBound) return;
+  wrap.__gestureBound = true;
+
+  let sx = 0, sy = 0, st = 0, moved = false, handled = false;
+
+  wrap.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+    st = Date.now();
+    moved = false;
+    handled = false;
+  }, { passive: true });
+
+  wrap.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - sx;
+    const dy = e.touches[0].clientY - sy;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) moved = true;
+  }, { passive: true });
+
+  const onEndOrCancel = (e, isCancel) => {
+    if (e.target && e.target.tagName === 'IFRAME') return;
+    if (handled || !rendition || !e.changedTouches || !e.changedTouches.length) return;
+    if (isInteractiveReaderTarget(e.target)) return;
+
+    const t = e.changedTouches[0];
+    const width = wrap.clientWidth || window.innerWidth;
+    const res = handleReaderSwipeOrTap(sx, sy, t.clientX, t.clientY, Date.now() - st, moved, width, window, isCancel);
+    if (res) handled = true;
+  };
+
+  wrap.addEventListener('touchend', (e) => onEndOrCancel(e, false), { passive: true });
+  wrap.addEventListener('touchcancel', (e) => onEndOrCancel(e, true), { passive: true });
+}
+
 function registerSwipeGestures(){
+  initViewerWrapGestures();
   if (!rendition || !rendition.hooks) return;
   rendition.hooks.content.register((contents) => {
     const doc = contents.document;
@@ -981,32 +1063,38 @@ function registerSwipeGestures(){
     applyReaderContentStyles(contents);
     doc.addEventListener('keydown', handleReaderShortcut);
 
-    const TOGGLE_COOLDOWN_MS = 200;
-    let sx = 0, sy = 0, st = 0, moved = false, lastTouchAt = 0, touchEdgeGuard = true;
-    doc.addEventListener('touchstart', (e) => {
+    let sx = 0, sy = 0, st = 0, moved = false, handled = false;
+
+    const onTouchStart = (e) => {
       if (e.touches.length !== 1) return;
-      sx = e.touches[0].clientX; sy = e.touches[0].clientY; st = Date.now(); moved = false;
-      touchEdgeGuard = e.touches[0].clientX > 22;
-    }, { passive: true });
-    doc.addEventListener('touchmove', (e) => {
+      sx = e.touches[0].clientX;
+      sy = e.touches[0].clientY;
+      st = Date.now();
+      moved = false;
+      handled = false;
+    };
+
+    const onTouchMove = (e) => {
       if (e.touches.length !== 1) return;
-      if (Math.abs(e.touches[0].clientX - sx) > 10 || Math.abs(e.touches[0].clientY - sy) > 10) moved = true;
-    }, { passive: true });
-    doc.addEventListener('touchcancel', () => {
-      lastTouchAt = 0;
-    }, { passive: true });
-    doc.addEventListener('touchend', (e) => {
-      lastTouchAt = Date.now();
-      if (!touchEdgeGuard) return;
-      if (!rendition || !e.changedTouches.length || isInteractiveReaderTarget(e.target)) return;
+      const dx = e.touches[0].clientX - sx;
+      const dy = e.touches[0].clientY - sy;
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) moved = true;
+    };
+
+    const onTouchEndOrCancel = (e, isCancel) => {
+      if (handled || !rendition || !e.changedTouches || !e.changedTouches.length) return;
+      if (isInteractiveReaderTarget(e.target)) return;
+
       const t = e.changedTouches[0];
-      const dx = t.clientX - sx, dy = t.clientY - sy, dt = Date.now() - st;
-      const swipeThreshold = Math.max(40, window.innerWidth * 0.08);
-      if (settings.layout === 'paginated' && Math.abs(dx) > swipeThreshold && Math.abs(dx) > Math.abs(dy) * 1.5 && dt < 600){
-        if (dx < 0) rendition.next(); else rendition.prev();
-        return;
-      }
-    }, { passive: true });
+      const width = win ? win.innerWidth : (doc.documentElement ? doc.documentElement.clientWidth : window.innerWidth);
+      const res = handleReaderSwipeOrTap(sx, sy, t.clientX, t.clientY, Date.now() - st, moved, width, win, isCancel);
+      if (res) handled = true;
+    };
+
+    doc.addEventListener('touchstart', onTouchStart, { passive: true });
+    doc.addEventListener('touchmove', onTouchMove, { passive: true });
+    doc.addEventListener('touchend', (e) => onTouchEndOrCancel(e, false), { passive: true });
+    doc.addEventListener('touchcancel', (e) => onTouchEndOrCancel(e, true), { passive: true });
   });
 }
 
@@ -1071,17 +1159,11 @@ function syncReaderChromeAccessibility(){
   });
 }
 
-function updateMobileFullscreenControl(){
-  const control = document.getElementById('mobile-fullscreen-toggle');
+function updateFullscreenControlUI(){
   const desktopBtn = document.getElementById('fullscreen-btn');
   const app = document.getElementById('app');
   if (!app) return;
-  const immersive = isImmersiveReading();
-  if (control) {
-    control.setAttribute('aria-pressed', String(immersive));
-    control.setAttribute('aria-label', immersive ? 'Exit fullscreen reading' : 'Enter fullscreen reading');
-    control.title = immersive ? 'Exit fullscreen reading' : 'Enter fullscreen reading';
-  }
+  const immersive = isImmersiveReading() || Boolean(readerFullscreenElement());
   if (desktopBtn) {
     desktopBtn.setAttribute('aria-pressed', String(immersive));
     desktopBtn.setAttribute('aria-label', immersive ? 'Exit fullscreen' : 'Fullscreen');
@@ -1122,7 +1204,7 @@ function enterImmersiveReading(){
   app.classList.add('chrome-hidden');
   closeDrawers();
   syncReaderChromeAccessibility();
-  updateMobileFullscreenControl();
+  updateFullscreenControlUI();
   scheduleReaderResize();
   return true;
 }
@@ -1134,7 +1216,7 @@ function exitImmersiveReading(){
   exitReaderFullscreen();
   closeDrawers();
   syncReaderChromeAccessibility();
-  updateMobileFullscreenControl();
+  updateFullscreenControlUI();
   scheduleReaderResize();
   return true;
 }
@@ -1331,7 +1413,7 @@ async function openBook(id){
   document.body.classList.add('reader-active');
   syncReaderPalette();
   syncReaderChromeAccessibility();
-  updateMobileFullscreenControl();
+  updateFullscreenControlUI();
 
   document.getElementById('shelf-view').style.display = 'none';
   document.getElementById('reader-view').classList.add('active');
@@ -2302,7 +2384,7 @@ function handleReaderShortcut(e){
     document.getElementById('app').classList.remove('chrome-hidden');
     syncReaderChromeAccessibility();
     exitReaderFullscreen();
-    updateMobileFullscreenControl();
+    updateFullscreenControlUI();
     scheduleReaderResize();
     return;
   }
@@ -2329,7 +2411,7 @@ function syncReaderFullscreenState(){
     app.classList.remove('chrome-hidden');
   }
   syncReaderChromeAccessibility();
-  updateMobileFullscreenControl();
+  updateFullscreenControlUI();
   scheduleReaderResize();
 }
 document.addEventListener('fullscreenchange', syncReaderFullscreenState);
@@ -2458,7 +2540,8 @@ function applyTheme(){
   if (window.matchMedia && window.matchMedia('(hover: hover)').matches) {
     paddingVal = `max(${paddingVal}, 44px, 8%)`;
   }
-  rendition.themes.override('padding', '0 ' + paddingVal, true);
+  const vPad = settings.layout === 'scrolled' ? '0' : '12px';
+  rendition.themes.override('padding', `${vPad} ${paddingVal}`, true);
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
   // Page appearance belongs inside the EPUB iframe; never tint the library shell.
@@ -2937,7 +3020,7 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   document.getElementById('app').classList.remove('chrome-hidden');
   syncReaderChromeAccessibility();
   exitReaderFullscreen();
-  updateMobileFullscreenControl();
+  updateFullscreenControlUI();
   document.body.classList.remove('reader-active');
   document.body.style.removeProperty('background');
   syncReaderPalette();
