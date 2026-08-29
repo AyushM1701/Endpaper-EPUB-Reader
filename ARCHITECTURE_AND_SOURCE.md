@@ -549,7 +549,7 @@ context.md
 
 ## File: `README.md`
 
-*Relative Path: `README.md` | Size: 8.4 KB | Total Lines: 173*
+*Relative Path: `README.md` | Size: 7.7 KB | Total Lines: 160*
 
 ````markdown
 # Endpaper
@@ -625,19 +625,6 @@ Once signed in as an admin, use **Admin Settings** to create reader accounts for
 Export and import are admin-only. An export includes EPUBs, covers, shared books and collections, and supported personal reading data. It excludes credentials, admin status, and login sessions.
 
 Import is a merge: existing shared books are preserved and missing shared records are added. Local users and their roles are never changed. Personal data from a backup is applied only when its username exactly matches an existing local account; data for other usernames is skipped. Export before importing a backup from another device, and import only archives you trust.
-
-## Optional API smoke checks
-
-The scripts in `server/` are manual integration checks against a running Endpaper server. They require credentials through environment variables and never contain real credentials. In PowerShell:
-
-```powershell
-cd server
-$env:ENDPAPER_USERNAME = "admin"
-$env:ENDPAPER_PASSPHRASE = "your passphrase"
-node test_api.js
-```
-
-Set `ENDPAPER_READER_USERNAME` and `ENDPAPER_READER_PASSPHRASE` as well to check that a reader receives `403` for shared-library changes. Set `ENDPAPER_RUN_MUTATION_TESTS=1` only when it is safe to temporarily create and delete a test collection. See the comments in `upload_test.js` before using it, since uploading adds a book to the shared library.
 
 ## Going live
 
