@@ -76,7 +76,7 @@ The username defaults to `admin`. A new username creates an admin account; an ex
 
 Open `https://books.yourdomain.com` and sign in with the username and passphrase from the previous step.
 
-Your first account is an admin. Use **Admin Settings** to add friends and family as readers. Readers can browse and read the same shared books and collections, but their progress, annotations, ratings, sessions, and settings remain private. Only admins can manage users, upload or remove shared books, edit shared metadata, organize collections, or use backup import/export.
+Your first account is an admin. Use **Admin Settings** to add friends and family as readers. Readers can browse, read, and contribute new books to the shared catalogue, while progress, annotations, ratings, sessions, and settings remain private. Only admins can manage users, remove shared books, edit shared metadata, organize collections, or use backup import/export.
 
 ## Updating
 

@@ -2,12 +2,6 @@
 
 const db = require('../db');
 
-const pruneExpiredSessions = db.prepare(`
-  DELETE FROM sessions
-  WHERE expires_at IS NULL
-     OR datetime(expires_at) IS NULL
-     OR datetime(expires_at) <= CURRENT_TIMESTAMP
-`);
 const findValidSession = db.prepare(`
   SELECT user_id
   FROM sessions
@@ -51,9 +45,6 @@ function authMiddleware(req, res, next) {
 
   let row;
   try {
-    // Pruning during authenticated requests handles expired sessions even if
-    // the server stays up for months without another login.
-    pruneExpiredSessions.run();
     row = findValidSession.get(token);
   } catch (err) {
     return next(err);

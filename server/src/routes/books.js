@@ -4,7 +4,8 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const { randomUUID } = require('crypto');
+const crypto = require('crypto');
+const { randomUUID } = crypto;
 const { Worker } = require('worker_threads');
 const db = require('../db');
 const { extractMeta, validateEpub } = require('../lib/epubMeta');
@@ -75,6 +76,7 @@ router.get('/api/books', (req, res) => {
   if (sort === 'opened') orderSql = 'ORDER BY ub.last_opened_at DESC NULLS LAST';
   else if (sort === 'title') orderSql = 'ORDER BY b.title COLLATE NOCASE ASC';
   else if (sort === 'author') orderSql = 'ORDER BY b.author COLLATE NOCASE ASC';
+  else if (sort === 'series') orderSql = 'ORDER BY CASE WHEN b.series IS NULL OR b.series = \'\' THEN 1 ELSE 0 END, b.series COLLATE NOCASE ASC, b.series_index ASC NULLS LAST, b.title COLLATE NOCASE ASC';
   else if (sort === 'progress') orderSql = 'ORDER BY IFNULL(ub.progress_percent, 0) DESC';
 
   const countSql = `
@@ -89,7 +91,7 @@ router.get('/api/books', (req, res) => {
     SELECT b.id, b.title, b.author, b.series, b.series_index, b.cover_path, b.cover_color,
            IFNULL(ub.status, 'unread') as status, ub.rating, IFNULL(ub.progress_percent, 0) as progress_percent, ub.last_location_cfi,
            b.added_at, ub.last_opened_at, b.file_size
-    FROM books b
+     FROM books b
     LEFT JOIN user_books ub ON b.id = ub.book_id AND ub.user_id = ?
     ${whereSql}
     ${orderSql}
@@ -127,9 +129,8 @@ router.get('/api/books', (req, res) => {
  * Multipart upload of an EPUB file.
  * Parses metadata + extracts cover, inserts DB row, returns the book object.
  */
-// Books are shared by everyone. Keep catalogue writes with the admins so a
-// regular reader cannot accidentally fill or alter the family library.
-router.post('/api/books', requireAdmin, upload.single('file'), async (req, res) => {
+// Books are shared by everyone.
+router.post('/api/books', upload.single('file'), async (req, res) => {
   let destPath = null;
   let coverPath = null;
   try {
@@ -142,7 +143,7 @@ router.post('/api/books', requireAdmin, upload.single('file'), async (req, res) 
     const filename = id + ext;
     destPath = path.join(BOOKS_DIR, filename);
 
-    // Verify, move, and extract metadata in a background worker
+    // Verify, move, hash, and extract metadata in a background worker
     let meta;
     try {
       meta = await new Promise((resolve, reject) => {
@@ -176,11 +177,24 @@ router.post('/api/books', requireAdmin, upload.single('file'), async (req, res) 
       coverPath = meta.coverPath;
     } catch (e) {
       if (e.validationError) {
-        // Equivalent to the outer try/catch for validation errors
         throw e; 
       } else {
-        // Unhandled worker error
         throw e;
+      }
+    }
+
+    // Check for duplicate uploads via off-thread computed SHA-256 hash
+    const fileHash = meta.file_hash;
+    if (fileHash) {
+      const existingBook = db.prepare('SELECT id, title FROM books WHERE file_hash = ?').get(fileHash);
+      if (existingBook) {
+        try { if (destPath && fs.existsSync(destPath)) fs.unlinkSync(destPath); } catch (e) {}
+        try { if (coverPath && fs.existsSync(path.join(COVERS_DIR, coverPath))) fs.unlinkSync(path.join(COVERS_DIR, coverPath)); } catch (e) {}
+        return res.status(409).json({
+          error: 'This book is already in the library',
+          book_id: existingBook.id,
+          title: existingBook.title
+        });
       }
     }
 
@@ -203,6 +217,7 @@ router.post('/api/books', requireAdmin, upload.single('file'), async (req, res) 
       filename,
       file_format: 'epub',
       file_size: fileSize,
+      file_hash: fileHash,
       cover_path: meta.coverPath || null,
       cover_color: coverColor,
       status: 'unread',
@@ -213,9 +228,9 @@ router.post('/api/books', requireAdmin, upload.single('file'), async (req, res) 
 
     db.prepare(`
       INSERT INTO books (id, title, author, series, series_index, filename, file_format,
-                         file_size, cover_path, cover_color)
+                         file_size, file_hash, cover_path, cover_color)
       VALUES (@id, @title, @author, @series, @series_index, @filename, @file_format,
-              @file_size, @cover_path, @cover_color)
+              @file_size, @file_hash, @cover_path, @cover_color)
     `).run(book);
 
     // Initial user_books record
@@ -270,7 +285,7 @@ router.get('/api/books/:id', validateUuidParam('id'), (req, res) => {
 
 /**
  * GET /api/books/:id/file
- * Streams the EPUB file.
+ * Streams the EPUB file with Cache-Control, Content-Length, and Range support.
  */
 router.get('/api/books/:id/file', validateUuidParam('id'), (req, res) => {
   const book = db.prepare('SELECT filename FROM books WHERE id = ?').get(req.params.id);
@@ -280,14 +295,52 @@ router.get('/api/books/:id/file', validateUuidParam('id'), (req, res) => {
   const filePath = path.join(BOOKS_DIR, book.filename);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
 
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    return res.status(500).json({ error: 'Could not access book file' });
+  }
+
+  const totalSize = stat.size;
   res.setHeader('Content-Type', 'application/epub+zip');
   res.setHeader('Content-Disposition', `inline; filename="${book.filename}"`);
-  const stream = fs.createReadStream(filePath);
-  stream.on('error', () => {
-    if (!res.headersSent) res.status(500).json({ error: 'Could not read book file' });
-    else res.destroy();
-  });
-  stream.pipe(res);
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  const range = req.headers.range;
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+
+    if (isNaN(start) || isNaN(end) || start < 0 || start > end || start >= totalSize) {
+      res.setHeader('Content-Range', `bytes */${totalSize}`);
+      return res.status(416).json({ error: 'Requested range not satisfiable' });
+    }
+
+    const clampedEnd = Math.min(end, totalSize - 1);
+    const chunkSize = (clampedEnd - start) + 1;
+
+    res.status(206);
+    res.setHeader('Content-Range', `bytes ${start}-${clampedEnd}/${totalSize}`);
+    res.setHeader('Content-Length', chunkSize);
+
+    const stream = fs.createReadStream(filePath, { start, end: clampedEnd });
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).json({ error: 'Could not read book file' });
+      else res.destroy();
+    });
+    stream.pipe(res);
+  } else {
+    res.setHeader('Content-Length', totalSize);
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).json({ error: 'Could not read book file' });
+      else res.destroy();
+    });
+    stream.pipe(res);
+  }
 });
 
 /**

@@ -34,7 +34,7 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  keyGenerator: (req) => req.ip,
+  keyGenerator: (req) => req.ip + ':' + (req.body.username || ''),
 });
 
 /**
@@ -44,16 +44,16 @@ const loginLimiter = rateLimit({
  */
 router.post('/api/login', loginLimiter, async (req, res) => {
   try {
-    const { username, passphrase } = req.body;
-
-    if (!username || typeof username !== 'string' || username.length > 255) {
+    const { username, passphrase } = req.body || {};
+    const trimmedUsername = typeof username === 'string' ? username.trim() : '';
+    if (!trimmedUsername || trimmedUsername.length > 255) {
       return res.status(400).json({ error: 'A valid username is required' });
     }
     if (!passphrase || typeof passphrase !== 'string' || passphrase.length > 1024) {
       return res.status(400).json({ error: 'A valid passphrase is required' });
     }
 
-    const user = db.prepare("SELECT id, passphrase_hash FROM users WHERE username = ?").get(username);
+    const user = db.prepare("SELECT id, passphrase_hash FROM users WHERE lower(username) = lower(?)").get(trimmedUsername);
 
     if (!user) {
       return res.status(401).json({ error: 'Incorrect username or passphrase' });

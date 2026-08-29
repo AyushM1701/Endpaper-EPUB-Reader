@@ -1,0 +1,10 @@
+node_modules
+data
+tmp
+output
+.git
+.gitignore
+README.md
+DEPLOY.md
+audit_report.md
+context.md

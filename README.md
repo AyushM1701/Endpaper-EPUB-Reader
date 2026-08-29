@@ -6,8 +6,8 @@ Endpaper is a self-hosted EPUB reader for a trusted household or group of friend
 
 Endpaper has two roles:
 
-- **Reader** - Can browse and read the shared library. Their reading activity and annotations are private to their account.
-- **Admin** - Has all reader permissions and can manage users, upload or remove shared books, edit shared book metadata, organize collections, and export or import backups.
+- **Reader** - Can browse, read, and contribute new books to the shared library. Their reading activity and annotations are private to their account.
+- **Admin** - Has all reader permissions and can manage users, remove shared books, edit shared book metadata, organize collections, and export or import backups.
 
 Use an admin account for yourself and add friends and family as readers from **Admin Settings** after the first sign-in. Grant admin access only to people who should be able to change the library for everyone.
 
@@ -24,7 +24,7 @@ Use an admin account for yourself and add friends and family as readers from **A
 ## Reliability and security
 
 - EPUB uploads and backup imports are validated, size-limited, and restricted to safe library file paths.
-- Only admins can change shared catalogue data: books, book metadata, collections, collection memberships, users, exports, and imports.
+- Only admins can change shared catalogue structure and management: removing books, editing shared book metadata, collections, collection memberships, users, exports, and imports.
 - Authentication uses high-entropy session tokens stored by the server in secure HTTP-only cookies. There is no `SESSION_SECRET` environment variable to configure.
 - Backups never include password hashes, admin flags, or login sessions. On import, shared books and collections are restored; personal reading data is restored only for existing local users with an exact matching username. Imports never create accounts or change roles, and unmatched personal data is skipped.
 
@@ -87,4 +87,86 @@ Set `ENDPAPER_READER_USERNAME` and `ENDPAPER_READER_PASSPHRASE` as well to check
 
 ## Going live
 
-For Docker/Caddy deployment instructions, see [DEPLOY.md](DEPLOY.md). For a private home-server setup, a mesh VPN such as [Tailscale](https://tailscale.com/) is a convenient way to give family access without exposing Endpaper publicly.
+### Option 1: Always Free Google Cloud VM + PM2 (Recommended — No Docker Needed)
+
+Because Endpaper is a lightweight Node.js + SQLite application, you do **not** need Docker. Running Endpaper natively with **PM2** on Google Cloud's Always Free Linux VM (`e2-micro` with 30GB disk) gives you maximum performance with minimal RAM usage (~50MB RAM vs Docker overhead).
+
+1. **Create the VM Instance:**
+   - Go to Google Cloud Console → **Compute Engine** → **VM instances**.
+   - Click **Create Instance** with machine type `e2-micro` in an Always Free region (`us-west1`, `us-central1`, or `us-east1`).
+   - Set Boot Disk to **Ubuntu 22.04 / 24.04 LTS** (up to 30GB Standard Persistent Disk).
+   - Under Firewall, check **Allow HTTP traffic** and **Allow HTTPS traffic**.
+2. **Connect via SSH:**
+   - In Google Cloud Console, click the **SSH** button next to your VM instance to open the terminal (or use `gcloud compute ssh <instance-name>`).
+3. **Install Node.js & PM2:**
+   ```bash
+   sudo apt update && sudo apt install -y git curl
+   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+   sudo apt install -y nodejs
+   sudo npm install -g pm2
+   ```
+4. **Deploy Endpaper:**
+   ```bash
+   git clone <your-repo-url> /opt/endpaper
+   cd /opt/endpaper/server
+   npm install
+
+   # Create your initial admin account
+   node src/lib/passphrase.js --set "your-secure-passphrase" admin
+
+   # Start Endpaper with PM2 daemon process manager
+   pm2 start src/index.js --name "endpaper"
+   pm2 save
+   pm2 startup
+   ```
+5. **Configure HTTPS Reverse Proxy (Caddy):**
+   - Point your domain or free dynamic DNS hostname (e.g. from [DuckDNS](https://www.duckdns.org/)) to your VM's External IP address.
+   - Install Caddy:
+     ```bash
+     sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+     sudo apt update && sudo apt install -y caddy
+     ```
+   - Edit `/etc/caddy/Caddyfile`:
+     ```caddyfile
+     books.yourdomain.com {
+         reverse_proxy 127.0.0.1:3001
+     }
+     ```
+   - Apply configuration:
+     ```bash
+     sudo systemctl restart caddy
+     ```
+
+### Option 2: Docker + Caddy
+
+If you prefer containerized deployment, see the Docker guide in [DEPLOY.md](DEPLOY.md).
+
+### Option 3: Private Mesh Network (Tailscale)
+
+If you prefer running at home on a Raspberry Pi or local server without exposing ports to the public internet:
+1. Install [Tailscale](https://tailscale.com/) on the host machine and your mobile devices / laptops.
+2. Run Endpaper with `pm2` or `npm run start` on the host.
+3. Access Endpaper securely from anywhere via the host's private Tailscale IP (e.g. `http://100.x.y.z:3001`).
+
+---
+
+## Updating an already live instance (through PM2)
+
+To update your live server to the latest version of Endpaper:
+
+```bash
+# 1. Navigate to project root and pull latest changes
+cd /opt/endpaper
+git pull origin main
+
+# 2. Install any dependency updates
+cd server
+npm install --production
+
+# 3. Restart the application seamlessly
+pm2 restart endpaper
+```
+
+> **Note:** All your books (`data/books/`), covers (`data/covers/`), and SQLite database (`data/endpaper.db`) remain completely intact in the persistent `data/` directory. Database migrations execute automatically when the server boots.

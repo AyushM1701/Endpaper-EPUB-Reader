@@ -82,29 +82,63 @@ router.get('/api/stats', (req, res) => {
     SELECT COUNT(*) as total FROM user_books WHERE progress_percent >= 95 AND user_id = ?
   `).get(req.user_id);
 
-  // Reading streak: calculate distinct local calendar days in one query. The
-  // current day only counts if there has actually been a session today.
-  const readingDays = db.prepare(`
-    SELECT DISTINCT date(started_at, 'localtime') AS day
-    FROM reading_sessions
-    WHERE started_at >= date('now', 'localtime', '-365 days') AND user_id = ?
-    ORDER BY day DESC
-  `).all(req.user_id).map(row => row.day);
-  let streak = 0;
-  const cursor = new Date();
-  cursor.setHours(0, 0, 0, 0);
-  const dayKey = (date) => {
-    const offset = date.getTimezoneOffset() * 60_000;
-    return new Date(date.getTime() - offset).toISOString().slice(0, 10);
+  // Timezone resolution: validate client timezone
+  let timeZone = 'UTC';
+  if (typeof req.query.tz === 'string' && req.query.tz.trim()) {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: req.query.tz.trim() });
+      timeZone = req.query.tz.trim();
+    } catch (_) {
+      timeZone = 'UTC';
+    }
+  }
+
+  // Helper: get local date string YYYY-MM-DD in client timezone
+  const getLocalDateKey = (dateObj) => {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(dateObj);
+    } catch (_) {
+      return dateObj.toISOString().slice(0, 10);
+    }
   };
-  const todayKey = dayKey(cursor);
-  const expected = readingDays.includes(todayKey)
-    ? cursor
-    : new Date(cursor.getTime() - 24 * 60 * 60 * 1000);
-  for (const day of readingDays) {
-    if (day !== dayKey(expected)) break;
-    streak++;
-    expected.setDate(expected.getDate() - 1);
+
+  // Reading streak: calculate distinct reader local calendar days.
+  const cutoff = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
+  const sessionRows = db.prepare(`
+    SELECT started_at FROM reading_sessions
+    WHERE started_at >= ? AND user_id = ?
+    ORDER BY started_at DESC
+  `).all(cutoff, req.user_id);
+
+  const daySet = new Set();
+  for (const row of sessionRows) {
+    if (row.started_at) {
+      const d = new Date(row.started_at);
+      if (!isNaN(d.getTime())) {
+        daySet.add(getLocalDateKey(d));
+      }
+    }
+  }
+
+  let streak = 0;
+  const now = new Date();
+  const todayKey = getLocalDateKey(now);
+
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const baseUtcTime = Date.UTC(y, m - 1, d);
+
+  let expectedDate = daySet.has(todayKey)
+    ? baseUtcTime
+    : baseUtcTime - 86400000;
+
+  while (true) {
+    const key = new Date(expectedDate).toISOString().slice(0, 10);
+    if (daySet.has(key)) {
+      streak++;
+      expectedDate -= 86400000;
+    } else {
+      break;
+    }
   }
 
   res.json({

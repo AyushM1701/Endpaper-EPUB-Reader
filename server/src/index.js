@@ -1,6 +1,9 @@
 'use strict';
 
 const express = require('express');
+const pino = require('pino');
+const pinoHttp = require('pino-http');
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
@@ -40,12 +43,17 @@ const settingsRoutes = require('./routes/settings');
 const usersRoutes = require('./routes/users');
 
 const app = express();
+const trustProxyVal = process.env.TRUST_PROXY;
+if (trustProxyVal !== undefined) {
+  app.set('trust proxy', isNaN(Number(trustProxyVal)) ? (trustProxyVal === 'true' ? true : (trustProxyVal === 'false' ? false : trustProxyVal)) : Number(trustProxyVal));
+} else {
+  app.set('trust proxy', 1);
+}
 const PORT = process.env.PORT || 3001;
 const DATA_DIR = path.resolve(__dirname, '../../data');
 const MAX_IMPORT_BYTES = Math.min(Math.max(Number(process.env.IMPORT_MAX_BYTES) || 500 * 1024 * 1024, 1), 2 * 1024 * 1024 * 1024);
 const MAX_IMPORT_ENTRIES = 5000;
 
-if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
 // ---------- Middleware ----------
@@ -53,16 +61,10 @@ app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
 // Request logging
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    if (!req.path.startsWith('/healthz')) {
-      console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
-    }
-  });
-  next();
-});
+app.use(pinoHttp({ 
+  logger, 
+  autoLogging: { ignore: req => req.url.startsWith('/healthz') } 
+}));
 
 // Security headers
 app.use((req, res, next) => {
@@ -98,7 +100,8 @@ app.use(settingsRoutes);
 app.use(usersRoutes);
 
 // ---------- Export / Import endpoints ----------
-const AdmZip = require('adm-zip');
+const archiver = require('archiver');
+const createZipArchive = (opts) => typeof archiver === 'function' ? archiver('zip', opts) : new archiver.ZipArchive(opts);
 
 function importError(message) {
   const error = new Error(message);
@@ -321,35 +324,6 @@ function validateBackupDump(dump) {
   return { users, userBooks, books, bookmarks, highlights, sessions, collections, bookCollections, settings };
 }
 
-function safeArchiveFiles(zip) {
-  const entries = zip.getEntries();
-  if (entries.length > MAX_IMPORT_ENTRIES) throw importError('Backup contains too many files');
-  let totalSize = 0;
-  const files = [];
-  const seenEntryNames = new Set();
-  let databaseEntries = 0;
-  for (const entry of entries) {
-    if (entry.isDirectory) continue;
-    if (seenEntryNames.has(entry.entryName)) throw importError('Backup contains duplicate file entries');
-    seenEntryNames.add(entry.entryName);
-    const size = Number(entry.header && entry.header.size);
-    if (!Number.isSafeInteger(size) || size < 0) throw importError('Backup contains an invalid file entry');
-    totalSize += size;
-    if (totalSize > MAX_IMPORT_BYTES) throw importError('Backup is too large to import');
-    if (entry.entryName === 'database.json') {
-      databaseEntries++;
-      continue;
-    }
-    const bookMatch = /^books\/([0-9a-f-]+\.epub)$/i.exec(entry.entryName);
-    const coverMatch = /^covers\/([0-9a-f-]+\.(?:jpe?g|png|gif|webp))$/i.exec(entry.entryName);
-    if (bookMatch && isBookFilename(bookMatch[1])) files.push({ entry, directory: 'books', filename: bookMatch[1], size });
-    else if (coverMatch && isCoverFilename(coverMatch[1])) files.push({ entry, directory: 'covers', filename: coverMatch[1], size });
-    else throw importError('Backup contains an unsupported file');
-  }
-  if (databaseEntries !== 1) throw importError('Backup must contain exactly one database.json');
-  return files;
-}
-
 function isRegularFile(filePath) {
   try {
     return fs.statSync(filePath).isFile();
@@ -389,34 +363,14 @@ function validateArchiveAssets(files, backup, booksDir, coversDir) {
   }
 }
 
-function restoreArchiveFiles(files, booksDir, coversDir) {
-  let restoredFiles = 0;
-  for (const file of files) {
-    const destination = path.join(file.directory === 'books' ? booksDir : coversDir, file.filename);
-    if (fs.existsSync(destination)) {
-      if (!isRegularFile(destination)) throw importError('A local library asset is not a regular file');
-      continue;
-    }
-    try {
-      fs.writeFileSync(destination, file.entry.getData(), { flag: 'wx' });
-      restoredFiles++;
-    } catch (err) {
-      // A concurrent import may have installed the same immutable UUID asset.
-      if (err && err.code === 'EEXIST' && isRegularFile(destination)) continue;
-      throw err;
-    }
-  }
-  return restoredFiles;
-}
-
-function addLibraryAsset(zip, assetDir, filename, seenAssets) {
+function addLibraryAsset(archive, assetDir, filename, seenAssets) {
   const assetPath = path.join(DATA_DIR, assetDir, filename);
   if (!isRegularFile(assetPath)) {
     throw new Error(`Cannot export: library asset ${assetDir}/${filename} is missing`);
   }
   const assetKey = `${assetDir}/${filename}`;
   if (!seenAssets.has(assetKey)) {
-    zip.addLocalFile(assetPath, assetDir);
+    archive.file(assetPath, { name: `${assetDir}/${filename}` });
     seenAssets.add(assetKey);
   }
 }
@@ -580,18 +534,54 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
 
 /**
  * POST /api/export
- * Zips the shared library plus user data. User records intentionally contain
+ * Streams a zip of the shared library plus user data. User records intentionally contain
  * identities only, so passphrase hashes, roles, and auth sessions never leave
  * this server.
  */
 app.post('/api/export', requireAdmin, (req, res) => {
   try {
     const books = db.prepare('SELECT * FROM books').all();
-    const zip = new AdmZip();
+
+    // Pre-flight validation: ensure all referenced book and cover files exist before streaming
+    for (const book of books) {
+      const bookPath = path.join(DATA_DIR, 'books', book.filename);
+      if (!isRegularFile(bookPath)) {
+        return res.status(500).json({
+          error: `Cannot export: book file for "${book.title || book.id}" (${book.filename}) is missing on disk`
+        });
+      }
+      if (book.cover_path) {
+        const coverPath = path.join(DATA_DIR, 'covers', book.cover_path);
+        if (!isRegularFile(coverPath)) {
+          return res.status(500).json({
+            error: `Cannot export: cover file for "${book.title || book.id}" (${book.cover_path}) is missing on disk`
+          });
+        }
+      }
+    }
+
+    const filename = `endpaper-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const archive = createZipArchive({ zlib: { level: 9 } });
+
+    archive.on('error', (err) => {
+      logger.error('Export archive error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Export failed' });
+      } else {
+        res.destroy(err);
+      }
+    });
+
+    archive.pipe(res);
+
     const exportedAssets = new Set();
     for (const book of books) {
-      addLibraryAsset(zip, 'books', book.filename, exportedAssets);
-      if (book.cover_path) addLibraryAsset(zip, 'covers', book.cover_path, exportedAssets);
+      addLibraryAsset(archive, 'books', book.filename, exportedAssets);
+      if (book.cover_path) addLibraryAsset(archive, 'covers', book.cover_path, exportedAssets);
     }
 
     const dump = {
@@ -612,18 +602,15 @@ app.post('/api/export', requireAdmin, (req, res) => {
         WHERE key NOT IN ('passphrase_hash', 'session_token')
       `).all(),
     };
-    zip.addFile('database.json', Buffer.from(JSON.stringify(dump, null, 2), 'utf8'));
-
-    const buffer = zip.toBuffer();
-    const filename = `endpaper-backup-${new Date().toISOString().slice(0, 10)}.zip`;
-
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', buffer.length);
-    res.send(buffer);
+    archive.append(JSON.stringify(dump, null, 2), { name: 'database.json' });
+    archive.finalize();
   } catch (err) {
-    console.error('Export error:', err);
-    res.status(500).json({ error: 'Export failed' });
+    logger.error('Export error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Export failed' });
+    } else {
+      res.destroy(err);
+    }
   }
 });
 
@@ -633,6 +620,7 @@ app.post('/api/export', requireAdmin, (req, res) => {
  * state is restored only for matching, pre-existing local usernames.
  */
 const multer = require('multer');
+const yauzl = require('yauzl');
 const importUpload = multer({
   dest: path.join(DATA_DIR, 'tmp'),
   limits: { fileSize: MAX_IMPORT_BYTES, files: 1, fields: 5 },
@@ -642,45 +630,107 @@ const importUpload = multer({
   },
 });
 
-app.post('/api/import', requireAdmin, importUpload.single('file'), (req, res) => {
+function openZip(zipPath) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+      if (err) return reject(err);
+      const entries = new Map();
+      zipfile.on('entry', entry => entries.set(entry.fileName, entry));
+      zipfile.on('end', () => resolve({ zipfile, entries }));
+      zipfile.on('error', reject);
+    });
+  });
+}
+
+function readEntry(zipfile, entry, maxBytes) {
+  return new Promise((resolve, reject) => {
+    if (entry.uncompressedSize > maxBytes) return reject(new Error('Entry too large'));
+    zipfile.openReadStream(entry, (err, readStream) => {
+      if (err) return reject(err);
+      const chunks = [];
+      readStream.on('data', chunk => chunks.push(chunk));
+      readStream.on('error', reject);
+      readStream.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+  });
+}
+
+app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, res) => {
+  let zipfile = null;
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const zip = new AdmZip(req.file.path);
     const BOOKS_DIR = path.join(DATA_DIR, 'books');
     const COVERS_DIR = path.join(DATA_DIR, 'covers');
-    const files = safeArchiveFiles(zip);
-
-    const dbEntry = zip.getEntry('database.json');
+    
+    const zipData = await openZip(req.file.path);
+    zipfile = zipData.zipfile;
+    const entries = zipData.entries;
+    
+    if (entries.size > MAX_IMPORT_ENTRIES) throw importError('Backup contains too many files');
+    
+    const dbEntry = entries.get('database.json');
     if (!dbEntry) throw importError('Backup is missing database.json');
-    const databaseSize = Number(dbEntry.header && dbEntry.header.size);
-    if (!Number.isSafeInteger(databaseSize) || databaseSize > 10 * 1024 * 1024) throw importError('Backup database is too large');
+    
+    const dbData = await readEntry(zipfile, dbEntry, 10 * 1024 * 1024);
     let dump;
     try {
-      dump = validateBackupDump(JSON.parse(dbEntry.getData().toString('utf8')));
+      dump = validateBackupDump(JSON.parse(dbData.toString('utf8')));
     } catch (err) {
       if (err.status) throw err;
       throw importError('Backup database is not valid JSON');
     }
 
+    // Prepare files list
+    const files = [];
+    let totalSize = 0;
+    for (const [name, entry] of entries.entries()) {
+      if (entry.fileName === 'database.json' || entry.fileName.endsWith('/')) continue;
+      
+      const size = entry.uncompressedSize;
+      totalSize += size;
+      if (totalSize > MAX_IMPORT_BYTES) throw importError('Backup is too large to import');
+      
+      const bookMatch = /^books\/([0-9a-f-]+\.epub)$/i.exec(entry.fileName);
+      const coverMatch = /^covers\/([0-9a-f-]+\.(?:jpe?g|png|gif|webp))$/i.exec(entry.fileName);
+      if (bookMatch && isBookFilename(bookMatch[1])) files.push({ entry, directory: 'books', filename: bookMatch[1], size });
+      else if (coverMatch && isCoverFilename(coverMatch[1])) files.push({ entry, directory: 'covers', filename: coverMatch[1], size });
+      else throw importError('Backup contains an unsupported file');
+    }
+
     validateArchiveAssets(files, dump, BOOKS_DIR, COVERS_DIR);
     const { userIds, unmatchedUsers } = createUserIdMap(dump.users);
 
-    // Asset files have UUID names and are never overwritten. Restore them
-    // before committing metadata so a write failure cannot leave new records
-    // that point at missing files. A retry after an interrupted import is safe.
-    const restoredFiles = restoreArchiveFiles(files, BOOKS_DIR, COVERS_DIR);
-    const results = importBackupData(dump, userIds, unmatchedUsers);
+    // Restore files
+    let restoredFiles = 0;
+    for (const file of files) {
+      const destination = path.join(file.directory === 'books' ? BOOKS_DIR : COVERS_DIR, file.filename);
+      if (fs.existsSync(destination)) {
+        if (!isRegularFile(destination)) throw importError('A local library asset is not a regular file');
+        continue;
+      }
+      try {
+        const fileData = await readEntry(zipfile, file.entry, MAX_IMPORT_BYTES);
+        fs.writeFileSync(destination, fileData, { flag: 'wx' });
+        restoredFiles++;
+      } catch (err) {
+        if (err && err.code === 'EEXIST' && isRegularFile(destination)) continue;
+        throw err;
+      }
+    }
 
-    // Clean up tmp file
+    const results = importBackupData(dump, userIds, unmatchedUsers);
+    
+    zipfile.close();
     try { fs.unlinkSync(req.file.path); } catch (e) {}
 
     res.json({ ok: true, restored_files: restoredFiles, ...results });
   } catch (err) {
+    if (zipfile) zipfile.close();
     if (req.file && fs.existsSync(req.file.path)) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
     }
-    console.error('Import error:', err);
+    logger.error('Import error:', err);
     res.status(err.status || 500).json({ error: err.status ? err.message : 'Import failed' });
   }
 });
@@ -689,7 +739,7 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), (req, res) =>
 const PUBLIC_DIR = path.resolve(__dirname, '../../public');
 app.use(express.static(PUBLIC_DIR));
 
-// SPA fallback: serve index.html for any non-API route
+// SPA fallback: serve index.html for any non-API route (Express 4 syntax; change to '/*splat' if upgrading to Express 5)
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'Not found' });
@@ -700,7 +750,7 @@ app.get('*', (req, res) => {
 // Keep errors from middleware (notably Multer) in the same JSON shape as the
 // rest of the API instead of returning Express's default HTML error page.
 app.use((err, req, res, next) => {
-  console.error('Request error:', err);
+  logger.error('Request error:', err);
   if (res.headersSent) return next(err);
   const isUploadError = err instanceof multer.MulterError;
   const status = err.status || (isUploadError ? 400 : 500);
@@ -712,25 +762,25 @@ app.use((err, req, res, next) => {
 
 // ---------- Start ----------
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Endpaper server listening on http://0.0.0.0:${PORT}`);
+  logger.info(`Endpaper server listening on http://0.0.0.0:${PORT}`);
 });
 
 // ---------- Graceful shutdown ----------
 function gracefulShutdown(signal) {
-  console.log(`\\n${signal} received — shutting down gracefully…`);
+  logger.info(`\\n${signal} received — shutting down gracefully…`);
   server.close(() => {
     try {
       db.pragma('wal_checkpoint(TRUNCATE)');
       db.close();
-      console.log('Database closed and WAL checkpointed.');
+      logger.info('Database closed and WAL checkpointed.');
     } catch (e) {
-      console.error('Error closing database:', e);
+      logger.error('Error closing database:', e);
     }
     process.exit(0);
   });
   // Force exit after 10s if connections don't drain
   setTimeout(() => {
-    console.error('Forcing shutdown after timeout.');
+    logger.error('Forcing shutdown after timeout.');
     process.exit(1);
   }, 10000);
 }

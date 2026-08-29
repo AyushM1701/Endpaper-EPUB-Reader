@@ -77,7 +77,14 @@ router.patch('/api/collections/:id', validateUuidParam('id'), requireAdmin, (req
 
   const duplicate = db.prepare('SELECT id FROM collections WHERE lower(name) = lower(?) AND id != ?').get(name, req.params.id);
   if (duplicate) return res.status(409).json({ error: 'A collection with that name already exists' });
-  db.prepare('UPDATE collections SET name = ? WHERE id = ?').run(name, req.params.id);
+  try {
+    db.prepare('UPDATE collections SET name = ? WHERE id = ?').run(name, req.params.id);
+  } catch (err) {
+    if (err.message && err.message.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'A collection with that name already exists' });
+    }
+    throw err;
+  }
   res.json(db.prepare('SELECT * FROM collections WHERE id = ?').get(req.params.id));
 });
 
