@@ -2513,6 +2513,15 @@ function syncReaderPalette(){
   if (app) app.style.setProperty('--reader-page-bg', readerTheme.body);
   const viewerWrap = document.getElementById('viewer-wrap');
   if (viewerWrap) viewerWrap.style.backgroundColor = readerTheme.body;
+  const readerView = document.getElementById('reader-view');
+  if (readerView) readerView.style.backgroundColor = readerTheme.body;
+
+  const isReaderActive = document.body.classList.contains('reader-active');
+  const shellColor = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7';
+  const effectiveBg = isReaderActive ? readerTheme.body : shellColor;
+  
+  document.documentElement.style.backgroundColor = effectiveBg;
+  document.body.style.backgroundColor = effectiveBg;
 
   // Track nav zone width so click zones never overlap rendered text
   const marginRaw = parseInt(MARGIN_PADDING[settings.marginIdx], 10) || 10;
@@ -2525,8 +2534,7 @@ function syncReaderPalette(){
   // areas do not appear as contrasting grey bands.
   const themeMeta = document.querySelector('meta[name="theme-color"]');
   if (themeMeta) {
-    const shellColor = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7';
-    themeMeta.content = document.body.classList.contains('reader-active') ? readerTheme.body : shellColor;
+    themeMeta.content = effectiveBg;
   }
 }
 

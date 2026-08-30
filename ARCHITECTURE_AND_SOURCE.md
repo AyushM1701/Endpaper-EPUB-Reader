@@ -1622,7 +1622,7 @@ self.addEventListener('fetch', (e) => {
 
 ## File: `public/app.css`
 
-*Relative Path: `public/app.css` | Size: 48.9 KB | Total Lines: 1610*
+*Relative Path: `public/app.css` | Size: 49.0 KB | Total Lines: 1612*
 
 ````css
 :root{
@@ -1700,8 +1700,7 @@ nav,
   --reader-page-bg: var(--paper);
   height:100vh; height:100dvh; min-height:0; width:100%; max-width:100vw;
   display:flex; flex-direction:column; overflow:hidden;
-  padding-top:env(safe-area-inset-top);
-  padding-bottom:env(safe-area-inset-bottom);
+  background: var(--paper);
 }
 body.reader-active,
 body.reader-active #app,
@@ -1710,25 +1709,23 @@ body.reader-active #viewer-wrap,
 body.reader-active #viewer{ background:var(--reader-page-bg); }
 #app:fullscreen, #app:-webkit-full-screen{
   width:100vw; max-width:none; height:100vh; height:100dvh; min-height:100%;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
   background:var(--reader-page-bg);
 }
 
 /* ---------- Top bar ---------- */
 #topbar{
   display:flex; align-items:center; justify-content:space-between;
-  gap:12px; min-width:0; padding: 14px 22px;
+  gap:12px; min-width:0; 
+  padding: calc(14px + env(safe-area-inset-top)) 22px 14px;
   border-bottom: 1px solid var(--line);
   flex-shrink:0;
   z-index: 20;
   background: var(--paper);
-  max-height: 90px;
   transition: max-height .25s ease, padding .25s ease, opacity .2s ease, border-color .2s ease;
 }
 #app.chrome-hidden #topbar{
   flex:0 0 0; height:0; min-height:0; max-height:0;
-  padding-top:0; padding-bottom:0; opacity:0; border-width:0; pointer-events:none;
+  padding:0; opacity:0; border-width:0; pointer-events:none;
 }
 #brand{
   background: none;
@@ -1945,7 +1942,12 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
 #reader-view.active{ display:flex; }
 #viewer-wrap{
   flex:1; position:relative; overflow:hidden; min-height:0;
-  background: var(--paper);
+  background: var(--reader-page-bg, var(--paper));
+  padding-bottom: env(safe-area-inset-bottom);
+}
+#app.chrome-hidden #viewer-wrap{
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 #viewer{
   width:100%; height:100%;
@@ -2757,8 +2759,8 @@ html.dark-shell .nav-zone{ box-shadow:0 5px 18px rgba(0,0,0,.34); }
   #shelf{ grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap:20px 14px; }
   .spine-title{ font-size:11.5px; -webkit-line-clamp:3; }
   .spine-author{ font-size:9.5px; }
-  #shelf-view{ padding: 24px 16px calc(60px + env(safe-area-inset-bottom)); }
-  #topbar{ padding: 8px 10px; }
+  #shelf-view{ padding: 20px 16px calc(48px + env(safe-area-inset-bottom)); }
+  #topbar{ padding: calc(8px + env(safe-area-inset-top)) 10px 8px; }
   .modal-card{ padding: 20px; }
   #topbar-actions { gap: 3px; }
   .icon-btn { width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
@@ -3240,7 +3242,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ## File: `public/app.js`
 
-*Relative Path: `public/app.js` | Size: 162.2 KB | Total Lines: 4300*
+*Relative Path: `public/app.js` | Size: 162.5 KB | Total Lines: 4308*
 
 ````javascript
 /* ================================================================
@@ -5758,6 +5760,15 @@ function syncReaderPalette(){
   if (app) app.style.setProperty('--reader-page-bg', readerTheme.body);
   const viewerWrap = document.getElementById('viewer-wrap');
   if (viewerWrap) viewerWrap.style.backgroundColor = readerTheme.body;
+  const readerView = document.getElementById('reader-view');
+  if (readerView) readerView.style.backgroundColor = readerTheme.body;
+
+  const isReaderActive = document.body.classList.contains('reader-active');
+  const shellColor = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7';
+  const effectiveBg = isReaderActive ? readerTheme.body : shellColor;
+  
+  document.documentElement.style.backgroundColor = effectiveBg;
+  document.body.style.backgroundColor = effectiveBg;
 
   // Track nav zone width so click zones never overlap rendered text
   const marginRaw = parseInt(MARGIN_PADDING[settings.marginIdx], 10) || 10;
@@ -5770,8 +5781,7 @@ function syncReaderPalette(){
   // areas do not appear as contrasting grey bands.
   const themeMeta = document.querySelector('meta[name="theme-color"]');
   if (themeMeta) {
-    const shellColor = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7';
-    themeMeta.content = document.body.classList.contains('reader-active') ? readerTheme.body : shellColor;
+    themeMeta.content = effectiveBg;
   }
 }
 
