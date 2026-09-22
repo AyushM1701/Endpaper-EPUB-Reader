@@ -15,15 +15,42 @@ const parser = new XMLParser({
 
 const MAX_XML_BYTES = 1 * 1024 * 1024;
 const MAX_COVER_BYTES = 20 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_ARCHIVE_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;
+const MAX_COMPRESSION_RATIO = 200;
+const MAX_COVER_PIXELS = 40 * 1024 * 1024;
 
 function openZip(epubPath) {
   return new Promise((resolve, reject) => {
-    yauzl.open(epubPath, { lazyEntries: false, autoClose: false }, (err, zipfile) => {
+    yauzl.open(epubPath, { lazyEntries: true, autoClose: false, validateEntrySizes: true }, (err, zipfile) => {
       if (err) return reject(err);
       const entries = new Map();
-      zipfile.on('entry', entry => entries.set(entry.fileName.toLowerCase(), entry));
-      zipfile.on('end', () => resolve({ zipfile, entries }));
-      zipfile.on('error', reject);
+      let entryCount = 0;
+      let totalBytes = 0;
+      let finished = false;
+      const fail = error => {
+        if (finished) return;
+        finished = true;
+        try { zipfile.close(); } catch (_) {}
+        reject(error);
+      };
+      zipfile.on('entry', entry => {
+        entryCount++;
+        totalBytes += entry.uncompressedSize || 0;
+        const compressed = Math.max(1, entry.compressedSize || 0);
+        if (entryCount > MAX_ARCHIVE_ENTRIES) return fail(new Error('EPUB contains too many files'));
+        if (totalBytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES) return fail(new Error('EPUB expands to too much data'));
+        if ((entry.uncompressedSize || 0) / compressed > MAX_COMPRESSION_RATIO) return fail(new Error('EPUB entry compression ratio is unsafe'));
+        entries.set(entry.fileName.toLowerCase(), entry);
+        zipfile.readEntry();
+      });
+      zipfile.on('end', () => {
+        if (finished) return;
+        finished = true;
+        resolve({ zipfile, entries });
+      });
+      zipfile.on('error', fail);
+      zipfile.readEntry();
     });
   });
 }
@@ -58,7 +85,18 @@ async function validateEpub(epubPath) {
       throw new Error('The uploaded file is not a valid EPUB');
     }
     
-    await readEntry(zipfile, containerEntry, MAX_XML_BYTES); // Validate size
+    const containerData = await readEntry(zipfile, containerEntry, MAX_XML_BYTES);
+    const container = parser.parse(containerData.toString('utf8'));
+    const rootfile = container?.container?.rootfiles?.rootfile;
+    const root = Array.isArray(rootfile) ? rootfile[0] : rootfile;
+    const opfPath = root && root['@_full-path'];
+    if (!opfPath || !entries.has(String(opfPath).toLowerCase())) throw new Error('The EPUB package document is missing');
+    const opfData = await readEntry(zipfile, entries.get(String(opfPath).toLowerCase()), MAX_XML_BYTES);
+    const opf = parser.parse(opfData.toString('utf8'));
+    const pkg = opf.package || opf['opf:package'];
+    const manifestItems = pkg?.manifest?.item;
+    const spineItems = pkg?.spine?.itemref;
+    if (!pkg || !manifestItems || !spineItems) throw new Error('The EPUB package has no readable manifest or spine');
   } finally {
     zipfile.close();
   }
@@ -66,7 +104,7 @@ async function validateEpub(epubPath) {
 
 async function extractMeta(epubPath, coverId, coversDir) {
   const { zipfile, entries } = await openZip(epubPath);
-  const result = { title: '', author: '', series: null, seriesIndex: null, coverPath: null };
+  const result = { title: '', author: '', series: null, seriesIndex: null, description: null, isbn: null, tags: null, coverPath: null };
 
   try {
     const containerEntry = entries.get('meta-inf/container.xml');
@@ -108,11 +146,24 @@ async function extractMeta(epubPath, coverId, coversDir) {
         result.author = typeof dcCreator === 'string' ? dcCreator : (dcCreator['#text'] || '');
       }
     }
+    const description = metadata['dc:description'];
+    if (description) result.description = typeof description === 'string' ? description : (description['#text'] || null);
+    const subjects = metadata['dc:subject'];
+    if (subjects) {
+      const subjectList = Array.isArray(subjects) ? subjects : [subjects];
+      result.tags = subjectList.map(subject => typeof subject === 'string' ? subject : subject['#text']).filter(Boolean).join(', ') || null;
+    }
+    const identifiers = Array.isArray(metadata['dc:identifier']) ? metadata['dc:identifier'] : (metadata['dc:identifier'] ? [metadata['dc:identifier']] : []);
+    const isbn = identifiers.map(identifier => typeof identifier === 'string' ? identifier : identifier['#text']).find(value => /(?:97[89])?\d{9}[\dX]/i.test(String(value || '').replace(/[-\s]/g, '')));
+    result.isbn = isbn ? String(isbn).trim() : null;
 
     const metas = Array.isArray(metadata.meta) ? metadata.meta : (metadata.meta ? [metadata.meta] : []);
     for (const m of metas) {
       if (m['@_name'] === 'calibre:series') result.series = m['@_content'] || null;
-      if (m['@_name'] === 'calibre:series_index') result.seriesIndex = parseFloat(m['@_content']) || null;
+      if (m['@_name'] === 'calibre:series_index') {
+        const parsed = parseFloat(m['@_content']);
+        result.seriesIndex = Number.isFinite(parsed) ? parsed : null;
+      }
     }
 
     let coverHref = null;
@@ -147,7 +198,12 @@ async function extractMeta(epubPath, coverId, coversDir) {
         const coverOutPath = path.join(coversDir, coverFilename);
         
         try {
-          await sharp(coverData)
+          const image = sharp(coverData, { limitInputPixels: MAX_COVER_PIXELS, failOn: 'error' });
+          const imageMeta = await image.metadata();
+          if (imageMeta.width && imageMeta.height && imageMeta.width * imageMeta.height > MAX_COVER_PIXELS) {
+            throw new Error('Cover image dimensions are too large');
+          }
+          await image
             .resize({ width: 400, withoutEnlargement: true })
             .webp({ quality: 80 })
             .toFile(coverOutPath);

@@ -28,8 +28,8 @@ async function main() {
   const passphrase = args[1];
   const username = (args[2] || 'admin').trim();
 
-  if (passphrase.length < 4) {
-    console.error('Error: Passphrase must be at least 4 characters.');
+  if (passphrase.length < 12) {
+    console.error('Error: Passphrase must be at least 12 characters.');
     process.exit(1);
   }
   if (!username) {

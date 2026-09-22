@@ -14,9 +14,53 @@ const { requireAdmin } = require('./users');
 
 const router = express.Router();
 
-const DATA_DIR = path.resolve(__dirname, '../../../data');
+const DATA_DIR = process.env.ENDPAPER_DATA_DIR
+  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
+  : path.resolve(__dirname, '../../../data');
 const BOOKS_DIR = path.join(DATA_DIR, 'books');
 const COVERS_DIR = path.join(DATA_DIR, 'covers');
+const MAX_WORKERS = Math.max(1, Math.min(4, Number(process.env.EPUB_WORKERS) || 2));
+const WORKER_TIMEOUT_MS = Math.max(10_000, Number(process.env.EPUB_WORKER_TIMEOUT_MS) || 120_000);
+let activeWorkers = 0;
+const workerQueue = [];
+
+function drainWorkerQueue() {
+  while (activeWorkers < MAX_WORKERS && workerQueue.length) {
+    const job = workerQueue.shift();
+    activeWorkers++;
+    let settled = false;
+    const worker = new Worker(path.join(__dirname, '../lib/epubWorker.js'), { workerData: job.workerData });
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      activeWorkers--;
+      if (error) job.reject(error); else job.resolve(value);
+      drainWorkerQueue();
+    };
+    const timeout = setTimeout(() => {
+      worker.terminate().catch(() => {});
+      finish(new Error('EPUB processing timed out'));
+    }, WORKER_TIMEOUT_MS);
+    worker.on('message', message => {
+      if (message.success) finish(null, message.meta);
+      else {
+        const error = new Error(message.error);
+        error.validationError = message.validationError;
+        finish(error);
+      }
+    });
+    worker.on('error', error => finish(error));
+    worker.on('exit', code => { if (code !== 0) finish(new Error(`Worker stopped with exit code ${code}`)); });
+  }
+}
+
+function runEpubWorker(workerData) {
+  return new Promise((resolve, reject) => {
+    workerQueue.push({ workerData, resolve, reject });
+    drainWorkerQueue();
+  });
+}
 
 // Spine colors for books without covers (matches frontend)
 const SPINE_COLORS = ['#3F5D4C','#7A3B32','#3B4A6B','#6B4C3B','#5B3F5D','#2C4237','#8A6A2F','#43506B'];
@@ -55,7 +99,7 @@ router.get('/api/books', (req, res) => {
   if (filter === 'unread') {
     whereClauses.push('IFNULL(ub.progress_percent, 0) = 0');
   } else if (filter === 'finished') {
-    whereClauses.push('IFNULL(ub.progress_percent, 0) >= 95');
+    whereClauses.push('IFNULL(ub.progress_percent, 0) >= 98');
   } else if (filter.startsWith('col_')) {
     const colId = filter.substring(4);
     whereClauses.push('b.id IN (SELECT book_id FROM book_collections WHERE collection_id = ?)');
@@ -64,9 +108,9 @@ router.get('/api/books', (req, res) => {
 
   // Search
   if (search) {
-    whereClauses.push('(b.title LIKE ? OR b.author LIKE ?)');
-    whereParams.push(`%${search}%`);
-    whereParams.push(`%${search}%`);
+    const literalSearch = search.replace(/[\\%_]/g, '\\$&');
+    whereClauses.push("(b.title LIKE ? ESCAPE '\\' OR b.author LIKE ? ESCAPE '\\' OR b.series LIKE ? ESCAPE '\\' OR b.description LIKE ? ESCAPE '\\' OR b.tags LIKE ? ESCAPE '\\' OR b.isbn LIKE ? ESCAPE '\\')");
+    for (let index = 0; index < 6; index++) whereParams.push(`%${literalSearch}%`);
   }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -88,7 +132,7 @@ router.get('/api/books', (req, res) => {
   const total = db.prepare(countSql).get(...queryParams, ...whereParams).n;
 
   const dataSql = `
-    SELECT b.id, b.title, b.author, b.series, b.series_index, b.cover_path, b.cover_color,
+    SELECT b.id, b.title, b.author, b.series, b.series_index, b.description, b.isbn, b.tags, b.cover_path, b.cover_color,
            IFNULL(ub.status, 'unread') as status, ub.rating, IFNULL(ub.progress_percent, 0) as progress_percent, ub.last_location_cfi,
            b.added_at, ub.last_opened_at, b.file_size
      FROM books b
@@ -101,18 +145,18 @@ router.get('/api/books', (req, res) => {
   const books = db.prepare(dataSql).all(...queryParams, ...whereParams, limit, offset);
 
   // Continue reading book (always fetch latest opened globally for the user)
-  let continueBook = null;
+  let continueBooks = [];
   if (page === 1 && !search && filter === 'all') {
-    continueBook = db.prepare(`
-      SELECT b.id, b.title, b.author, b.series, b.series_index, b.cover_path, b.cover_color,
+    continueBooks = db.prepare(`
+      SELECT b.id, b.title, b.author, b.series, b.series_index, b.description, b.isbn, b.tags, b.cover_path, b.cover_color,
              IFNULL(ub.status, 'unread') as status, ub.rating, IFNULL(ub.progress_percent, 0) as progress_percent, ub.last_location_cfi,
              b.added_at, ub.last_opened_at, b.file_size
       FROM books b
       JOIN user_books ub ON b.id = ub.book_id AND ub.user_id = ?
-      WHERE ub.last_opened_at IS NOT NULL
+      WHERE ub.last_opened_at IS NOT NULL AND ub.progress_percent > 0 AND ub.progress_percent < 98
       ORDER BY ub.last_opened_at DESC
-      LIMIT 1
-    `).get(req.user_id);
+      LIMIT 4
+    `).all(req.user_id);
   }
 
   res.json({
@@ -120,7 +164,8 @@ router.get('/api/books', (req, res) => {
     total,
     page,
     totalPages: Math.ceil(total / limit),
-    continueBook: continueBook || null
+    continueBooks,
+    continueBook: continueBooks[0] || null
   });
 });
 
@@ -133,6 +178,7 @@ router.get('/api/books', (req, res) => {
 router.post('/api/books', upload.single('file'), async (req, res) => {
   let destPath = null;
   let coverPath = null;
+  let uploadedFileHash = null;
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -146,29 +192,7 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
     // Verify, move, hash, and extract metadata in a background worker
     let meta;
     try {
-      meta = await new Promise((resolve, reject) => {
-        const worker = new Worker(path.join(__dirname, '../lib/epubWorker.js'), {
-          workerData: {
-            tmpPath: req.file.path,
-            destPath: destPath,
-            id: id,
-            coversDir: COVERS_DIR
-          }
-        });
-        worker.on('message', (msg) => {
-          if (msg.success) {
-            resolve(msg.meta);
-          } else {
-            const err = new Error(msg.error);
-            err.validationError = msg.validationError;
-            reject(err);
-          }
-        });
-        worker.on('error', reject);
-        worker.on('exit', (code) => {
-          if (code !== 0) reject(new Error(`Worker stopped with exit code ${code}`));
-        });
-      });
+      meta = await runEpubWorker({ tmpPath: req.file.path, destPath, id, coversDir: COVERS_DIR });
       
       if (meta._extractError) {
         console.error('Metadata extraction error:', meta._extractError);
@@ -185,6 +209,7 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
 
     // Check for duplicate uploads via off-thread computed SHA-256 hash
     const fileHash = meta.file_hash;
+    uploadedFileHash = fileHash;
     if (fileHash) {
       const existingBook = db.prepare('SELECT id, title FROM books WHERE file_hash = ?').get(fileHash);
       if (existingBook) {
@@ -213,7 +238,10 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
       title,
       author: text(meta.author, { max: 500, field: 'author' }),
       series: text(meta.series, { max: 500, field: 'series' }),
-      series_index: meta.seriesIndex || null,
+      series_index: Number.isFinite(meta.seriesIndex) ? meta.seriesIndex : null,
+      description: meta.description || null,
+      isbn: meta.isbn || null,
+      tags: meta.tags || null,
       filename,
       file_format: 'epub',
       file_size: fileSize,
@@ -226,18 +254,15 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
       last_location_cfi: null,
     };
 
-    db.prepare(`
-      INSERT INTO books (id, title, author, series, series_index, filename, file_format,
-                         file_size, file_hash, cover_path, cover_color)
-      VALUES (@id, @title, @author, @series, @series_index, @filename, @file_format,
-              @file_size, @file_hash, @cover_path, @cover_color)
-    `).run(book);
-
-    // Initial user_books record
-    db.prepare(`
-      INSERT INTO user_books (user_id, book_id, status, progress_percent)
-      VALUES (?, ?, 'unread', 0)
-    `).run(req.user_id, id);
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO books (id, title, author, series, series_index, description, isbn, tags, filename, file_format,
+                           file_size, file_hash, cover_path, cover_color)
+        VALUES (@id, @title, @author, @series, @series_index, @description, @isbn, @tags, @filename, @file_format,
+                @file_size, @file_hash, @cover_path, @cover_color)
+      `).run(book);
+      db.prepare(`INSERT INTO user_books (user_id, book_id, status, progress_percent) VALUES (?, ?, 'unread', 0)`).run(req.user_id, id);
+    })();
 
     // Return the full book row
     const inserted = db.prepare(`
@@ -262,7 +287,11 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
       }
     }
     console.error('Upload error:', err);
-    const isClientError = /valid EPUB|must be/.test(err.message);
+    if (err && (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed: books.file_hash/.test(err.message || ''))) {
+      const existing = uploadedFileHash ? db.prepare('SELECT id, title FROM books WHERE file_hash = ?').get(uploadedFileHash) : null;
+      return res.status(409).json({ error: 'This book is already in the library', book_id: existing && existing.id, title: existing && existing.title });
+    }
+    const isClientError = /valid EPUB|must be|too many|too large|compression ratio|timed out/i.test(err.message);
     res.status(isClientError ? 400 : 500).json({ error: isClientError ? err.message : 'Upload failed' });
   }
 });
@@ -310,9 +339,25 @@ router.get('/api/books/:id/file', validateUuidParam('id'), (req, res) => {
 
   const range = req.headers.range;
   if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+    if (!/^bytes=\d*-\d*$/.test(range) || range.includes(',')) {
+      res.setHeader('Content-Range', `bytes */${totalSize}`);
+      return res.status(416).end();
+    }
+    const parts = range.slice(6).split('-');
+    let start;
+    let end;
+    if (parts[0] === '') {
+      const suffixLength = parseInt(parts[1], 10);
+      if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+        res.setHeader('Content-Range', `bytes */${totalSize}`);
+        return res.status(416).end();
+      }
+      start = Math.max(0, totalSize - suffixLength);
+      end = totalSize - 1;
+    } else {
+      start = parseInt(parts[0], 10);
+      end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+    }
 
     if (isNaN(start) || isNaN(end) || start < 0 || start > end || start >= totalSize) {
       res.setHeader('Content-Range', `bytes */${totalSize}`);
@@ -359,7 +404,7 @@ router.get('/api/books/:id/cover', validateUuidParam('id'), (req, res) => {
   const ext = path.extname(book.cover_path).toLowerCase();
   const mimeTypes = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp' };
   res.setHeader('Content-Type', mimeTypes[ext] || 'image/jpeg');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'private, max-age=86400');
   const stream = fs.createReadStream(coverPath);
   stream.on('error', () => {
     if (!res.headersSent) res.status(500).json({ error: 'Could not read cover image' });
@@ -383,7 +428,7 @@ router.patch('/api/books/:id', validateUuidParam('id'), (req, res) => {
 
   const user = db.prepare("SELECT is_admin FROM users WHERE id = ?").get(req.user_id);
   const isAdmin = !!(user && user.is_admin);
-  const changesSharedMetadata = req.body.title !== undefined || req.body.author !== undefined;
+  const changesSharedMetadata = ['title', 'author', 'series', 'series_index', 'description', 'isbn', 'tags'].some(key => req.body[key] !== undefined);
   if (changesSharedMetadata && !isAdmin) {
     return res.status(403).json({ error: 'Admin privileges required to edit shared book metadata' });
   }
@@ -425,6 +470,16 @@ router.patch('/api/books/:id', validateUuidParam('id'), (req, res) => {
       bookValues.author = text(req.body.author, { max: 500, field: 'author' });
       bookUpdates.push('author = @author');
     }
+    for (const field of ['series', 'description', 'isbn', 'tags']) {
+      if (req.body[field] !== undefined) {
+        bookValues[field] = text(req.body[field], { max: field === 'description' ? 5000 : 500, field });
+        bookUpdates.push(`${field} = @${field}`);
+      }
+    }
+    if (req.body.series_index !== undefined) {
+      bookValues.series_index = number(req.body.series_index, { min: -1000000, max: 1000000, nullable: true, field: 'series_index' });
+      bookUpdates.push('series_index = @series_index');
+    }
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -443,7 +498,7 @@ router.patch('/api/books/:id', validateUuidParam('id'), (req, res) => {
       // Auto-update status based on progress
       const newProgress = userBookValues.progress_percent !== undefined ? userBookValues.progress_percent : book.progress_percent;
       const currentStatus = userBookValues.status || book.status;
-      if (newProgress >= 95 && currentStatus !== 'finished') {
+      if (newProgress >= 98 && currentStatus !== 'finished') {
         userBookValues.status = 'finished';
         if (!userBookUpdates.includes('status = @status')) userBookUpdates.push('status = @status');
       } else if (newProgress > 0 && currentStatus === 'unread') {
@@ -493,17 +548,25 @@ router.delete('/api/books/:id', validateUuidParam('id'), requireAdmin, (req, res
   const book = db.prepare('SELECT id, filename, cover_path FROM books WHERE id = ?').get(req.params.id);
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
-  db.prepare('DELETE FROM books WHERE id = ?').run(req.params.id);
-
-  if (isBookFilename(book.filename)) {
-    const filePath = path.join(BOOKS_DIR, book.filename);
-    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch(e) { console.error('Error deleting epub:', e); }
+  const staged = [];
+  try {
+    const stage = (source, label) => {
+      if (!source || !fs.existsSync(source)) return;
+      const destination = path.join(DATA_DIR, 'tmp', `delete-${book.id}-${label}-${randomUUID()}`);
+      fs.renameSync(source, destination);
+      staged.push({ source, destination });
+    };
+    if (isBookFilename(book.filename)) stage(path.join(BOOKS_DIR, book.filename), 'book');
+    if (book.cover_path && isCoverFilename(book.cover_path)) stage(path.join(COVERS_DIR, book.cover_path), 'cover');
+    db.prepare('DELETE FROM books WHERE id = ?').run(req.params.id);
+  } catch (error) {
+    for (const item of staged.reverse()) {
+      try { if (fs.existsSync(item.destination)) fs.renameSync(item.destination, item.source); } catch (_) {}
+    }
+    console.error('Error staging book deletion:', error);
+    return res.status(500).json({ error: 'Could not remove book files safely' });
   }
-
-  if (book.cover_path && isCoverFilename(book.cover_path)) {
-    const coverPath = path.join(COVERS_DIR, book.cover_path);
-    try { if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath); } catch(e) { console.error('Error deleting cover:', e); }
-  }
+  for (const item of staged) fs.promises.unlink(item.destination).catch(error => console.error('Error finalizing book deletion:', error));
 
   res.json({ ok: true });
 });

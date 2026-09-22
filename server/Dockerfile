@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:20-alpine AS dependencies
 
 # better-sqlite3 requires build tools
 RUN apk add --no-cache python3 make g++
@@ -9,7 +9,17 @@ ENV NODE_ENV=production \
     PORT=3000
 
 COPY package*.json ./
-RUN npm ci --production
+RUN npm ci --omit=dev
+
+FROM node:20-alpine AS runtime
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    PORT=3000
+
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY package*.json ./
 
 COPY src/ ./src/
 

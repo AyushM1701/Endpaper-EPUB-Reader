@@ -1,10 +1,10 @@
-# Endpaper â€” Complete Architecture & Full Codebase Documentation
+# Endpaper — Complete Architecture & Full Codebase Documentation
 
 > **Project Name:** Endpaper  
 > **Workspace Directory:** `C:\Users\AYUSH\Documents\Endpaper`  
 > **Application Type:** Self-Hosted Multi-User EPUB Reader & Shared Digital Library  
 > **Technology Stack:** Node.js (v20+), Express.js, `better-sqlite3` (WAL Mode), Worker Threads, Multer, Fast-XML-Parser, Sharp, Archiver, Yauzl, Bcrypt, Vanilla HTML5/CSS3/ES6+ JS, `ePub.js` Engine  
-> **Deployment Model:** Docker, Docker Compose, Caddy Reverse Proxy (Auto-HTTPS)  
+> **Deployment Model:** PM2 / Docker, Docker Compose, Caddy Reverse Proxy (Auto-HTTPS)  
 
 ---
 
@@ -32,11 +32,11 @@
 
 ### Core Architectural Principles
 1. **Zero-Build Frontend**: The client is built exclusively with standard HTML5, CSS3 Custom Properties, and modern Vanilla ES6+ JavaScript. There is no Webpack, Vite, Babel, or TypeScript compilation step. This guarantees instant startup, transparent browser debugging, and effortless long-term maintainability.
-2. **Embedded Relational Persistence**: Built on SQLite via `better-sqlite3` operating in Write-Ahead Logging (`WAL`) mode. This provides ACID compliance, zero configuration overhead, high concurrency for simultaneous readers, and single-file database portability.
-3. **PWA and Offline Resilience**: A custom Service Worker uses a **Network-First with Cache Fallback** strategy for the core app shell assets (`/`, `/index.html`, `/app.js`, `/app.css`, `/manifest.json`) with automated reload on controller changes. Dedicated runtime caching caches active EPUB files and cover images. An asynchronous offline mutation queue (`endpaper_offline_queue`) captures reading progress and bookmarks created while disconnected, seamlessly syncing them to the server upon network reconnection.
-4. **Single-Process Lightweight Server with Worker Threads**: The backend is an Express.js Node.js server with CPU-intensive tasks (such as EPUB decompression, XML manifest parsing, and streaming SHA-256 calculation) offloaded to Node.js Worker Threads (`worker_threads`) to keep the main event loop responsive.
-5. **Streaming & Memory Efficiency**: Large EPUB binary transfers support RFC 7233 HTTP `Range` requests (206 Partial Content) with immutable cache headers. Full library export archives are streamed on-the-fly directly to the response with `archiver` with constant $O(1)$ memory usage.
-6. **Production Simplicity**: Deployable in seconds via Docker Compose with Caddy for automatic Let's Encrypt / ZeroSSL TLS termination and HTTP/2 + HTTP/3 support.
+2. **Embedded Relational Persistence**: Built on SQLite via `better-sqlite3` operating in Write-Ahead Logging (`WAL`) mode with schema versioning (`PRAGMA user_version = 3`) and pre-migration database snapshots. This provides ACID compliance, zero configuration overhead, high concurrency for simultaneous readers, and single-file database portability.
+3. **PWA and Offline Resilience**: A custom Service Worker precaches the self-hosted application shell and reader dependencies (`epub.min.js`, `jszip.min.js`), supports cached byte ranges for EPUBs, and defers updates while a reader is active. Explicit offline downloads, range-aware caching, and an account-scoped, bounded, idempotent mutation queue (`client_operations` deduplication table) make offline state and later synchronization robust and transparent.
+4. **Single-Process Lightweight Server with Bounded Worker Threads**: The backend is an Express.js Node.js server with EPUB metadata parsing and validation dispatched through a bounded worker queue. File hashing and large archive transfers use streams so startup and request handling remain responsive without memory spikes.
+5. **Streaming & Memory Efficiency**: Large EPUB binary transfers support RFC 7233 HTTP single-range requests (206 Partial Content) with private cache headers. Full library export archives stream on-the-fly directly to the response with `archiver` with constant $O(1)$ memory usage. Imports use lazy ZIP iteration, bounded decompression limits (max 200:1 ratio, max entry bounds), isolated staging, and transactional database promotion with rollback cleanup.
+6. **Production Simplicity**: Deployable in seconds via native PM2 process management or Docker Compose with Caddy for automatic Let's Encrypt / ZeroSSL TLS termination and HTTP/2 + HTTP/3 support.
 
 ---
 
@@ -91,7 +91,7 @@ graph TD
 
 ## 3. Database Architecture & Relational Schema
 
-The SQLite schema is initialized in `server/src/db.js` using WAL mode (`PRAGMA journal_mode = WAL;`), foreign key constraints (`PRAGMA foreign_keys = ON;`), and a 5000ms busy timeout (`PRAGMA busy_timeout = 5000;`).
+The SQLite schema is initialized in `server/src/db.js` using WAL mode (`PRAGMA journal_mode = WAL;`), foreign key constraints (`PRAGMA foreign_keys = ON;`), and a 5000ms busy timeout (`PRAGMA busy_timeout = 5000;`). Migrations are tracked with `PRAGMA user_version = 3`, with automated pre-migration safety snapshots created in `data/backups/`.
 
 ```mermaid
 erDiagram
@@ -101,6 +101,7 @@ erDiagram
     USERS ||--o{ HIGHLIGHTS : creates
     USERS ||--o{ READING_SESSIONS : records
     USERS ||--o{ SETTINGS : configures
+    USERS ||--o{ CLIENT_OPERATIONS : logs
     BOOKS ||--o{ USER_BOOKS : associates
     BOOKS ||--o{ BOOK_COLLECTIONS : grouped_in
     BOOKS ||--o{ BOOKMARKS : contains
@@ -126,6 +127,8 @@ erDiagram
         text title
         text author
         text description
+        text isbn
+        text tags
         text filename
         text file_hash UK
         integer file_size
@@ -171,6 +174,7 @@ erDiagram
         text color
         text note
         text chapter
+        text tags
         text created_at
     }
     READING_SESSIONS {
@@ -180,25 +184,44 @@ erDiagram
         text started_at
         text ended_at
         integer duration_seconds
+        text client_id
     }
     SETTINGS {
         text user_id PK,FK
         text key PK
         text value
     }
+    CLIENT_OPERATIONS {
+        text user_id PK,FK
+        text operation_id PK
+        text response_json
+        text created_at
+    }
 ```
+
+### Schema Tables & Indexes
+1. **`users`**: Stores reader and administrator credentials. `username` is indexed with `COLLATE NOCASE` for case-insensitive logins and uniqueness.
+2. **`sessions`**: Server-side storage for active authentication tokens with strict expiration timestamps (`expires_at`).
+3. **`books`**: Shared metadata for books in the library. `file_hash` enforces SHA-256 uniqueness to reject duplicates upon upload. Includes rich fields: `description`, `isbn`, `tags`, `series`, `series_index`.
+4. **`user_books`**: Per-user reading progress (`progress_percent`, `last_location_cfi`), read status (`unread`, `reading`, `finished`, `abandoned`), and personal 1–5 star ratings.
+5. **`collections` & `book_collections`**: Shared organizational shelves with case-insensitive unique names.
+6. **`bookmarks`**: User-specific saved positions with CFI, chapter title, custom label, and percentage progress.
+7. **`highlights`**: Annotations and quotes with CFI range, selected excerpt, color swatch, note text, chapter name, and optional tags.
+8. **`reading_sessions`**: Granular reading activity log with start/end timestamps, duration in seconds, and client operation ID for deduplication.
+9. **`settings`**: Per-user appearance preferences (font family, font size, margins, line height, letter spacing, theme, layout flow, gesture preferences).
+10. **`client_operations`**: Idempotency ledger storing client operation IDs and cached responses to prevent duplicate mutations during offline sync replay.
 
 ---
 
 ## 4. Authentication, Security & Role-Based Access Control
 
 1. **User Roles**:
-   - **Admin**: Full library and account administration permissions. Can upload books, remove books from shared library, manage global collections, trigger export/import backups, provision reader accounts, and manage user roles/passphrases.
+   - **Admin**: Full library and account administration permissions. Can upload books, remove books from shared library, edit shared metadata (title, author, series, ISBN, tags, description), manage global collections, trigger export/import backups, provision reader accounts, and manage user roles/passphrases.
    - **Reader**: Standard reading access to all books in the shared library. Can upload books, read, track personal progress, set bookmarks, create highlights/notes, rate books, and view personal reading analytics.
 2. **Session Security & Credentials**:
    - Authenticated via secure `httpOnly` cookie-based session tokens (`endpaper_session`) with a 90-day expiry (`Max-Age=7776000`, `SameSite=Strict`).
    - Case-insensitive username uniqueness is enforced at both the database level (`username TEXT NOT NULL UNIQUE COLLATE NOCASE` with index `idx_users_username_nocase`) and application level (`WHERE lower(username) = lower(?)`).
-   - Passphrases are hashed using `bcrypt` with salt rounds of 10.
+   - Passphrases are hashed using `bcrypt` with salt rounds of 10. Minimum passphrase length of 12 characters is enforced for account creation and resets.
    - Background hourly pruning purges expired session tokens without impacting request hot paths.
 3. **Brute-Force Protection & Account Management**:
    - IP-based rate limiting on `POST /api/login` prevents brute-force credential stuffing.
@@ -218,29 +241,33 @@ erDiagram
   - `api.getBookFile()` fetches the EPUB and stores it as a `Blob` (not `ArrayBuffer`) in a 24 MB LRU cache (`epubBlobCache`).
   - A `blob://` URL is created via `URL.createObjectURL(blob)` and passed directly to `ePub()`. This avoids the `.slice(0)` copy that previously doubled peak memory usage for large books.
   - The active `currentBlobUrl` is revoked in `discardReaderState()` so the browser can immediately reclaim the underlying EPUB data.
-  - Book warmup is **disabled on touch/mobile devices** (R-17/R-18) — `scheduleBookWarmup()` checks `(hover: none) and (pointer: coarse)` and skips prefetch when true. There is no hover-intent signal on touch screens, so prefetch only wastes bandwidth.
-- **Overlay Chrome Architecture (R-13)**:
-  - `#topbar` and `#progress-bar` are removed from document flow during reader mode (`body.reader-active`) and become `position:fixed` overlays via CSS. Chrome show/hide now uses CSS `transform: translateY(±100%)` (slide animation) rather than `height:0` collapse.
-  - This eliminates the viewport reflow that previously triggered EPUB.js's internal ResizeObserver on every chrome toggle — the root cause of the chapter-skip bug in scrolled mode.
-  - The EPUB viewport is **permanently fullscreen** — its dimensions never change regardless of chrome state. On mobile (`≤768px`), `#app` is `position:fixed; inset:0`, `#reader-view` and `#viewer-wrap` are `position:absolute; inset:0; padding:0`. On desktop, `#viewer-wrap` is `flex:1` and fills all remaining height since the overlay bars are out of document flow.
-  - `#topbar` and `#progress-bar` are **translucent glass overlays**: `background: color-mix(in srgb, var(--paper) 88%, transparent)` + `backdrop-filter: blur(18px)` — they sit on top of the EPUB without consuming any layout space, and adapt automatically to all reading themes (Light/Sepia/Dark/Night).
-  - Chrome show/hide uses `transform: translateY(±110%)` + `opacity` only — no `height`, `padding`, or `flex` changes, so EPUB.js's `ResizeObserver` never fires.
-  - `enterImmersiveReading()` and `exitImmersiveReading()` no longer call `resizeReaderViewport()` — there is nothing to resize.
-  - **Auto-hide (Kindle/Apple Books UX)**: `showReaderChromeTemporarily(delay=3000)` shows the chrome and starts a 3-second timer; if no drawer is open when the timer fires, `enterImmersiveReading()` is called. Center-tap while chrome is hidden calls `showReaderChromeTemporarily()`; center-tap while chrome is visible calls `enterImmersiveReading()` immediately and cancels any pending timer. Chrome is also shown temporarily on book open (after the loading overlay hides).
+  - Book warmup is **disabled on touch/mobile devices** (R-17/R-18) — `scheduleBookWarmup()` checks `(hover: none) and (pointer: coarse)` and skips prefetch when true.
+- **Overlay Chrome Architecture (R-13 v2)**:
+  - `#topbar` and `#progress-bar` are removed from document flow during reader mode (`body.reader-active`) and become `position:fixed` overlays via CSS. Chrome show/hide uses CSS `transform: translateY(±110%)` + `opacity` transitions rather than `height:0` collapse.
+  - This eliminates viewport reflows that previously triggered EPUB.js's internal `ResizeObserver` on chrome toggles — the root cause of the chapter-skip bug in scrolled mode.
+  - The EPUB viewport is **permanently fullscreen** — its dimensions never change regardless of chrome state. On mobile (`≤768px`), `#app` is `position:fixed; inset:0`, `#reader-view` and `#viewer-wrap` are `position:absolute; inset:0; padding:0`. On desktop, `#viewer-wrap` is `flex:1` and fills all remaining height.
+  - `#topbar` and `#progress-bar` are **translucent glass overlays**: `background: color-mix(in srgb, var(--paper) 88%, transparent)` + `backdrop-filter: blur(18px)`.
+  - `enterImmersiveReading()` and `exitImmersiveReading()` do not call `resizeReaderViewport()` — there is nothing to resize.
+  - **Auto-hide (Kindle/Apple Books UX)**: `showReaderChromeTemporarily(delay=3000)` shows the chrome and starts a 3-second timer; if no drawer is open when the timer fires, `enterImmersiveReading()` is called. Center-tap while chrome is hidden calls `showReaderChromeTemporarily()`; center-tap while chrome is visible calls `enterImmersiveReading()` immediately and cancels any pending timer.
 - **Robust Spine Progress Calculation**:
   - Employs a 4-tier location resolution strategy (`getSpineSection`):
     1. Standard EPUB.js `spine.get(cfi)`.
     2. Direct mathematical parsing of EPUB CFI spine components `/6/(\d+)` ($(\frac{N}{2}) - 1$).
     3. Multi-strategy href normalization matching base paths, clean paths, or basename filenames (`chapter04.xhtml`) — basename match is unique-only (R-23).
     4. TOC navigation fallback matching using `tocIdx / (length-1)` formula (R-21).
-  - **Finished threshold** is 98% (R-22): a book is auto-marked finished and appears in the "Finished" shelf filter when progress reaches ≥ 98%. The threshold was raised from 95% to avoid premature marking on the second-to-last chapter.
-  - Live progress slider updates synchronously during user drags and releases without getting overwritten by background events.
+  - **Finished threshold** is 98% (R-22): a book is auto-marked finished when progress reaches $\ge 98\%$.
 - **Text-to-Speech (TTS) & Highlighting**:
-  - Multi-tier text extraction from `rendition.getContents()` document bodies with active toggle state styling.
-  - TTS chapter advance uses `rendition.currentLocation()` to identify the active section after navigation, rather than always taking `getContents()[0]` which may be a preloaded prior section (R-10/R-11).
-  - Captures selected text DOM ranges inside the EPUB iframe, serializes them to CFIs, and renders persistent highlight swatches with notes, with one-click Markdown highlight export.
+  - Advanced TTS controller featuring: play/pause, voice selector dropdown (`#tts-voice-select`), pitch adjustment slider (`#tts-pitch`), sleep timer (10, 20, 30 min), speed rate cycling (0.75× to 2.0×), and stop control.
+  - TTS chapter advance uses `rendition.currentLocation()` to identify the active section after navigation (R-10/R-11).
+  - Captures selected text DOM ranges inside the EPUB iframe, serializes to CFIs, and renders persistent highlight swatches with notes and tag support.
+  - Highlight selection popup provides: Note, Define (dictionary lookup), Copy, Share (Web Share API), and Listen.
+- **Interactive UI Modals & Reading Discovery**:
+  - **Notebook Modal (`#notebook-modal`)**: Global search across all highlights and notes with book title, author, text excerpt, and tag filters, plus Markdown export.
+  - **Book Details Modal (`#book-details-modal`)**: Cover preview, description, ISBN, series, tags, page estimates, reading stats, and admin metadata editing.
+  - **Reading Insights Modal (`#stats-modal`)**: 14-day interactive reading bar chart, current & longest reading streaks, total time read, and customizable goals (daily minutes, weekly hours, books per year).
+  - **Gesture Settings**: User-configurable toggles for swipe page turns, edge tap zones, and center tap chrome controls.
 - **Navigation Serialization (R-09)**:
-  - All `rendition.next()` / `rendition.prev()` calls route through `turnPage(direction)` which holds a module-level mutex (`pageTurnLock`). Swipe, tap, keyboard, TTS chapter advance, and nav-zone button clicks all share the same lock, preventing overlapping navigations.
+  - All `rendition.next()` / `rendition.prev()` calls route through `turnPage(direction)` with a module-level mutex (`pageTurnLock`).
 
 ---
 
@@ -248,22 +275,26 @@ erDiagram
 
 - **Service Worker (`public/sw.js`)**:
   - Shell cache versioned with build timestamps (e.g. `endpaper-shell-v10.1.0-20260922`).
-  - Core app shell assets (`/`, `/index.html`, `/app.js`, `/app.css`, `/epub.min.js`, `/manifest.json`) use **Network-First with Cache Fallback**. `epub.min.js` is self-hosted (built from upstream EPUB.js commit `eee359d`, 2026-09-22, includes mobile continuous-scroll jitter fix `171f7ec`) for PWA offline support and CDN independence.
-  - `controllerchange` event listener in `public/index.html` triggers an automatic single-fire reload when a new service worker takes control, ensuring open tabs immediately execute new code.
+  - Core app shell assets (`/`, `/index.html`, `/app.js`, `/app.css`, `/epub.min.js`, `/jszip.min.js`, `/manifest.json`) use **Network-First with Cache Fallback**. Both `epub.min.js` and `jszip.min.js` are self-hosted for complete CDN independence and offline PWA reliability.
+  - Handles single-range RFC 7233 HTTP `Range` requests directly from the cache for offline EPUB playback.
+  - `controllerchange` event listener in `public/index.html` triggers a deferred update notification banner (`#update-banner`), allowing readers to finish reading uninterrupted before updating.
   - Dedicated runtime cache (`endpaper-runtime-v10.1.0-20260922`) caches active EPUB files and covers with `SET_CURRENT_BOOK` message synchronization.
 - **Offline Mutation Queue (`public/app.js`)**:
-  - If a network failure occurs during reading (e.g. saving reading position, setting a bookmark), the mutation payload is appended to `localStorage.getItem('endpaper_offline_queue')`.
-  - When the browser fires the `online` event, `flushOfflineQueue()` replays pending requests to the server in FIFO order.
+  - If a network failure occurs during reading (progress updates, bookmarks, highlights, reading sessions), the mutation payload is assigned a UUID `operation_id` and saved to `localStorage` under `endpaper_offline_queue`.
+  - When the browser fires the `online` event or reconnects, `flushOfflineQueue()` replays pending mutations to the server in FIFO order. The server stores executed IDs in `client_operations` to ensure strict idempotency.
 
 ---
 
 ## 7. Backup, Export, and Disaster Recovery Subsystem
 
-- **Export (`POST /api/export`)**:
-  - Admin-authorized endpoint with pre-flight asset verification across all referenced book and cover files before streaming begins.
-  - Streams on-the-fly ZIP archives via `archiver` directly to `res` with constant $O(1)$ memory usage. Missing assets trigger a clean `500` JSON error rather than a truncated archive.
+- **Export (`ALL /api/export`)**:
+  - Admin-authorized endpoint supporting HEAD, GET, and POST requests.
+  - Pre-flight asset verification across all referenced book and cover files before streaming begins.
+  - Streams on-the-fly ZIP archives via `archiver` directly to `res` with constant $O(1)$ memory usage. Missing assets trigger a clean `500` JSON error rather than a corrupted archive.
 - **Import (`POST /api/import`)**:
-  - Streams an uploaded backup archive via `yauzl`, unzips files, and performs an idempotent merge into SQLite, restoring library books and user data without data loss or memory exhaustion.
+  - Validates archive structure using `yauzl` with lazy entry reading and strict decompression bounds (max entries: 10,000, max size: 2 GB, max compression ratio: 200:1).
+  - Decompresses assets into an isolated staging directory (`data/tmp/import-*`) first. No live library file is touched until all entries validate.
+  - Promotes staged files via atomic filesystem renames and executes database import inside a single SQLite transaction with rollback file cleanup on failure.
 - **Automated Rolling Backups**:
   - Automatic non-blocking daily backups maintain the last 5 database snapshots in `data/backups/`.
   - Pre-migration backups are automatically created prior to any structural table changes.
@@ -279,22 +310,23 @@ erDiagram
 | `POST` | `/api/logout` | User | Clear session cookie and delete session record |
 | `GET` | `/api/session` | User | Return active user account status, role, and username |
 | `GET` | `/api/users` | Admin | List all user accounts in system |
-| `POST` | `/api/users` | Admin | Create a new user account (Admin or Reader) |
-| `PATCH` | `/api/users/:id` | Admin | Update user role (`is_admin`) or reset `passphrase` |
-| `DELETE` | `/api/users/:id` | Admin | Delete a user account and associated reading data |
-| `GET` | `/api/books` | User | List all books in shared library (`?sort=series|recent|opened|title|author`) |
+| `POST` | `/api/users` | Admin | Create a new user account (Admin or Reader) with min 12-char passphrase |
+| `PATCH` | `/api/users/:id` | Admin | Update user role (`is_admin`) or reset passphrase with session revocation |
+| `DELETE` | `/api/users/:id` | Admin | Delete a user account and associated personal reading data |
+| `GET` | `/api/books` | User | List all books in shared library (`?q=&sort=recent|title|author|opened|series&status=&collection=`) |
 | `POST` | `/api/books` | User | Upload new EPUB book (SHA-256 deduplicated, returns `409 Conflict` on duplicate) |
-| `GET` | `/api/books/:id` | User | Get detailed book metadata and reading status |
-| `PATCH` | `/api/books/:id` | User | Update user reading progress (CFI, %, status, rating) or edit shared metadata (title, author - Admin only) |
-| `DELETE` | `/api/books/:id` | Admin | Delete book and associated files from library |
-| `GET` | `/api/books/:id/file` | User | Stream EPUB binary with HTTP Range (`206 Partial Content`) and immutable caching |
-| `GET` | `/api/books/:id/cover` | User | Serve extracted book cover image |
+| `GET` | `/api/books/:id` | User | Get detailed book metadata and user reading status |
+| `PATCH` | `/api/books/:id` | User / Admin | Update reading progress (CFI, %, status, rating) or edit shared metadata (title, author, series, series_index, description, isbn, tags - Admin only) |
+| `DELETE` | `/api/books/:id` | Admin | Staged atomic deletion of book and cover files from library |
+| `GET` | `/api/books/:id/file` | User | Stream EPUB binary with RFC 7233 single-range support (`206 Partial Content`) and private caching |
+| `GET` | `/api/books/:id/cover` | User | Serve extracted book cover image with caching |
 | `GET` | `/api/books/:id/bookmarks` | User | List user bookmarks for a book |
 | `POST` | `/api/books/:id/bookmarks` | User | Create a new bookmark |
 | `DELETE` | `/api/bookmarks/:id` | User | Delete a bookmark |
-| `GET` | `/api/books/:id/highlights` | User | List user highlights for a book |
-| `POST` | `/api/books/:id/highlights` | User | Create a new text highlight and note |
-| `PATCH` | `/api/highlights/:id` | User | Update highlight note or color |
+| `GET` | `/api/highlights` | User | Global highlights notebook search (`?q=&book_id=&color=&tag=&limit=&offset=`) |
+| `GET` | `/api/books/:id/highlights` | User | List user highlights for a specific book |
+| `POST` | `/api/books/:id/highlights` | User | Create a new text highlight, note, and optional tags |
+| `PATCH` | `/api/highlights/:id` | User | Update highlight note, color, or tags |
 | `DELETE` | `/api/highlights/:id` | User | Delete a highlight |
 | `GET` | `/api/collections` | User | List all collections |
 | `POST` | `/api/collections` | Admin | Create a new collection |
@@ -302,19 +334,34 @@ erDiagram
 | `DELETE` | `/api/collections/:id` | Admin | Delete a collection |
 | `POST` | `/api/books/:id/collections/:collectionId` | Admin | Add a book to a collection |
 | `DELETE` | `/api/books/:id/collections/:collectionId` | Admin | Remove a book from a collection |
-| `POST` | `/api/sessions/start` | User | Start reading time tracking session |
+| `POST` | `/api/sessions/start` | User | Start reading time tracking session (supports client deduplication) |
 | `POST` | `/api/sessions/:id/end` | User | End reading session and record duration |
-| `GET` | `/api/stats` | User | Get reading stats (streaks, total time, finished) with `?tz=` support |
-| `GET` | `/api/settings` | User | Retrieve personal reader appearance settings |
-| `PUT` | `/api/settings` | User | Save personal reader appearance settings |
-| `POST` | `/api/export` | Admin | Stream complete library backup ZIP directly to client |
-| `POST` | `/api/import` | Admin | Restore / merge library from backup ZIP |
+| `GET` | `/api/stats` | User | Get reading stats (streaks, 14-day history, total time, goals) with `?tz=` support |
+| `GET` | `/api/settings` | User | Retrieve personal reader appearance and gesture settings |
+| `PUT` | `/api/settings` | User | Save personal reader appearance and gesture settings |
+| `ALL` | `/api/export` | Admin | Stream complete library backup ZIP directly to client (HEAD/GET/POST) |
+| `POST` | `/api/import` | Admin | Staged, atomic restore and merge of library from backup ZIP |
 
 ---
 
 ## 9. Infrastructure & Deployment Topology
 
-Endpaper is containerized with Docker and fronted by Caddy:
+Endpaper supports two primary production deployment architectures:
+
+### Option 1: Native PM2 Process Deployment (Recommended for Single VPS)
+Running directly on Node.js 20+ with PM2 avoids Docker abstraction overhead and provides instant process restarts:
+
+```bash
+# Run server under PM2
+cd server
+npm ci --omit=dev
+pm2 start src/index.js --name "endpaper"
+pm2 save
+pm2 startup
+```
+
+### Option 2: Docker Compose & Caddy Reverse Proxy
+Containerized deployment with automatic Let's Encrypt / ZeroSSL TLS termination:
 
 ```yaml
 services:
@@ -354,46 +401,58 @@ volumes:
 
 ```text
 Endpaper/
-â”œâ”€â”€ .dockerignore
-â”œâ”€â”€ .gitignore
-â”œâ”€â”€ ARCHITECTURE_AND_SOURCE.md
-â”œâ”€â”€ Caddyfile
-â”œâ”€â”€ DEPLOY.md
-â”œâ”€â”€ docker-compose.yml
-â”œâ”€â”€ README.md
-â”œâ”€â”€ data/
-â”‚   â”œâ”€â”€ backups/
-â”‚   â”œâ”€â”€ books/
-â”‚   â”œâ”€â”€ covers/
-â”‚   â””â”€â”€ endpaper.db
-â”œâ”€â”€ public/
-â”‚   â”œâ”€â”€ app.css
-â”‚   â”œâ”€â”€ app.js
-â”‚   â”œâ”€â”€ index.html
-â”‚   â”œâ”€â”€ manifest.json
-â”‚   â””â”€â”€ sw.js
-â””â”€â”€ server/
-    â”œâ”€â”€ Dockerfile
-    â”œâ”€â”€ package.json
-    â””â”€â”€ src/
-        â”œâ”€â”€ db.js
-        â”œâ”€â”€ index.js
-        â”œâ”€â”€ lib/
-        â”‚   â”œâ”€â”€ epubMeta.js
-        â”‚   â”œâ”€â”€ epubWorker.js
-        â”‚   â”œâ”€â”€ passphrase.js
-        â”‚   â””â”€â”€ validation.js
-        â”œâ”€â”€ middleware/
-        â”‚   â””â”€â”€ auth.js
-        â””â”€â”€ routes/
-            â”œâ”€â”€ auth.js
-            â”œâ”€â”€ bookmarks.js
-            â”œâ”€â”€ books.js
-            â”œâ”€â”€ collections.js
-            â”œâ”€â”€ highlights.js
-            â”œâ”€â”€ sessions.js
-            â”œâ”€â”€ settings.js
-            â””â”€â”€ users.js
+├── .dockerignore
+├── .gitignore
+├── ARCHITECTURE_AND_SOURCE.md
+├── Caddyfile
+├── DEPLOY.md
+├── docker-compose.yml
+├── README.md
+├── data/
+│   ├── backups/
+│   ├── books/
+│   ├── covers/
+│   └── endpaper.db
+├── public/
+│   ├── app.css
+│   ├── app.js
+│   ├── epub.min.js          (self-hosted EPUB.js build)
+│   ├── icon-source.svg
+│   ├── icons/
+│   │   ├── apple-touch-icon.png
+│   │   ├── icon-192.png
+│   │   ├── icon-512.png
+│   │   └── icon-maskable-512.png
+│   ├── index.html
+│   ├── jszip.min.js         (self-hosted JSZip build)
+│   ├── manifest.json
+│   └── sw.js
+└── server/
+    ├── Dockerfile
+    ├── package-lock.json
+    ├── package.json
+    ├── src/
+    │   ├── db.js
+    │   ├── index.js
+    │   ├── lib/
+    │   │   ├── epubMeta.js
+    │   │   ├── epubWorker.js
+    │   │   ├── passphrase.js
+    │   │   └── validation.js
+    │   ├── middleware/
+    │   │   └── auth.js
+    │   └── routes/
+    │       ├── auth.js
+    │       ├── bookmarks.js
+    │       ├── books.js
+    │       ├── collections.js
+    │       ├── highlights.js
+    │       ├── sessions.js
+    │       ├── settings.js
+    │       └── users.js
+    └── test/
+        ├── api-smoke.test.js
+        └── validation.test.js
 ```
 
 ---
@@ -407,7 +466,7 @@ The following sections contain the complete, verbatim source code for every file
 
 ## File: `server/package.json`
 
-*Relative Path: `server/package.json` | Size: 0.7 KB | Total Lines: 31*
+*Relative Path: `server/package.json` | Size: 0.7 KB | Total Lines: 30*
 
 ````json
 {
@@ -421,10 +480,10 @@ The following sections contain the complete, verbatim source code for every file
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "set-passphrase": "node src/lib/passphrase.js --set"
+    "set-passphrase": "node src/lib/passphrase.js --set",
+    "test": "node --test"
   },
   "dependencies": {
-    "adm-zip": "^0.6.0",
     "archiver": "^8.0.0",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^11.3.0",
@@ -432,24 +491,24 @@ The following sections contain the complete, verbatim source code for every file
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
     "fast-xml-parser": "^5.10.1",
-    "multer": "^1.4.5-lts.1",
+    "multer": "^2.4.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "sharp": "^0.35.4",
-    "yauzl": "^3.4.0",
-    "yauzl-promise": "^4.0.0"
+    "yauzl": "^3.4.0"
   }
 }
+
 ````
 
 ---
 
 ## File: `server/Dockerfile`
 
-*Relative Path: `server/Dockerfile` | Size: 0.5 KB | Total Lines: 22*
+*Relative Path: `server/Dockerfile` | Size: 0.6 KB | Total Lines: 32*
 
 ````dockerfile
-FROM node:20-alpine
+FROM node:20-alpine AS dependencies
 
 # better-sqlite3 requires build tools
 RUN apk add --no-cache python3 make g++
@@ -460,7 +519,17 @@ ENV NODE_ENV=production \
     PORT=3000
 
 COPY package*.json ./
-RUN npm ci --production
+RUN npm ci --omit=dev
+
+FROM node:20-alpine AS runtime
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    PORT=3000
+
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY package*.json ./
 
 COPY src/ ./src/
 
@@ -470,6 +539,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
 
 CMD ["node", "src/index.js"]
+
 ````
 
 ---
@@ -508,6 +578,7 @@ services:
 
 volumes:
   caddy_data:
+
 ````
 
 ---
@@ -516,12 +587,13 @@ volumes:
 
 *Relative Path: `Caddyfile` | Size: 0.2 KB | Total Lines: 6*
 
-````caddyfile
+````text
 # Replace books.yourdomain.com with your actual domain before deploying.
 # Caddy will automatically obtain and renew a Let's Encrypt certificate.
 books.yourdomain.com {
   reverse_proxy app:3000
 }
+
 ````
 
 ---
@@ -530,7 +602,7 @@ books.yourdomain.com {
 
 *Relative Path: `.gitignore` | Size: 0.1 KB | Total Lines: 13*
 
-````gitignore
+````text
 node_modules/
 .env
 data/
@@ -543,6 +615,7 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
 ````
 
 ---
@@ -551,7 +624,7 @@ Thumbs.db
 
 *Relative Path: `.dockerignore` | Size: 0.1 KB | Total Lines: 11*
 
-````dockerignore
+````text
 node_modules
 data
 tmp
@@ -562,13 +635,14 @@ README.md
 DEPLOY.md
 audit_report.md
 context.md
+
 ````
 
 ---
 
 ## File: `README.md`
 
-*Relative Path: `README.md` | Size: 7.7 KB | Total Lines: 160*
+*Relative Path: `README.md` | Size: 8.3 KB | Total Lines: 164*
 
 ````markdown
 # Endpaper
@@ -588,8 +662,10 @@ Use an admin account for yourself and add friends and family as readers from **A
 
 - **Shared library shelf** - One EPUB catalogue with cover art and shared collections for everyone.
 - **Private reading state** - Per-user progress, status, ratings, bookmarks, highlights, reading time, and settings.
-- **Full EPUB reader** - Paginated and scrolled layouts, customizable fonts, themes, and spacing.
-- **Search, sorting, and filters** - Find books by title or author, browse collections, and sort by progress or recency.
+- **Full EPUB reader** - Paginated and scrolled layouts, customizable fonts, themes, spacing, gestures, text-to-speech controls, and in-book search.
+- **Library discovery** - Smart shelves, multi-book continue reading, metadata search, sorting, filters, bulk actions, and a global highlights notebook.
+- **Offline-first PWA** - Explicit per-book downloads, range-aware offline reading, queued reading-state sync, and safe deferred updates.
+- **Reading insights** - Goals, streaks, comparisons, monthly trends, favorite books, and personalized time estimates.
 - **Admin tools** - Create reader/admin accounts and maintain the shared catalogue.
 - **Backup and restore** - Admin-only backup exports and imports for the shared library and supported personal reading data.
 - **Responsive UI** - Works across phones, tablets, and desktop browsers.
@@ -620,7 +696,7 @@ Endpaper requires Node.js 20 or newer.
 
 ```bash
 cd server
-npm install
+npm ci
 
 # Create the first admin account. Replace both values with your own.
 npm run set-passphrase -- "a long unique passphrase" admin
@@ -642,6 +718,8 @@ Once signed in as an admin, use **Admin Settings** to create reader accounts for
 ## Backups
 
 Export and import are admin-only. An export includes EPUBs, covers, shared books and collections, and supported personal reading data. It excludes credentials, admin status, and login sessions.
+
+The server's automatic daily files in `data/backups/` are SQLite snapshots for database recovery; they do not contain EPUB or cover files. Back up the complete `data/` directory or download an in-app export when you need a portable, full-library backup.
 
 Import is a merge: existing shared books are preserved and missing shared records are added. Local users and their roles are never changed. Personal data from a backup is applied only when its username exactly matches an existing local account; data for other usernames is skipped. Export before importing a backup from another device, and import only archives you trust.
 
@@ -669,7 +747,7 @@ Because Endpaper is a lightweight Node.js + SQLite application, you do **not** n
    ```bash
    git clone <your-repo-url> /opt/endpaper
    cd /opt/endpaper/server
-   npm install
+   npm ci --omit=dev
 
    # Create your initial admin account
    node src/lib/passphrase.js --set "your-secure-passphrase" admin
@@ -723,20 +801,21 @@ git pull origin main
 
 # 2. Install any dependency updates
 cd server
-npm install --production
+npm ci --omit=dev
 
 # 3. Restart the application seamlessly
 pm2 restart endpaper
 ```
 
 > **Note:** All your books (`data/books/`), covers (`data/covers/`), and SQLite database (`data/endpaper.db`) remain completely intact in the persistent `data/` directory. Database migrations execute automatically when the server boots.
+
 ````
 
 ---
 
 ## File: `DEPLOY.md`
 
-*Relative Path: `DEPLOY.md` | Size: 5.3 KB | Total Lines: 186*
+*Relative Path: `DEPLOY.md` | Size: 5.6 KB | Total Lines: 188*
 
 ````markdown
 # Deploying Endpaper
@@ -844,7 +923,7 @@ If you prefer not to use Docker, you can run Endpaper natively on your VPS using
 
 2. **Install dependencies:**
    ```bash
-   npm install
+   npm ci --omit=dev
    ```
 
 3. **Start the app with PM2:**
@@ -864,13 +943,15 @@ If you prefer not to use Docker, you can run Endpaper natively on your VPS using
 5. **Updating the app:**
    ```bash
    git pull origin main
-   npm install
+   npm ci --omit=dev
    pm2 restart endpaper
    ```
 
 ## Backups
 
 > **Important:** The VPS may hold the only copy of your library. Back up the entire `data/` directory regularly; it contains the SQLite database, EPUBs, and covers.
+
+Endpaper also writes automatic SQLite snapshots to `data/backups/`. Those snapshots protect the database during migrations and routine operation, but they are not full-library backups because EPUB and cover files are stored separately.
 
 ### Option 1: Manual backup
 
@@ -885,7 +966,7 @@ scp endpaper-backup-*.tar.gz your-local-machine:/backups/
 crontab -e
 ```
 
-Add a daily backup:
+Add a daily full-data backup:
 
 ```text
 0 3 * * * cd /opt/endpaper && tar czf /backups/endpaper-$(date +\%Y\%m\%d).tar.gz data/
@@ -924,13 +1005,14 @@ For a reader account, replace `admin` with that reader's username. This command 
 ### Login fails because no account exists
 
 Create the first admin account with the command in step 5, then sign in using both its username and passphrase.
+
 ````
 
 ---
 
 ## File: `public/manifest.json`
 
-*Relative Path: `public/manifest.json` | Size: 0.9 KB | Total Lines: 20*
+*Relative Path: `public/manifest.json` | Size: 0.7 KB | Total Lines: 32*
 
 ````json
 {
@@ -944,24 +1026,37 @@ Create the first admin account with the command in step 5, then sign in using bo
   "orientation": "any",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23C9973F'/%3E%3Cstop offset='100%25' stop-color='%23A9803F'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='96' fill='%23F6F1E7'/%3E%3Crect x='176' y='96' width='160' height='320' rx='8' fill='url(%23g)'/%3E%3Crect x='316' y='96' width='24' height='320' rx='4' fill='rgba(0,0,0,0.15)'/%3E%3C/svg%3E",
-      "sizes": "512x512",
-      "type": "image/svg+xml",
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "categories": ["books", "education"]
 }
+
 ````
 
 ---
 
 ## File: `public/sw.js`
 
-*Relative Path: `public/sw.js` | Size: 4.1 KB | Total Lines: 126*
+*Relative Path: `public/sw.js` | Size: 5.2 KB | Total Lines: 142*
 
 ````javascript
-const BUILD_VERSION = 'v10.11.0-20260922';
+const BUILD_VERSION = 'v12.0.0-20260922';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const STATIC_ASSETS = [
@@ -969,15 +1064,35 @@ const STATIC_ASSETS = [
   '/index.html',
   '/app.css',
   '/app.js',
+  '/jszip.min.js',
   '/epub.min.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png',
+  '/icons/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
 });
+
+async function cachedRangeResponse(request, cached) {
+  const range = request.headers.get('range');
+  if (!range || !cached) return cached;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (!match) return new Response(null, { status: 416 });
+  const blob = await cached.blob();
+  let start = match[1] ? Number(match[1]) : Math.max(0, blob.size - Number(match[2] || 0));
+  let end = match[2] && match[1] ? Number(match[2]) : blob.size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= blob.size) {
+    return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${blob.size}` } });
+  }
+  end = Math.min(end, blob.size - 1);
+  return new Response(blob.slice(start, end + 1), { status: 206, headers: { 'Content-Type': cached.headers.get('Content-Type') || 'application/epub+zip', 'Content-Length': String(end - start + 1), 'Content-Range': `bytes ${start}-${end}/${blob.size}`, 'Accept-Ranges': 'bytes' } });
+}
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -1026,42 +1141,37 @@ self.addEventListener('fetch', (e) => {
 
   // Book files and covers: Network first with runtime cache fallback and background cache write
   if (url.pathname.includes('/api/books/') && (url.pathname.includes('/file') || url.pathname.includes('/cover'))) {
+    const cacheRequest = new Request(e.request.url, { credentials: 'same-origin' });
     e.respondWith(
       fetch(e.request).then((fetchRes) => {
         if (fetchRes && fetchRes.status === 200) {
           const resClone = fetchRes.clone();
-          caches.open(RUNTIME_CACHE_NAME).then((cache) => cache.put(e.request, resClone)).catch(() => {});
+          caches.open(RUNTIME_CACHE_NAME).then((cache) => cache.put(cacheRequest, resClone)).catch(() => {});
         }
         return fetchRes;
       }).catch(() => {
-        return caches.open(RUNTIME_CACHE_NAME).then((cache) => cache.match(e.request));
+        return caches.open(RUNTIME_CACHE_NAME).then(async cache => cachedRangeResponse(e.request, await cache.match(cacheRequest)));
       })
     );
     return;
   }
 
-  // Other API endpoints: Network first, fallback to offline cache if present
+  // Personal API payloads are deliberately not placed in a shared service-
+  // worker cache. Return an explicit offline response instead of pretending a
+  // cache fallback exists (and avoid leaking one account's data to another).
   if (url.pathname.startsWith('/api/')) {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
+      fetch(e.request).catch(() => new Response(JSON.stringify({ error: 'Offline' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      }))
     );
     return;
   }
 
-  // External CDNs & Google Fonts: Stale-While-Revalidate with caching
+  // External lookups (currently the optional dictionary service) are managed
+  // by the bounded application cache rather than an unbounded CacheStorage.
   if (url.origin !== location.origin) {
-    e.respondWith(
-      caches.match(e.request).then((cachedRes) => {
-        const fetchPromise = fetch(e.request).then((fetchRes) => {
-          if (fetchRes && fetchRes.status === 200) {
-            const resClone = fetchRes.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, resClone)).catch(() => {});
-          }
-          return fetchRes;
-        }).catch(() => null);
-        return cachedRes || fetchPromise;
-      })
-    );
     return;
   }
 
@@ -1087,13 +1197,14 @@ self.addEventListener('fetch', (e) => {
     })
   );
 });
+
 ````
 
 ---
 
 ## File: `public/index.html`
 
-*Relative Path: `public/index.html` | Size: 35.5 KB | Total Lines: 541*
+*Relative Path: `public/index.html` | Size: 41.9 KB | Total Lines: 647*
 
 ````html
 <!DOCTYPE html>
@@ -1106,25 +1217,43 @@ self.addEventListener('fetch', (e) => {
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Endpaper">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23C9973F'/%3E%3Cstop offset='100%25' stop-color='%23A9803F'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='96' fill='%23F6F1E7'/%3E%3Crect x='176' y='96' width='160' height='320' rx='8' fill='url(%23g)'/%3E%3Crect x='316' y='96' width='24' height='320' rx='4' fill='rgba(0,0,0,0.15)'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="/jszip.min.js"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
 <script src="/epub.min.js"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
 <link rel="stylesheet" href="app.css">
 
   <script>
     if ('serviceWorker' in navigator) {
       let refreshing = false;
+      let hadController = Boolean(navigator.serviceWorker.controller);
       navigator.serviceWorker.addEventListener('controllerchange', () => {
+        // clients.claim() also fires during the first install. There is no old
+        // application shell to replace in that case, so avoid a surprise reload.
+        if (!hadController) {
+          hadController = true;
+          return;
+        }
         if (refreshing) return;
         refreshing = true;
-        window.location.reload();
+        if (document.body.classList.contains('reader-active')) {
+          window.__reloadAfterReader = true;
+        } else {
+          window.location.reload();
+        }
       });
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').then((reg) => {
+          const announce = () => {
+            if (!reg.waiting) return;
+            window.__pendingServiceWorker = reg.waiting;
+            document.getElementById('update-banner')?.removeAttribute('hidden');
+          };
+          announce();
+          reg.addEventListener('updatefound', () => reg.installing?.addEventListener('statechange', () => {
+            if (reg.installing?.state === 'installed' && navigator.serviceWorker.controller) announce();
+          }));
           reg.update().catch(() => {});
         }).catch(err => console.error('SW registration failed:', err));
       });
@@ -1181,6 +1310,9 @@ self.addEventListener('fetch', (e) => {
       <button class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Toggle fullscreen" style="display:none;" onclick="toggleFullscreen()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M8 21H4a1 1 0 0 1-1-1v-4M16 21h4a1 1 0 0 0 1-1v-4"/></svg>
       </button>
+      <button class="icon-btn" id="reader-more-btn" title="More reading tools" aria-label="More reading tools" aria-expanded="false" style="display:none;" onclick="toggleReaderMoreMenu(event)">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+      </button>
       <button class="icon-btn" id="help-toggle" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onclick="openShortcutsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 1.7-2.3 3.3"/><line x1="12" y1="17" x2="12" y2="17.1"/></svg>
       </button>
@@ -1205,6 +1337,14 @@ self.addEventListener('fetch', (e) => {
       <input type="file" id="file-input" accept=".epub" multiple hidden>
       <input type="file" id="import-input" accept=".zip" style="display:none;" data-admin-only hidden>
     </div>
+    <span id="sync-status" class="sync-status" data-state="saved" hidden aria-live="polite"></span>
+    <div id="reader-more-menu" class="reader-more-menu" hidden>
+      <button type="button" onclick="toggleDrawer('search'); toggleReaderMoreMenu()">Search book</button>
+      <button type="button" onclick="toggleDrawer('bookmarks'); toggleReaderMoreMenu()">Notebook</button>
+      <button type="button" onclick="document.getElementById('tts-btn').click(); toggleReaderMoreMenu()">Read aloud</button>
+      <button type="button" onclick="toggleFullscreen(); toggleReaderMoreMenu()">Fullscreen</button>
+      <button type="button" onclick="openShortcutsModal(); toggleReaderMoreMenu()">Help</button>
+    </div>
   </div>
 
   <!-- Library -->
@@ -1220,14 +1360,15 @@ self.addEventListener('fetch', (e) => {
       <div id="dropzone" hidden>Drag an .epub file here, or use "Add book" above</div>
       <p id="empty-import-row" data-admin-only hidden style="margin-top:18px; font-size:13px;">Already have a backup? <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import backup</button></p>
     </div>
-    <div id="continue-card" style="display:none;"></div>
+    <div id="continue-card" class="continue-rail" style="display:none;"></div>
+    <div id="smart-sections" style="display:none;"></div>
     <div id="shelf-header" style="display:none;">
       <div class="shelf-title-group">
         <h2>Shared library</h2>
         <span id="shelf-count" class="shelf-badge"></span>
       </div>
       <div class="shelf-controls">
-        <input id="shelf-search" class="shelf-select" type="search" placeholder="Search books…" aria-label="Search library" oninput="renderShelf()">
+        <input id="shelf-search" class="shelf-select" type="search" placeholder="Search books…" aria-label="Search library" oninput="scheduleShelfRender()">
         <select id="shelf-filter" class="shelf-select" onchange="renderShelf()">
           <option value="all">All Books</option>
           <option value="unread">Unread</option>
@@ -1242,10 +1383,16 @@ self.addEventListener('fetch', (e) => {
           <option value="author">Author</option>
           <option value="progress">Progress</option>
         </select>
+        <select id="shelf-density" class="shelf-select" aria-label="Shelf density" onchange="renderShelf()">
+          <option value="comfortable">Comfortable</option>
+          <option value="compact">Compact</option>
+        </select>
         <button type="button" class="file-link-btn" onclick="openStatsModal()" title="Reading statistics">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px; height:13px; margin-right:4px;"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
           Stats
         </button>
+        <button type="button" class="file-link-btn" onclick="openNotebookModal()">Notebook</button>
+        <button type="button" class="file-link-btn" id="bulk-select-btn" onclick="toggleBulkMode()">Select</button>
         <div class="admin-library-tools dropdown-wrap" data-admin-only hidden role="group" aria-label="Shared library tools">
           <button type="button" class="file-link-btn dropdown-toggle" id="library-tools-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleLibraryToolsMenu(event)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px; height:13px; margin-right:4px;"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
@@ -1269,6 +1416,15 @@ self.addEventListener('fetch', (e) => {
         </div>
       </div>
     </div>
+    <div id="bulk-toolbar" hidden aria-live="polite">
+      <span id="bulk-count">0 selected</span>
+      <button type="button" onclick="bulkDownloadOffline()">Download offline</button>
+      <button type="button" data-admin-only hidden onclick="bulkAddToCollection()">Add to collection</button>
+      <button type="button" data-admin-only hidden onclick="bulkRemoveFromCollection()">Remove from collection</button>
+      <button type="button" data-admin-only hidden onclick="bulkEditSeries()">Edit series</button>
+      <button type="button" data-admin-only hidden onclick="bulkDeleteBooks()">Remove</button>
+      <button type="button" onclick="toggleBulkMode(false)">Cancel</button>
+    </div>
     <div id="shelf"></div>
   </div>
 
@@ -1282,6 +1438,13 @@ self.addEventListener('fetch', (e) => {
         <div id="bookmark-ticks"></div>
       </div>
       <span id="progress-pct">0%</span>
+      <span id="progress-remaining" aria-live="polite"></span>
+      <div id="reader-bottom-actions">
+        <button type="button" onclick="toggleDrawer('settings')" aria-label="Reading appearance">Aa</button>
+        <button type="button" onclick="toggleBookmark()" aria-label="Bookmark this page">♧</button>
+        <button type="button" onclick="toggleDrawer('toc')" aria-label="Contents">☰</button>
+        <button type="button" onclick="toggleReaderMoreMenu(event)" aria-label="More">•••</button>
+      </div>
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
@@ -1417,6 +1580,12 @@ self.addEventListener('fetch', (e) => {
         <label class="setting-label" for="letter-spacing-slider">Letter spacing — <span id="letter-spacing-val">Normal</span></label>
         <input type="range" class="mini" id="letter-spacing-slider" min="0" max="3" step="1" value="0" aria-valuetext="Normal letter spacing">
       </div>
+      <div class="setting-group gesture-settings">
+        <span class="setting-label">Gestures &amp; tap zones</span>
+        <label><input type="checkbox" id="gesture-swipe" checked onchange="updateGestureSettings()"> Swipe to turn pages</label>
+        <label><input type="checkbox" id="gesture-edge" checked onchange="updateGestureSettings()"> Edge tap zones</label>
+        <label><input type="checkbox" id="gesture-center" checked onchange="updateGestureSettings()"> Center tap toggles controls</label>
+      </div>
     </aside>
   </div>
 
@@ -1431,6 +1600,10 @@ self.addEventListener('fetch', (e) => {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:13px; height:13px; margin-right:3px;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
     <span>Listen</span>
   </button>
+  <button type="button" class="popup-action-btn" onclick="addNoteToSelection()">Note</button>
+  <button type="button" class="popup-action-btn" onclick="lookupSelectedWord()">Define</button>
+  <button type="button" class="popup-action-btn" onclick="copySelectionText()">Copy</button>
+  <button type="button" class="popup-action-btn" onclick="shareSelectionText()">Share</button>
   <button type="button" id="highlight-remove-btn" style="display:none;" onclick="removeCurrentHighlight()">Remove</button>
 </div>
 
@@ -1458,6 +1631,11 @@ self.addEventListener('fetch', (e) => {
       <button type="button" class="tts-ctrl-btn rate-btn" id="tts-rate-btn" title="Change speech rate" aria-label="Change speech rate" onclick="cycleTtsRate()">
         <span id="tts-rate-label">1.0×</span>
       </button>
+      <select id="tts-voice-select" class="tts-select" aria-label="Voice"></select>
+      <label class="tts-compact-label">Pitch <input id="tts-pitch" type="range" min="0.5" max="2" value="1" step="0.1"></label>
+      <select id="tts-sleep" class="tts-select" aria-label="Sleep timer">
+        <option value="0">No timer</option><option value="10">10 min</option><option value="20">20 min</option><option value="30">30 min</option>
+      </select>
       <button type="button" class="tts-ctrl-btn stop-btn" id="tts-stop-btn" title="Stop reading aloud" aria-label="Stop reading aloud" onclick="stopTts()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -1484,12 +1662,22 @@ self.addEventListener('fetch', (e) => {
       </div>
       <div class="stat-card">
         <div class="stat-number" id="stat-week">0h</div>
-        <div class="stat-label">Read This Week</div>
+        <div class="stat-label">Last 7 Days</div>
       </div>
       <div class="stat-card">
         <div class="stat-number" id="stat-total">0h</div>
         <div class="stat-label">Total Time Read</div>
       </div>
+    </div>
+    <div id="stats-chart" class="stats-chart" aria-label="Reading minutes over the last 14 days"></div>
+    <div id="stats-comparison" class="stats-summary"></div>
+    <div id="stats-most-read" class="stats-summary"></div>
+    <div class="reading-goals">
+      <h4>Optional goals</h4>
+      <label>Daily minutes <input id="goal-daily" type="number" min="0" max="1440" step="5"></label>
+      <label>Weekly hours <input id="goal-weekly" type="number" min="0" max="168" step="0.5"></label>
+      <label>Books per year <input id="goal-books" type="number" min="0" max="1000"></label>
+      <button type="button" onclick="saveReadingGoals()">Save goals</button>
     </div>
     <div class="close-row" style="text-align:right;"><button type="button" class="new-collection-btn" onclick="closeStatsModal()">Close</button></div>
   </div>
@@ -1539,7 +1727,7 @@ self.addEventListener('fetch', (e) => {
         </div>
         <div class="admin-field">
           <label for="new-user-passphrase">Passphrase</label>
-          <input type="password" id="new-user-passphrase" class="new-collection-input" autocomplete="new-password" minlength="4" required>
+          <input type="password" id="new-user-passphrase" class="new-collection-input" autocomplete="new-password" minlength="12" required>
         </div>
         <label class="admin-role-option" for="new-user-isadmin">
           <input type="checkbox" id="new-user-isadmin">
@@ -1586,7 +1774,7 @@ self.addEventListener('fetch', (e) => {
       <p id="reset-passphrase-user-label" style="font-size: 13px; color: var(--ink-soft); margin: 8px 0 14px;"></p>
       <div class="admin-field">
         <label for="reset-passphrase-input">New Passphrase</label>
-        <input type="password" id="reset-passphrase-input" class="new-collection-input" autocomplete="new-password" minlength="4" required placeholder="Minimum 4 characters">
+        <input type="password" id="reset-passphrase-input" class="new-collection-input" autocomplete="new-password" minlength="12" required placeholder="Minimum 12 characters">
       </div>
       <div class="admin-create-actions" style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
         <button type="button" class="file-link-btn" onclick="closeResetPassphraseModal()" style="padding: 8px 12px;">Cancel</button>
@@ -1594,6 +1782,35 @@ self.addEventListener('fetch', (e) => {
       </div>
     </form>
   </div>
+</div>
+
+<div id="book-details-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="book-details-title" aria-hidden="true">
+  <div class="modal-card book-details-card">
+    <div class="modal-title"><h3 id="book-details-title">Book details</h3><button type="button" class="modal-close" onclick="closeBookDetails()" aria-label="Close">×</button></div>
+    <div id="book-details-content"></div>
+    <div id="book-details-actions" class="modal-actions"></div>
+  </div>
+</div>
+
+<div id="notebook-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="notebook-title" aria-hidden="true">
+  <div class="modal-card notebook-card">
+    <div class="modal-title"><h3 id="notebook-title">Notebook</h3><button type="button" class="modal-close" onclick="closeNotebookModal()" aria-label="Close">×</button></div>
+    <input id="notebook-search" type="search" placeholder="Search highlights, notes, books, or tags…" oninput="renderNotebook()">
+    <div id="notebook-tags"></div>
+    <div id="notebook-list"></div>
+  </div>
+</div>
+
+<div id="install-tip" class="install-tip" hidden>
+  <strong>Install Endpaper</strong>
+  <span>In Safari, tap Share, then “Add to Home Screen” for fullscreen reading and reliable offline access.</span>
+  <button type="button" onclick="dismissInstallTip()">Got it</button>
+</div>
+
+<div id="update-banner" class="update-banner" hidden>
+  <span>A new Endpaper version is ready.</span>
+  <button type="button" onclick="applyAppUpdate()">Update now</button>
+  <button type="button" onclick="this.parentElement.hidden=true">Later</button>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
@@ -1636,13 +1853,14 @@ self.addEventListener('fetch', (e) => {
   <div id="dict-tooltip" class="hidden"></div>
 </body>
 </html>
+
 ````
 
 ---
 
 ## File: `public/app.css`
 
-*Relative Path: `public/app.css` | Size: 49.3 KB | Total Lines: 1624*
+*Relative Path: `public/app.css` | Size: 59.5 KB | Total Lines: 1743*
 
 ````css
 :root{
@@ -1657,8 +1875,13 @@ self.addEventListener('fetch', (e) => {
   --cloth-deep: #2C4237;
   --shadow: rgba(32,28,22,0.12);
   --radius: 3px;
-  --font-display: "Fraunces", serif;
-  --font-ui: "Work Sans", sans-serif;
+  --font-display: Georgia, "Times New Roman", serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --accent: var(--gold);
+  --bg: var(--paper);
+  --fg: var(--ink);
+  --border: var(--line);
+  --border-soft: color-mix(in srgb, var(--line) 65%, transparent);
 }
 html.dark-shell{
   --paper: #12151A;
@@ -1739,13 +1962,35 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
   padding: calc(14px + env(safe-area-inset-top)) 22px 14px;
   border-bottom: 1px solid var(--line);
   flex-shrink:0;
-  z-index: 20;
+  z-index: 30;
   background: var(--paper);
   transition: max-height .25s ease, padding .25s ease, opacity .2s ease, border-color .2s ease;
 }
 #app.chrome-hidden #topbar{
   flex:0 0 0; height:0; min-height:0; max-height:0;
   padding:0; opacity:0; border-width:0; pointer-events:none;
+}
+
+/* R-13: In reader mode the chrome bars become translucent glass overlays so
+   the EPUB viewport is exactly the same size whether controls are visible or
+   not. No height-collapse, no viewer resize, no chapter-skip. */
+body.reader-active #topbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 40;
+  transition: transform .22s ease, opacity .18s ease;
+  /* reset shelf-mode flex sizing */
+  flex: initial; height: initial; min-height: initial; max-height: initial;
+  /* translucent glass — adapts automatically to light/sepia/dark/night themes */
+  border-bottom: none;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+body.reader-active #app.chrome-hidden #topbar {
+  transform: translateY(-110%);
+  opacity: 0;
+  pointer-events: none;
 }
 #brand{
   background: none;
@@ -1880,6 +2125,16 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
   grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   gap: 32px 22px;
 }
+
+#shelf.compact {
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 18px 14px;
+}
+
+#shelf.compact .book-meta-under .author,
+#shelf.compact .shelf-rating-widget {
+  display: none;
+}
 .book-card{
   display:flex; flex-direction:column; cursor:pointer;
   position:relative; transition: transform .18s ease;
@@ -1965,10 +2220,8 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
   background: var(--reader-page-bg, var(--paper));
   padding-bottom: env(safe-area-inset-bottom);
 }
-#app.chrome-hidden #viewer-wrap{
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-}
+/* viewer-wrap fills all available space; its dimensions never change when
+   chrome is toggled — the overlays sit on top without stealing any height */
 #viewer{
   width:100%; height:100%;
 }
@@ -2005,13 +2258,34 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
   display:flex; align-items:center; gap:14px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
-  z-index: 10;
+  z-index: 30;
   max-height: 54px; overflow:hidden;
   transition: max-height .25s ease, padding .25s ease, opacity .2s ease, border-color .2s ease;
 }
 #app.chrome-hidden #progress-bar{
   flex:0 0 0; height:0; min-height:0; max-height:0;
   padding-top:0; padding-bottom:0; opacity:0; border-width:0; pointer-events:none;
+}
+
+/* R-13: progress-bar as translucent glass overlay during reader mode */
+body.reader-active #progress-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  padding: 10px 22px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  border-bottom: none;
+  z-index: 40;
+  transition: transform .22s ease, opacity .18s ease;
+  flex: initial; height: initial; min-height: initial; max-height: initial; overflow: visible;
+  /* translucent glass */
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+body.reader-active #app.chrome-hidden #progress-bar {
+  transform: translateY(110%);
+  opacity: 0;
+  pointer-events: none;
 }
 /* A small tap hint that briefly appears the first time chrome is hidden */
 #chrome-hint{
@@ -2768,10 +3042,40 @@ input.shelf-select:focus{ width:220px; }
   }
 }
 
+/* R-13 mobile: lock the reader canvas to exactly the screen dimensions so
+   no ancestor layout can resize the EPUB viewport. The chrome overlays float
+   on top; viewer dimensions are constant whether controls are visible or not. */
+@media (max-width: 768px) {
+  body.reader-active #app {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  body.reader-active #reader-view {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  body.reader-active #viewer-wrap {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;         /* overlays float on top — no padding needed */
+  }
+  body.reader-active #viewer {
+    width: 100%;
+    height: 100%;
+  }
+}
+
 html.dark-shell{ color-scheme:dark; }
 html.dark-shell #reader-view,
 html.dark-shell #viewer-wrap{ background: var(--reader-page-bg, var(--paper)); }
-html.dark-shell #progress-bar{ background:var(--paper); }
+html.dark-shell #progress-bar{ /* in reader mode the translucent backdrop handles theming; only override in shelf mode */ }
 html.dark-shell .drawer,
 html.dark-shell .nav-zone{ box-shadow:0 5px 18px rgba(0,0,0,.34); }
 
@@ -3268,13 +3572,47 @@ html.dark-shell .admin-btn-sm:hover {
   margin: 0;
   line-height: 1.4;
 }
+
+/* Product home, sync, bulk actions, and overlay tools */
+.sync-status{position:absolute;right:calc(env(safe-area-inset-right) + 12px);bottom:-22px;z-index:4;padding:3px 9px;border-radius:999px;background:var(--paper-card);border:1px solid var(--line);font-size:11px;color:var(--ink-soft);box-shadow:0 2px 8px var(--shadow)}
+.sync-status[data-state="offline"],.sync-status[data-state="pending"]{color:#9b5b22}.sync-status[data-state="saved"]{color:var(--cloth)}
+.reader-more-menu{position:fixed;right:12px;top:calc(58px + env(safe-area-inset-top));z-index:120;background:var(--paper-card);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 35px var(--shadow);padding:6px;min-width:190px}
+.reader-more-menu button{display:block;width:100%;min-height:44px;padding:9px 12px;text-align:left;border:0;background:transparent;color:var(--ink);border-radius:8px;font:500 13px var(--font-ui)}
+.reader-more-menu button:hover{background:color-mix(in srgb,var(--gold) 10%,transparent)}
+.continue-rail{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 2px 12px;margin-bottom:22px;background:none!important;border:0!important;box-shadow:none!important}
+.continue-item{scroll-snap-align:start;display:grid;grid-template-columns:82px minmax(175px,260px);gap:13px;min-width:290px;padding:12px;background:var(--paper-card);border:1px solid var(--line);border-radius:12px;cursor:pointer}
+.continue-item .spine{height:120px;width:82px;border-radius:5px}.continue-item h3{font:600 16px var(--font-display);margin:4px 0}.continue-item .kicker{text-transform:uppercase;letter-spacing:.08em;font-size:9px;color:var(--gold)}
+#smart-sections{display:grid;gap:22px;margin-bottom:28px}.smart-section h3{margin:0 0 10px;font:600 17px var(--font-display)}.smart-rail{display:flex;gap:11px;overflow-x:auto;padding-bottom:6px}.smart-book{min-width:145px;max-width:145px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--paper-card);cursor:pointer}.smart-book strong,.smart-book span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.smart-book strong{font-size:12px}.smart-book span{font-size:10px;color:var(--ink-soft);margin-top:3px}
+#bulk-toolbar{position:sticky;top:72px;z-index:15;align-items:center;gap:8px;padding:9px 12px;margin:8px 0 18px;background:var(--paper-card);border:1px solid var(--line);border-radius:10px;box-shadow:0 5px 18px var(--shadow)}#bulk-toolbar:not([hidden]){display:flex}#bulk-toolbar span{margin-right:auto;font-size:12px;font-weight:600}#bulk-toolbar button,.reading-goals button{min-height:36px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);padding:6px 10px}
+.book-card.bulk-mode{position:relative}.book-select{position:absolute;z-index:4;top:8px;left:8px;width:24px;height:24px;accent-color:var(--gold)}.book-card.selected .spine{outline:3px solid var(--gold);outline-offset:2px}
+.book-menu-btn{position:absolute;right:7px;top:7px;z-index:3;width:36px;height:36px;border:0;border-radius:50%;background:rgba(20,18,14,.72);color:#fff;font-size:20px}.book-card .spine{position:relative}.cover-img{display:block;width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.book-details-card{max-width:580px}.book-details-layout{display:grid;grid-template-columns:120px 1fr;gap:18px}.book-details-cover{width:120px;aspect-ratio:2/3;object-fit:cover;border-radius:7px;background:var(--cloth)}.book-detail-meta{color:var(--ink-soft);font-size:12px;line-height:1.6}.book-description{white-space:pre-line;line-height:1.55}.modal-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.modal-actions button{min-height:42px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink)}
+.notebook-card{max-width:760px;max-height:86dvh;overflow:auto}#notebook-search{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink)}#notebook-tags{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.tag-chip{border:1px solid var(--line);border-radius:999px;padding:4px 9px;background:var(--paper);color:var(--ink);font-size:11px}.notebook-item{padding:14px 2px;border-bottom:1px solid var(--line)}.notebook-item blockquote{margin:6px 0;font:italic 15px/1.5 var(--font-display)}.notebook-item small{color:var(--ink-soft)}
+.stats-chart{height:150px;display:flex;align-items:end;gap:5px;margin:20px 0 10px;padding-top:12px;border-bottom:1px solid var(--line)}.stats-bar{flex:1;min-width:6px;background:var(--gold);border-radius:4px 4px 0 0;opacity:.78;position:relative}.stats-bar span{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font-size:8px;color:var(--ink-soft)}.stats-summary{font-size:12px;line-height:1.6;margin-top:12px}.reading-goals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}.reading-goals h4{grid-column:1/-1;margin:0}.reading-goals label{display:grid;gap:4px;font-size:11px;color:var(--ink-soft)}.reading-goals input{width:100%;padding:7px;background:var(--paper);border:1px solid var(--line);color:var(--ink)}
+.tts-select{max-width:120px;height:34px;border:1px solid var(--line);border-radius:6px;background:var(--paper-card);color:var(--ink)}.tts-compact-label{font-size:10px;display:flex;align-items:center;gap:4px}.tts-compact-label input{width:64px}
+.gesture-settings label{display:block;margin:8px 0;font-size:12px}.gesture-settings input{accent-color:var(--gold)}
+.install-tip,.update-banner{position:fixed;z-index:500;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;align-items:center;gap:10px;width:min(92vw,620px);padding:12px 14px;background:var(--paper-card);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 38px var(--shadow);font-size:12px}.install-tip[hidden],.update-banner[hidden]{display:none}.install-tip span{flex:1}.install-tip button,.update-banner button{min-height:36px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:7px;padding:6px 10px}
+#progress-remaining{min-width:88px;font-size:10px;color:var(--ink-soft);text-align:right}
+#reader-bottom-actions{display:none}
+
+@media (hover:none) and (pointer:coarse){
+  .icon-btn,#topbar button,.drawer button,.popup-action-btn{min-width:44px;min-height:44px}
+  body.reader-active #search-toggle,body.reader-active #bookmarks-toggle,body.reader-active #tts-btn,body.reader-active #fullscreen-btn,body.reader-active #help-toggle,body.reader-active #shell-theme-toggle,body.reader-active #logout-btn,body.reader-active #admin-toggle{display:none!important}
+  body.reader-active #reader-more-btn{display:flex!important}
+  body.reader-active #progress-bar{padding-bottom:calc(8px + env(safe-area-inset-bottom));min-height:56px}
+  body.reader-active #progress-chapter,body.reader-active #progress-track,body.reader-active #progress-pct,body.reader-active #progress-remaining{display:none}
+  #reader-bottom-actions{display:flex;width:100%;align-items:center;justify-content:space-around}#reader-bottom-actions button{min-width:52px;min-height:44px;border:0;background:transparent;color:var(--ink);font:600 16px var(--font-ui)}
+  .reading-goals{grid-template-columns:1fr}.book-details-layout{grid-template-columns:90px 1fr}.book-details-cover{width:90px}
+  .tts-info{display:none}.tts-bar-content{justify-content:center}.tts-select,.tts-compact-label{display:none}
+}
+
 ````
 
 ---
 
 ## File: `public/app.js`
 
-*Relative Path: `public/app.js` | Size: 164.5 KB | Total Lines: 4330*
+*Relative Path: `public/app.js` | Size: 202.5 KB | Total Lines: 4948*
 
 ````javascript
 /* ================================================================
@@ -3290,45 +3628,53 @@ let allCollections = [];
 // Keep a small, account-scoped LRU of recently opened EPUBs. This avoids a
 // second download when a reader briefly returns to the shelf, without letting
 // a very large book pin an unbounded amount of mobile memory.
+// R-16: Store Blobs instead of ArrayBuffers so EPUB.js receives a blob:// URL
+// — the backing data lives outside the GC heap and no .slice() copy is needed.
 const EPUB_BUFFER_CACHE_MAX_BYTES = 24 * 1024 * 1024;
 const EPUB_BUFFER_CACHE_MAX_ITEM_BYTES = 12 * 1024 * 1024;
-const epubBufferCache = new Map();
-const epubBufferRequests = new Map();
+const epubBlobCache = new Map();     // key → Blob
+const epubBlobRequests = new Map();  // key → Promise<Blob>
 const epubLocationCache = new Map();
-let epubBufferCacheBytes = 0;
+let epubBlobCacheBytes = 0;
+
+// Blob URL for the currently open book; revoked in discardReaderState (R-16)
+let currentBlobUrl = null;
 
 function readerAssetCacheKey(bookId, version = accountVersion) {
   return `${version}:${bookId}`;
 }
 
-function getCachedEpubBuffer(key) {
-  const buffer = epubBufferCache.get(key);
-  if (!buffer) return null;
-  epubBufferCache.delete(key);
-  epubBufferCache.set(key, buffer);
-  return buffer;
+function getCachedEpubBlob(key) {
+  const blob = epubBlobCache.get(key);
+  if (!blob) return null;
+  // LRU: re-insert to move to tail
+  epubBlobCache.delete(key);
+  epubBlobCache.set(key, blob);
+  return blob;
 }
 
-function rememberEpubBuffer(key, buffer) {
-  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength > EPUB_BUFFER_CACHE_MAX_ITEM_BYTES) return;
-  const previous = epubBufferCache.get(key);
-  if (previous) epubBufferCacheBytes -= previous.byteLength;
-  epubBufferCache.delete(key);
-  epubBufferCache.set(key, buffer);
-  epubBufferCacheBytes += buffer.byteLength;
-  while (epubBufferCacheBytes > EPUB_BUFFER_CACHE_MAX_BYTES && epubBufferCache.size > 1) {
-    const oldestKey = epubBufferCache.keys().next().value;
-    const oldest = epubBufferCache.get(oldestKey);
-    epubBufferCache.delete(oldestKey);
-    epubBufferCacheBytes -= oldest.byteLength;
+function rememberEpubBlob(key, blob) {
+  if (!(blob instanceof Blob) || blob.size > EPUB_BUFFER_CACHE_MAX_ITEM_BYTES) return;
+  const previous = epubBlobCache.get(key);
+  if (previous) epubBlobCacheBytes -= previous.size;
+  epubBlobCache.delete(key);
+  epubBlobCache.set(key, blob);
+  epubBlobCacheBytes += blob.size;
+  while (epubBlobCacheBytes > EPUB_BUFFER_CACHE_MAX_BYTES && epubBlobCache.size > 1) {
+    const oldestKey = epubBlobCache.keys().next().value;
+    const oldest = epubBlobCache.get(oldestKey);
+    epubBlobCache.delete(oldestKey);
+    epubBlobCacheBytes -= oldest.size;
   }
 }
 
 function clearReaderAssetCaches() {
-  epubBufferCache.clear();
-  epubBufferRequests.clear();
+  epubBlobCache.clear();
+  epubBlobRequests.clear();
   epubLocationCache.clear();
-  epubBufferCacheBytes = 0;
+  bookSearchIndex.clear();
+  bookTextIndex.clear();
+  epubBlobCacheBytes = 0;
 }
 
 const api = {
@@ -3359,6 +3705,7 @@ const api = {
       const err = new Error(data.error || `Request failed (${res.status})`);
       err.status = res.status;
       err.data = data;
+      err.isOffline = res.status === 503 && data.error === 'Offline';
       err.book_id = data.book_id;
       err.title = data.title;
       throw err;
@@ -3370,7 +3717,7 @@ const api = {
     const res = await this.fetch('/api/sessions/start', {
       ...opts,
       method: 'POST',
-      body: JSON.stringify({ book_id: bookId }),
+      body: JSON.stringify({ book_id: bookId, client_id: CLIENT_ID }),
     });
     return res.json();
   },
@@ -3382,8 +3729,18 @@ const api = {
   },
 
   async getBooks(opts = {}) {
-    const res = await this.fetch('/api/books?limit=10000', opts);
-    return res.json();
+    const books = [];
+    let page = 1;
+    let firstPayload = null;
+    do {
+      const res = await this.fetch(`/api/books?limit=100&page=${page}`, opts);
+      const payload = await res.json();
+      if (!firstPayload) firstPayload = payload;
+      books.push(...(Array.isArray(payload) ? payload : (payload.books || [])));
+      if (Array.isArray(payload) || page >= (payload.totalPages || 1)) break;
+      page++;
+    } while (page <= 10_000);
+    return { ...(firstPayload || {}), books, page: 1, totalPages: 1 };
   },
 
   async uploadBook(file) {
@@ -3399,25 +3756,26 @@ const api = {
   async getBookFile(id, opts = {}) {
     const requestAccountVersion = opts.expectedAccountVersion == null ? accountVersion : opts.expectedAccountVersion;
     const key = readerAssetCacheKey(id, requestAccountVersion);
-    const cached = getCachedEpubBuffer(key);
+    // R-16: Return Blob from cache — EPUB.js will receive a blob:// URL, no .slice() copy needed
+    const cached = getCachedEpubBlob(key);
     if (cached) return cached;
     if (opts.signal && opts.signal.aborted) {
       const error = new Error('The user aborted a request.');
       error.name = 'AbortError';
       throw error;
     }
-    if (epubBufferRequests.has(key)) return epubBufferRequests.get(key);
+    if (epubBlobRequests.has(key)) return epubBlobRequests.get(key);
 
     const pending = this.fetch(`/api/books/${id}/file`, {
       ...opts,
       headers: {},  // no Content-Type for binary
-    }).then(res => res.arrayBuffer()).then(buffer => {
-      if (requestAccountVersion === accountVersion && currentUser) rememberEpubBuffer(key, buffer);
-      return buffer;
+    }).then(res => res.blob()).then(blob => {
+      if (requestAccountVersion === accountVersion && currentUser) rememberEpubBlob(key, blob);
+      return blob;
     }).finally(() => {
-      if (epubBufferRequests.get(key) === pending) epubBufferRequests.delete(key);
+      if (epubBlobRequests.get(key) === pending) epubBlobRequests.delete(key);
     });
-    epubBufferRequests.set(key, pending);
+    epubBlobRequests.set(key, pending);
     return pending;
   },
 
@@ -3505,6 +3863,11 @@ const api = {
     return res.json();
   },
 
+  async getAllHighlights(query = '', opts = {}) {
+    const res = await this.fetch(`/api/highlights?q=${encodeURIComponent(query)}`, opts);
+    return res.json();
+  },
+
   async addHighlight(bookId, data, opts = {}) {
     const res = await this.fetch(`/api/books/${bookId}/highlights`, {
       ...opts,
@@ -3584,6 +3947,10 @@ let readerAbortController = null;
 let activeReaderRequest = null;
 let isDraggingProgressSlider = false;
 let seekLockUntil = 0;
+let lastReaderInteractionAt = 0;
+let personalReadingBytesPerMinute = 4200;
+const CLIENT_ID = sessionStorage.getItem('endpaper_client_id') || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+sessionStorage.setItem('endpaper_client_id', CLIENT_ID);
 
 function showToast(message, action = null) {
   const toast = document.getElementById('toast');
@@ -3707,6 +4074,7 @@ const DEFAULT_READER_SETTINGS = Object.freeze({
   marginIdx: 1,
   letterSpacingIdx: 0,
   layout: 'paginated',
+  gestures: { swipe: true, edge: true, center: true },
 });
 
 const settings = { ...DEFAULT_READER_SETTINGS };
@@ -3746,6 +4114,7 @@ function normalizeSettings() {
   settings.marginIdx = Number.isInteger(settings.marginIdx) ? Math.max(0, Math.min(MARGIN_LABELS.length - 1, settings.marginIdx)) : 1;
   settings.letterSpacingIdx = Number.isInteger(settings.letterSpacingIdx) ? Math.max(0, Math.min(SPACING_VALUES.length - 1, settings.letterSpacingIdx)) : 0;
   if (!['paginated', 'scrolled'].includes(settings.layout)) settings.layout = 'paginated';
+  settings.gestures = { swipe: true, edge: true, center: true, ...(settings.gestures || {}) };
 }
 
 /* ---------------- Auth gate ---------------- */
@@ -3764,7 +4133,7 @@ async function handleLogin(e) {
   const userIn = document.getElementById('username-input');
   const passIn = document.getElementById('passphrase-input');
   const username = userIn.value.trim();
-  const passphrase = passIn.value.trim();
+  const passphrase = passIn.value;
 
   if (!username) { errEl.textContent = 'Please enter a username.'; return false; }
   if (!passphrase) { errEl.textContent = 'Please enter a passphrase.'; return false; }
@@ -3820,6 +4189,9 @@ async function logout() {
     currentSessionId = null;
   }
   setCurrentUser(null);
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_RUNTIME_CACHE' });
+  }
   showLoginGate();
   document.getElementById('username-input').focus();
   showToast('You have been logged out.');
@@ -3871,14 +4243,24 @@ async function handleFiles(fileList){
   const progressEl = document.getElementById('upload-progress');
   const progressText = document.getElementById('upload-progress-text');
   progressEl.classList.add('show');
+  progressText.replaceChildren();
+  const uploadHeading = document.createElement('strong');
+  uploadHeading.textContent = `Adding ${epubFiles.length} book${epubFiles.length === 1 ? '' : 's'}`;
+  const uploadList = document.createElement('div');
+  const uploadRows = epubFiles.map(file => {
+    const row = document.createElement('div');
+    row.className = 'upload-status-row';
+    row.textContent = `${file.name} — waiting`;
+    uploadList.appendChild(row);
+    return row;
+  });
+  progressText.append(uploadHeading, uploadList);
 
   let uploaded = 0;
   let lastAddedBookId = null;
   for (let i = 0; i < epubFiles.length; i++) {
     const file = epubFiles[i];
-    progressText.textContent = epubFiles.length > 1
-      ? `Uploading ${i + 1} of ${epubFiles.length}…`
-      : `Uploading “${file.name}”…`;
+    uploadRows[i].textContent = `${file.name} — uploading…`;
     try {
       const bookData = await api.uploadBook(file);
       const entry = {
@@ -3890,6 +4272,9 @@ async function handleFiles(fileList){
         rating: bookData.rating != null ? Number(bookData.rating) : null,
         coverColor: bookData.cover_color,
         coverPath: bookData.cover_path,
+        description: bookData.description || '',
+        isbn: bookData.isbn || '',
+        tags: bookData.tags || '',
         progress: bookData.progress_percent || 0,
         status: bookData.status || 'unread',
         lastLocationCfi: bookData.last_location_cfi,
@@ -3903,6 +4288,7 @@ async function handleFiles(fileList){
       renderShelf();
       lastAddedBookId = entry.id;
       uploaded++;
+      uploadRows[i].textContent = `${file.name} — added`;
     } catch(err) {
       console.error('Upload failed:', err);
       if (err.status === 409 || (err.message && err.message.toLowerCase().includes('already in the library'))) {
@@ -3915,6 +4301,7 @@ async function handleFiles(fileList){
       } else {
         showToast(`Could not add “${file.name}”: ${err.message}`);
       }
+      uploadRows[i].textContent = `${file.name} — ${err.status === 409 ? 'already in library' : 'failed'}`;
     }
   }
   progressEl.classList.remove('show');
@@ -3938,11 +4325,14 @@ function cancelBookWarmup() {
 
 function scheduleBookWarmup(entry) {
   if (!entry || !currentUser || entry.fileSize > EPUB_BUFFER_CACHE_MAX_ITEM_BYTES) return;
+  // R-17/R-18: Touch/mobile devices have no hover intent signal — prefetching a
+  // large EPUB wastes bandwidth with no user benefit. Warmup is desktop-only.
+  if (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches) return;
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (connection && (connection.saveData || /(^|-)2g$/.test(connection.effectiveType || ''))) return;
   const expectedAccountVersion = accountVersion;
   const key = readerAssetCacheKey(entry.id, expectedAccountVersion);
-  if (epubBufferCache.has(key) || epubBufferRequests.has(key) || bookWarmupKey === key) return;
+  if (epubBlobCache.has(key) || epubBlobRequests.has(key) || bookWarmupKey === key) return;
 
   cancelBookWarmup();
   bookWarmupKey = key;
@@ -4045,7 +4435,10 @@ function renderShelf(){
     ? library.filter(b => `${b.name || ''} ${b.author || ''}`.toLocaleLowerCase().includes(searchQuery))
     : library;
   if (filterVal === 'unread') filtered = filtered.filter(b => b.progress === 0);
-  else if (filterVal === 'finished') filtered = filtered.filter(b => b.progress >= 95);
+  // R-22: threshold raised from 95 to 98 — avoids premature finished marking on
+  // the second-to-last chapter (R-21 formula now makes last entry reach 100% only
+  // at its actual end, so 98% is a safe auto-finish trigger)
+  else if (filterVal === 'finished') filtered = filtered.filter(b => b.progress >= 98);
   else if (filterVal.startsWith('col_')) {
     const colId = filterVal.substring(4);
     const col = allCollections.find(c => c.id === colId);
@@ -4160,6 +4553,10 @@ async function showShelf(){
       if (isActiveAccount(saveAccountVersion)) console.error('Could not end reading session:', e);
     }
   }
+  if (window.__reloadAfterReader && isActiveAccount(saveAccountVersion)) {
+    window.__reloadAfterReader = false;
+    window.location.reload();
+  }
 }
 
 /* ---------------- Layout (paginated vs scrolled) ---------------- */
@@ -4169,10 +4566,10 @@ function renditionOptions(){
       width: '100%', height: '100%',
       flow: 'scrolled', manager: 'continuous',
       snap: false,
-      sandbox: 'allow-same-origin allow-scripts',
+      sandbox: 'allow-same-origin',
     };
   }
-  return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto', sandbox: 'allow-same-origin allow-scripts' };
+  return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto', sandbox: 'allow-same-origin' };
 }
 
 function setLayout(mode){
@@ -4263,6 +4660,7 @@ function isInteractiveReaderTarget(target) {
 
 function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel) {
   if (!rendition) return false;
+  lastReaderInteractionAt = Date.now();
   const dx = ex - sx;
   const dy = ey - sy;
 
@@ -4270,7 +4668,7 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
   if (win && win.getSelection && !win.getSelection().isCollapsed) return false;
 
   // 1. Horizontal swipe gesture in paginated mode
-  if (settings.layout === 'paginated') {
+  if (settings.layout === 'paginated' && settings.gestures.swipe) {
     const swipeThreshold = 30; // Responsive threshold for mobile swipe
     if (Math.abs(dx) >= swipeThreshold && Math.abs(dx) > Math.abs(dy) * 1.1 && dt < 800) {
       if (dx < 0) turnPage('next');
@@ -4281,7 +4679,7 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
 
   // 2. Clean tap: tap-to-turn zones (left 25% = prev, right 25% = next, center = toggle controls)
   if (!isCancel && !moved && Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 450) {
-    if (settings.layout === 'paginated') {
+    if (settings.layout === 'paginated' && settings.gestures.edge) {
       if (ex < width * 0.25) {
         turnPage('prev');
         return true;
@@ -4290,8 +4688,10 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
         return true;
       }
     }
-    toggleReaderChrome();
-    return true;
+    if (settings.gestures.center) {
+      toggleReaderChrome();
+      return true;
+    }
   }
   return false;
 }
@@ -4382,6 +4782,8 @@ let chromeHintShown = false;
 let chromeResizeTimer = null;
 let chromeResizeFrame = null;
 let lastReaderViewportSize = { width: 0, height: 0 };
+// Auto-hide timer for the Kindle-like 3-second chrome dismiss (R-13)
+let readerChromeTimer = null;
 
 // Page-turn serialization mutex — all rendition.next()/prev() calls route through
 // turnPage() to prevent overlapping navigations from swipe, tap, keyboard, and TTS (R-09)
@@ -4414,6 +4816,13 @@ function getSafeCfi(targetRendition) {
     const loc = r.currentLocation();
     if (!loc || typeof loc.then === 'function') return null;
     return (loc.start && loc.start.cfi) || null;
+  } catch (_) { return null; }
+}
+
+async function getCurrentLocationSafe(targetRendition = rendition) {
+  try {
+    if (!targetRendition || !targetRendition.currentLocation) return null;
+    return await Promise.resolve(targetRendition.currentLocation());
   } catch (_) { return null; }
 }
 
@@ -4458,6 +4867,7 @@ function scheduleReaderResize(){
   // prevents EPUB.js from retaining the smaller, pre-fullscreen page box.
   chromeResizeTimer = setTimeout(resizeReaderViewport, 320);
 }
+
 
 function syncReaderChromeAccessibility(){
   const app = document.getElementById('app');
@@ -4512,11 +4922,13 @@ function exitReaderFullscreen(){
 function enterImmersiveReading(){
   const app = document.getElementById('app');
   if (!app || !document.body.classList.contains('reader-active')) return false;
+  clearTimeout(readerChromeTimer);
+  readerChromeTimer = null;
   app.classList.add('chrome-hidden');
   closeDrawers();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
-  scheduleReaderResize();
+  // R-13: Viewer dimensions are constant (overlays float on top) — no resize needed
   return true;
 }
 
@@ -4525,19 +4937,36 @@ function exitImmersiveReading(){
   if (!app) return false;
   app.classList.remove('chrome-hidden');
   exitReaderFullscreen();
-  closeDrawers();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
-  scheduleReaderResize();
+  // R-13: Viewer dimensions unchanged — no resize needed
   return true;
 }
 
-function toggleMobileReadingFullscreen(){
-  toggleFullscreen();
+// Show chrome and start a 3-second auto-hide timer (Kindle-like UX, R-13).
+// Tapping center while chrome is visible calls enterImmersiveReading() directly.
+function showReaderChromeTemporarily(delay = 3000) {
+  const app = document.getElementById('app');
+  if (!app || !document.body.classList.contains('reader-active')) return;
+  app.classList.remove('chrome-hidden');
+  syncReaderChromeAccessibility();
+  updateFullscreenControlUI();
+  clearTimeout(readerChromeTimer);
+  readerChromeTimer = setTimeout(() => {
+    readerChromeTimer = null;
+    if (
+      document.body.classList.contains('reader-active') &&
+      !document.querySelector('.drawer[aria-hidden="false"]')
+    ) {
+      enterImmersiveReading();
+    }
+  }, delay);
 }
 
 function toggleReaderChrome(){
-  if (isImmersiveReading()) exitImmersiveReading();
+  // Tapping center: if currently immersive — show chrome briefly then auto-hide;
+  // if chrome is visible — hide it immediately and cancel any pending timer.
+  if (isImmersiveReading()) showReaderChromeTemporarily();
   else enterImmersiveReading();
 }
 
@@ -4559,18 +4988,15 @@ function tuneScrollContainer(targetRendition = rendition, entry = getCurrentEntr
     el.__endpaperScrollListenerBound = true;
     let scrollRaf = null;
     el.addEventListener('scroll', () => {
+      lastReaderInteractionAt = Date.now();
       if (scrollRaf) return;
-      scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = requestAnimationFrame(async () => {
         scrollRaf = null;
         if (!isReaderRequestCurrent(request, book, targetRendition)) return;
         const currentEntry = entry || getCurrentEntry();
         if (!currentEntry) return;
-        try {
-          const loc = targetRendition.currentLocation && targetRendition.currentLocation();
-          if (loc && loc.start) {
-            updateReaderLocation(currentEntry, loc, book, targetRendition, request);
-          }
-        } catch (_) {}
+        const loc = await getCurrentLocationSafe(targetRendition);
+        if (loc && loc.start && isReaderRequestCurrent(request, book, targetRendition)) updateReaderLocation(currentEntry, loc, book, targetRendition, request);
       });
     }, { passive: true });
   }
@@ -4663,6 +5089,7 @@ function getLocationsKey(bookId) {
 /* ---------------- Opening a book ---------------- */
 async function openBook(id){
   const entry = library.find(b => b.id === id);
+  lastReaderInteractionAt = Date.now();
   if (!entry || !currentUser) return;
   if (currentBookId === id && rendition) return;
   if (currentBookId && (book || rendition || currentSessionId)) {
@@ -4699,6 +5126,7 @@ async function openBook(id){
   document.getElementById('bookmark-toggle').style.display = 'flex';
   if (document.getElementById('tts-btn')) document.getElementById('tts-btn').style.display = 'flex';
   if (document.getElementById('fullscreen-btn')) document.getElementById('fullscreen-btn').style.display = 'flex';
+  if (document.getElementById('reader-more-btn')) document.getElementById('reader-more-btn').style.display = 'flex';
   document.getElementById('upload-btn').style.display = 'none';
 
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
@@ -4717,9 +5145,13 @@ async function openBook(id){
   // Fetch the EPUB file from the server
   let targetBook;
   try {
-    const arrayBuffer = await api.getBookFile(id, requestOptions);
+    const blob = await api.getBookFile(id, requestOptions);
     if (!isReaderRequestCurrent(request, null, null)) return;
-    targetBook = ePub(arrayBuffer.slice(0));
+    // R-16: Use a Blob URL — avoids .slice() copy, data lives outside the GC heap.
+    // Revoke the previous URL first so the browser can release any prior backing store.
+    if (currentBlobUrl) { try { URL.revokeObjectURL(currentBlobUrl); } catch (_) {} }
+    currentBlobUrl = URL.createObjectURL(blob);
+    targetBook = ePub(currentBlobUrl);
   } catch(err) {
     if (isReaderRequestCurrent(request, null, null) && !isAbortError(err)) {
       console.error('Failed to load book file:', err);
@@ -4786,6 +5218,8 @@ async function openBook(id){
   targetRendition.display(entry.lastLocationCfi || undefined).then(() => {
     if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     overlay.classList.add('hidden');
+    // R-13: Show chrome briefly then auto-hide (Kindle-like UX)
+    showReaderChromeTemporarily();
     tuneScrollContainer(targetRendition);
     updateBookmarkIcon();
     applySavedHighlights(entry, targetRendition);
@@ -4830,8 +5264,12 @@ async function openBook(id){
       ? (cb) => window.requestIdleCallback(cb, { timeout: 4000 })
       : (cb) => setTimeout(cb, 100);
 
-    scheduleLocations(async () => {
+    const generateWhenQuiet = () => scheduleLocations(async () => {
       if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+      if (Date.now() - lastReaderInteractionAt < 2500) {
+        generateWhenQuiet();
+        return;
+      }
       try {
         await targetBook.locations.generate(1024);
         if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
@@ -5104,7 +5542,7 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
     }
 
     // Auto-update status
-    if (pct != null && pct >= 95 && entry.status !== 'finished') {
+    if (pct != null && pct >= 98 && entry.status !== 'finished') { // R-22: 95→98
       entry.status = 'finished';
     } else if (pct != null && pct > 0 && entry.status === 'unread') {
       entry.status = 'reading';
@@ -5149,10 +5587,10 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
     }
 }
 
-function syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request) {
+async function syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request) {
   if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-  const location = targetRendition.currentLocation && targetRendition.currentLocation();
-  if (location) updateReaderLocation(entry, location, targetBook, targetRendition, request);
+  const location = await getCurrentLocationSafe(targetRendition);
+  if (location && isReaderRequestCurrent(request, targetBook, targetRendition)) updateReaderLocation(entry, location, targetBook, targetRendition, request);
 }
 
 /* ---------------- Bookmarks ---------------- */
@@ -5186,7 +5624,7 @@ async function toggleBookmark(){
   const context = createReaderMutationContext(entry);
   if (!context) return;
   const { targetBook, targetRendition, requestOptions } = context;
-  const loc = targetRendition.currentLocation();
+  const loc = await getCurrentLocationSafe(targetRendition);
   if (!loc || !loc.start) return;
   const cfi = loc.start.cfi;
 
@@ -5240,11 +5678,11 @@ async function toggleBookmark(){
   renderBookmarkTicks();
 }
 
-function updateBookmarkIcon(knownCfi){
+async function updateBookmarkIcon(knownCfi){
   const btn = document.getElementById('bookmark-toggle');
   const entry = getCurrentEntry();
   if (!entry || !rendition){ if (btn) btn.classList.remove('active'); return; }
-  const cfi = knownCfi !== undefined ? knownCfi : (rendition.currentLocation && rendition.currentLocation()?.start?.cfi || null);
+  const cfi = knownCfi !== undefined ? knownCfi : ((await getCurrentLocationSafe(rendition))?.start?.cfi || null);
   const bookmarked = !!cfi && entry.bookmarks.some(bm => bm.cfi === cfi);
   if (btn && btn.classList.contains('active') !== bookmarked) {
     btn.classList.toggle('active', bookmarked);
@@ -5480,7 +5918,7 @@ async function applyHighlight(color){
       });
     }
   } else {
-    const location = targetRendition.currentLocation && targetRendition.currentLocation();
+    const location = await getCurrentLocationSafe(targetRendition);
     const chapter = targetBook.navigation && location && location.start && targetBook.navigation.get(location.start.href);
     const chapterLabel = chapter ? chapter.label.trim() : 'Untitled section';
     const excerpt = context.excerpt || '';
@@ -5576,6 +6014,43 @@ function renderHighlights(){
 /* ---------------- Search ---------------- */
 let searchDebounce = null;
 let searchRequestVersion = 0;
+const bookSearchIndex = new Map();
+const bookTextIndex = new Map();
+
+async function getBookTextIndex(targetBook, bookId, isCurrentSearch) {
+  if (bookTextIndex.has(bookId)) return bookTextIndex.get(bookId);
+  const pending = (async () => {
+    const sections = [];
+    if (targetBook.spine && typeof targetBook.spine.each === 'function') {
+      targetBook.spine.each(section => sections.push(section));
+    }
+    const indexed = [];
+    for (const section of sections) {
+      if (!isCurrentSearch()) return null;
+      try {
+        const documentNode = await section.load(targetBook.load.bind(targetBook));
+        if (!isCurrentSearch()) return null;
+        const textContent = documentNode?.documentElement?.textContent || documentNode?.body?.textContent || '';
+        indexed.push({ section, text: textContent.normalize('NFKC').toLocaleLowerCase() });
+      } catch (_) {
+        indexed.push({ section, text: '' });
+      } finally {
+        if (typeof section.unload === 'function') section.unload();
+      }
+    }
+    return indexed;
+  })();
+  bookTextIndex.set(bookId, pending);
+  try {
+    const indexed = await pending;
+    if (!indexed) bookTextIndex.delete(bookId);
+    while (bookTextIndex.size > 3) bookTextIndex.delete(bookTextIndex.keys().next().value);
+    return indexed;
+  } catch (error) {
+    bookTextIndex.delete(bookId);
+    throw error;
+  }
+}
 document.getElementById('search-input').addEventListener('input', (e) => {
   clearTimeout(searchDebounce);
   const requestVersion = ++searchRequestVersion;
@@ -5603,18 +6078,27 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
   resultsEl.innerHTML = '';
   let results = [];
   try {
-    const sections = [];
-    if (targetBook.spine && typeof targetBook.spine.each === 'function') {
-      targetBook.spine.each(s => sections.push(s));
-    }
-    for (const section of sections){
-      try {
-        await section.load(targetBook.load.bind(targetBook));
-        if (!isCurrentSearch()) return;
-        const matches = section.find(query) || [];
-        matches.forEach(m => results.push({ cfi: m.cfi, excerpt: m.excerpt, href: section.href }));
-      } catch(e){ /* skip unreadable section */ }
-      if (results.length > 60) break;
+    const cacheKey = `${currentBookId}:${query.toLocaleLowerCase()}`;
+    const cached = bookSearchIndex.get(cacheKey);
+    if (cached) {
+      results = cached;
+    } else {
+      const indexedSections = await getBookTextIndex(targetBook, currentBookId, isCurrentSearch);
+      if (!indexedSections || !isCurrentSearch()) return;
+      const normalizedQuery = query.normalize('NFKC').toLocaleLowerCase();
+      const candidates = indexedSections.filter(item => item.text.includes(normalizedQuery));
+      for (const { section } of candidates){
+        try {
+          await section.load(targetBook.load.bind(targetBook));
+          if (!isCurrentSearch()) return;
+          const matches = section.find(query) || [];
+          matches.forEach(m => results.push({ cfi: m.cfi, excerpt: m.excerpt, href: section.href }));
+        } catch(e){ /* skip unreadable section */ }
+        finally { if (typeof section.unload === 'function') section.unload(); }
+        if (results.length > 60) break;
+      }
+      bookSearchIndex.set(cacheKey, results.slice(0, 61));
+      while (bookSearchIndex.size > 100) bookSearchIndex.delete(bookSearchIndex.keys().next().value);
     }
     if (!isCurrentSearch()) return;
     document.getElementById('search-status').textContent =
@@ -5970,65 +6454,103 @@ function toggleShellTheme(){
 
 /* ---------------- Persistence (API-backed) ---------------- */
 
-const OFFLINE_QUEUE_KEY = 'endpaper_offline_queue';
+const OFFLINE_QUEUE_PREFIX = 'endpaper_offline_queue:';
+const OFFLINE_QUEUE_MAX_ITEMS = 200;
+const OFFLINE_QUEUE_MAX_BYTES = 2 * 1024 * 1024;
+const OFFLINE_QUEUE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function offlineQueueKey() {
+  return currentUser && currentUser.username ? OFFLINE_QUEUE_PREFIX + encodeURIComponent(currentUser.username.toLocaleLowerCase()) : null;
+}
+
+function setSyncState(state, detail = '') {
+  const element = document.getElementById('sync-status');
+  if (!element) return;
+  element.dataset.state = state;
+  element.textContent = detail || ({ saved: 'Saved', saving: 'Saving…', syncing: 'Syncing…', offline: 'Offline', pending: 'Changes pending' }[state] || '');
+  element.hidden = !element.textContent;
+}
+
+function loadOfflineQueue() {
+  const key = offlineQueueKey();
+  if (!key) return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    const cutoff = Date.now() - OFFLINE_QUEUE_TTL_MS;
+    return Array.isArray(parsed) ? parsed.filter(item => item && item.ts >= cutoff && item.account === currentUser.username) : [];
+  } catch (_) { return []; }
+}
+
+function storeOfflineQueue(queue) {
+  const key = offlineQueueKey();
+  if (!key) return;
+  let bounded = queue.slice(-OFFLINE_QUEUE_MAX_ITEMS);
+  while (bounded.length && new Blob([JSON.stringify(bounded)]).size > OFFLINE_QUEUE_MAX_BYTES) bounded.shift();
+  if (bounded.length) localStorage.setItem(key, JSON.stringify(bounded));
+  else localStorage.removeItem(key);
+  setSyncState(bounded.length ? (navigator.onLine ? 'pending' : 'offline') : 'saved', bounded.length ? `${bounded.length} change${bounded.length === 1 ? '' : 's'} pending` : 'Saved');
+}
 
 async function resilientApiPost(url, body, isProgressSave = false, method = 'POST', opts = {}) {
+  const operationId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  setSyncState(navigator.onLine ? 'saving' : 'offline');
   try {
+    const headers = new Headers(opts.headers || {});
+    headers.set('Idempotency-Key', operationId);
     const res = await api.fetch(url, {
       ...opts,
+      headers,
       method,
       body: JSON.stringify(body),
     });
+    generateWhenQuiet();
+    setSyncState('saved');
     return await res.json().catch(() => ({ ok: true }));
   } catch (networkErr) {
     if (isAbortError(networkErr) || (networkErr && networkErr.message === 'Session expired')) {
       throw networkErr;
     }
-    try {
-      const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
-      if (isProgressSave) {
-        const filtered = queue.filter(item => item.url !== url);
-        filtered.push({ url, body, method, ts: Date.now() });
-        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(filtered));
-      } else {
-        queue.push({ url, body, method, ts: Date.now() });
-        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-      }
-    } catch (_) {}
+    // HTTP failures are permanent/application errors, not evidence of being
+    // offline. Queue only a genuine fetch/network failure.
+    if (networkErr && networkErr.status && !networkErr.isOffline) throw networkErr;
+    const queue = loadOfflineQueue();
+    const item = { url, body, method, ts: Date.now(), operationId, account: currentUser.username };
+    const next = isProgressSave ? queue.filter(queued => queued.url !== url).concat(item) : queue.concat(item);
+    storeOfflineQueue(next);
     return { queued: true };
   }
 }
 
 async function flushOfflineQueue() {
   try {
-    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
-    if (!raw) return;
-    const queue = JSON.parse(raw);
+    const queue = loadOfflineQueue();
     if (!Array.isArray(queue) || !queue.length) return;
 
+    setSyncState('syncing');
     const failed = [];
-    for (const item of queue) {
+    for (let index = 0; index < queue.length; index++) {
+      const item = queue[index];
       try {
         await api.fetch(item.url, {
           method: item.method || 'POST',
+          headers: { 'Idempotency-Key': item.operationId },
           body: JSON.stringify(item.body),
         });
       } catch (e) {
-        if (e && e.message !== 'Session expired') {
-          failed.push(item);
+        if (e && e.message === 'Session expired') {
+          failed.push(...queue.slice(index));
+          break;
         }
+        if (!e || !e.status || e.isOffline) failed.push(item);
+        else console.error('Dropping permanently failed offline change', e);
       }
     }
-
-    if (failed.length) {
-      localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(failed));
-    } else {
-      localStorage.removeItem(OFFLINE_QUEUE_KEY);
-    }
+    storeOfflineQueue(failed);
   } catch (_) {}
 }
 
 window.addEventListener('online', flushOfflineQueue);
+window.addEventListener('offline', () => setSyncState('offline', loadOfflineQueue().length ? `${loadOfflineQueue().length} changes pending` : 'Offline'));
 
 let metaSaveTimer = null;
 let metaSaveAbortController = null;
@@ -6096,6 +6618,9 @@ async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
     rating: b.rating != null ? Number(b.rating) : null,
     coverColor: b.cover_color,
     coverPath: b.cover_path,
+    description: b.description || '',
+    isbn: b.isbn || '',
+    tags: b.tags || '',
     progress: b.progress_percent || 0,
     status: b.status || 'unread',
     lastLocationCfi: b.last_location_cfi,
@@ -6122,24 +6647,14 @@ async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
 /* ---------------- Export / Import ---------------- */
 async function exportLibrary(){
   if (!requireAdmin('create a library backup')) return;
-  try {
-    const res = await api.fetch('/api/export', {
-      method: 'POST',
-      headers: {},
-    });
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'endpaper-backup-' + new Date().toISOString().slice(0,10) + '.zip';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  } catch(err) {
-    console.error('Export failed:', err);
-    showToast('Export failed. Please try again.');
-  }
+  // Native navigation lets the browser stream directly to disk instead of
+  // buffering a potentially huge ZIP in JavaScript memory.
+  const link = document.createElement('a');
+  link.href = '/api/export';
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 document.getElementById('import-input').addEventListener('change', async (e) => {
@@ -6242,8 +6757,18 @@ async function boot(){
     return;
   }
   renderFontOptions();
+  restoreShelfPreferences();
+  syncGestureSettingsUI();
   renderShelf();
   updateSettingsUI();
+  api.getStats({ expectedAccountVersion: bootAccountVersion }).then(stats => {
+    if (!isActiveAccount(bootAccountVersion)) return;
+    const measured = Number(stats.reading_bytes_per_minute);
+    if (Number.isFinite(measured) && measured > 0) {
+      personalReadingBytesPerMinute = Math.min(50_000, Math.max(1_500, measured));
+      renderShelf();
+    }
+  }).catch(() => {});
   // Load collections after shelf is ready
   await loadCollections();
   if (!isActiveAccount(bootAccountVersion)) return;
@@ -6293,6 +6818,15 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
     scrollFadeObserver.disconnect();
     scrollFadeObserver = null;
   }
+  clearTimeout(readerChromeTimer); // R-13
+  readerChromeTimer = null;
+
+  // R-16: Revoke the Blob URL so the browser can reclaim the underlying EPUB data
+  if (currentBlobUrl) {
+    try { URL.revokeObjectURL(currentBlobUrl); } catch (_) {}
+    currentBlobUrl = null;
+  }
+
   const oldBook = book;
   book = null;
   rendition = null;
@@ -6314,7 +6848,7 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   syncReaderPalette();
   document.getElementById('reader-view').classList.remove('active', 'scrolled');
   document.getElementById('shelf-view').style.display = 'block';
-  ['toc-toggle', 'search-toggle', 'settings-toggle', 'bookmarks-toggle', 'bookmark-toggle', 'tts-btn', 'fullscreen-btn'].forEach(id => {
+  ['toc-toggle', 'search-toggle', 'settings-toggle', 'bookmarks-toggle', 'bookmark-toggle', 'tts-btn', 'fullscreen-btn', 'reader-more-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -6384,6 +6918,22 @@ async function openStatsModal() {
     
     const totalHours = (stats.time_read_total / 3600).toFixed(1);
     document.getElementById('stat-total').textContent = totalHours.replace('.0', '') + 'h';
+
+    const chart = document.getElementById('stats-chart');
+    const daily = Array.isArray(stats.daily) ? stats.daily : [];
+    const maxSeconds = Math.max(60, ...daily.map(day => day.seconds || 0));
+    chart.innerHTML = daily.map(day => `<div class="stats-bar" style="height:${Math.max(2, Math.round((day.seconds || 0) / maxSeconds * 100))}%" title="${Math.round((day.seconds || 0) / 60)} minutes on ${escapeHtml(day.date)}"><span>${escapeHtml(day.date.slice(8))}</span></div>`).join('');
+    const change = stats.previous_7_days > 0 ? Math.round((stats.time_read_this_week - stats.previous_7_days) / stats.previous_7_days * 100) : null;
+    const recentMonths = (stats.monthly || []).slice(-6).map(month => `${month.month}: ${formatMinutes(Math.round(month.seconds / 60))}`).join(' · ');
+    document.getElementById('stats-comparison').textContent = `Longest streak: ${stats.longest_streak_days || 0} days · Average session: ${Math.round((stats.average_session_seconds || 0) / 60)} min${change == null ? '' : ` · ${change >= 0 ? '+' : ''}${change}% vs previous 7 days`}${recentMonths ? `\nMonthly: ${recentMonths}` : ''}`;
+    document.getElementById('stats-most-read').innerHTML = stats.most_read?.length ? `<strong>Most read</strong><br>${stats.most_read.map((item, index) => `${index + 1}. ${escapeHtml(item.title)} — ${formatMinutes(Math.round(item.seconds / 60))}`).join('<br>')}` : '';
+    try {
+      const prefs = await api.getSettings({ expectedAccountVersion });
+      const goals = prefs['reading-goals'] || {};
+      document.getElementById('goal-daily').value = goals.dailyMinutes || '';
+      document.getElementById('goal-weekly').value = goals.weeklyHours || '';
+      document.getElementById('goal-books').value = goals.booksPerYear || '';
+    } catch (_) {}
 
     const modal = document.getElementById('stats-modal');
     modal.classList.add('show');
@@ -6838,8 +7388,8 @@ async function handleResetPassphraseSubmit(event) {
   if (!resetPassphraseTargetId) return;
   const input = document.getElementById('reset-passphrase-input');
   const passphrase = input.value.trim();
-  if (!passphrase || passphrase.length < 4) {
-    showToast('Passphrase must be at least 4 characters.');
+  if (!passphrase || passphrase.length < 12) {
+    showToast('Passphrase must be at least 12 characters.');
     input.focus();
     return;
   }
@@ -7071,6 +7621,9 @@ let ttsIndex = 0;
 let ttsUtterance = null;
 let ttsIsPaused = false;
 let ttsRate = 1.0;
+let ttsPitch = 1.0;
+let ttsVoiceURI = '';
+let ttsSleepTimer = null;
 const TTS_RATES = [0.75, 1.0, 1.25, 1.5, 2.0];
 
 function splitIntoSentences(text) {
@@ -7206,7 +7759,9 @@ function speakCurrentTtsItem() {
 
   ttsUtterance = new SpeechSynthesisUtterance(item.text);
   ttsUtterance.rate = ttsRate;
-  ttsUtterance.pitch = 1.0;
+  ttsUtterance.pitch = ttsPitch;
+  const selectedVoice = speechSynthesis.getVoices().find(voice => voice.voiceURI === ttsVoiceURI);
+  if (selectedVoice) ttsUtterance.voice = selectedVoice;
 
   ttsUtterance.onend = () => {
     if (!ttsIsPaused) {
@@ -7227,29 +7782,32 @@ function speakCurrentTtsItem() {
           (ttsAdvancePromise || Promise.resolve()).then(() => {
             unlockTts();
             clearTimeout(pageTurnLockTimer);
-            setTimeout(() => {
+            setTimeout(async () => {
               // Match active section via currentLocation() rather than blindly
               // taking getContents()[0] which may be a preloaded prior section (R-11)
               let targetDoc = null;
               try {
-                const loc = rendition.currentLocation && rendition.currentLocation();
+                const loc = await getCurrentLocationSafe(rendition);
                 const activeHref = loc && loc.start && loc.start.href;
                 const contents = (rendition.getContents && rendition.getContents()) || [];
                 if (activeHref && contents.length > 0) {
-                  const activeBase = activeHref.split('#')[0].split('?')[0].split('/').pop();
-                  for (const c of contents) {
-                    const cHref = c.href || (c.section && c.section.href) || '';
-                    if (cHref.split('#')[0].split('?')[0].split('/').pop() === activeBase) {
-                      targetDoc = c.document;
-                      break;
-                    }
+                  const normalizeHref = value => decodeURIComponent(String(value || '').split('#')[0].split('?')[0]).replace(/^\.\//, '');
+                  const activePath = normalizeHref(activeHref);
+                  const exact = contents.filter(c => {
+                    const candidate = normalizeHref(c.href || (c.section && c.section.href));
+                    return candidate === activePath || candidate.endsWith('/' + activePath) || activePath.endsWith('/' + candidate);
+                  });
+                  if (exact.length === 1) targetDoc = exact[0].document;
+                  if (!targetDoc) {
+                    const activeBase = activePath.split('/').pop();
+                    const basenameMatches = contents.filter(c => normalizeHref(c.href || (c.section && c.section.href)).split('/').pop() === activeBase);
+                    if (basenameMatches.length === 1) targetDoc = basenameMatches[0].document;
                   }
                 }
-                if (!targetDoc && contents.length > 0) targetDoc = contents[0].document;
               } catch (_) {}
               if (!targetDoc) {
-                const iframe = document.querySelector('#viewer iframe');
-                if (iframe) targetDoc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
+                const iframes = document.querySelectorAll('#viewer iframe');
+                if (iframes.length === 1) targetDoc = iframes[0].contentDocument || (iframes[0].contentWindow && iframes[0].contentWindow.document);
               }
               if (targetDoc) {
                 const nextQueue = collectReadableItemsFromNode(null, targetDoc);
@@ -7306,6 +7864,8 @@ function stopTts() {
   ttsIndex = 0;
   ttsUtterance = null;
   ttsIsPaused = false;
+  if (ttsSleepTimer) clearTimeout(ttsSleepTimer);
+  ttsSleepTimer = null;
   clearTtsHighlights();
   updateTtsPlayerUI();
 }
@@ -7565,8 +8125,13 @@ async function lookupDictionary(word, x, y) {
     if (tooltip) tooltip.classList.add('hidden');
     return;
   }
+  const cacheKey = 'endpaper_dictionary_cache';
+  let dictionaryCache = {};
+  try { dictionaryCache = JSON.parse(localStorage.getItem(cacheKey) || '{}'); } catch (_) {}
+  const normalizedWord = word.toLocaleLowerCase();
   if (!navigator.onLine) {
-    showDictionaryUI(word, null, 'offline', x, y);
+    if (dictionaryCache[normalizedWord]) showDictionaryUI(word, dictionaryCache[normalizedWord].data, 'success', x, y);
+    else showDictionaryUI(word, null, 'offline', x, y);
     return;
   }
   try {
@@ -7576,6 +8141,11 @@ async function lookupDictionary(word, x, y) {
       return;
     }
     const data = await res.json();
+    try {
+      dictionaryCache[normalizedWord] = { data, ts: Date.now() };
+      const entries = Object.entries(dictionaryCache).sort((a,b) => b[1].ts - a[1].ts).slice(0, 200);
+      localStorage.setItem(cacheKey, JSON.stringify(Object.fromEntries(entries)));
+    } catch (_) {}
     showDictionaryUI(word, data, 'success', x, y);
   } catch (_) {
     showDictionaryUI(word, null, 'offline', x, y);
@@ -7606,13 +8176,400 @@ if (document.getElementById('export-highlights-btn')) {
     URL.revokeObjectURL(a.href);
   });
 }
+
+/* ---------------- Product experience extensions (R-24–R-55) ---------------- */
+let shelfRenderTimer = null;
+let bulkMode = false;
+const bulkSelection = new Set();
+let notebookItems = [];
+let notebookTagFilter = '';
+
+function shelfPreferenceKey() {
+  return currentUser?.username ? `endpaper_shelf:${currentUser.username.toLocaleLowerCase()}` : null;
+}
+
+function saveShelfPreferences() {
+  const key = shelfPreferenceKey();
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify({
+    search: document.getElementById('shelf-search')?.value || '',
+    filter: document.getElementById('shelf-filter')?.value || 'all',
+    sort: document.getElementById('shelf-sort')?.value || 'recent',
+    density: document.getElementById('shelf-density')?.value || 'comfortable',
+  }));
+}
+
+function restoreShelfPreferences() {
+  const key = shelfPreferenceKey();
+  if (!key) return;
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '{}');
+    if (document.getElementById('shelf-search')) document.getElementById('shelf-search').value = value.search || '';
+    if (document.getElementById('shelf-filter') && [...document.getElementById('shelf-filter').options].some(option => option.value === value.filter)) document.getElementById('shelf-filter').value = value.filter;
+    if (document.getElementById('shelf-sort') && [...document.getElementById('shelf-sort').options].some(option => option.value === value.sort)) document.getElementById('shelf-sort').value = value.sort;
+    if (document.getElementById('shelf-density') && ['comfortable', 'compact'].includes(value.density)) document.getElementById('shelf-density').value = value.density;
+  } catch (_) {}
+}
+
+function scheduleShelfRender() {
+  clearTimeout(shelfRenderTimer);
+  shelfRenderTimer = setTimeout(renderShelf, 130);
+}
+
+function estimatedBookMinutes(entry, remainingOnly = false) {
+  const total = Math.max(10, Math.round((entry.fileSize || 1_000_000) / personalReadingBytesPerMinute));
+  return remainingOnly ? Math.max(0, Math.round(total * (1 - (entry.progress || 0) / 100))) : total;
+}
+
+function formatMinutes(minutes) {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours}h${rest ? ` ${rest}m` : ''}`;
+}
+
+function coverMarkup(entry, className = 'cover-img') {
+  return entry.coverPath
+    ? `<img class="${className}" src="/api/books/${entry.id}/cover" alt="" loading="lazy" decoding="async">`
+    : `<span class="spine-title">${escapeHtml(entry.name)}</span><span class="spine-author">${escapeHtml(entry.author || '')}</span>`;
+}
+
+function renderContinueCard(){
+  const rail = document.getElementById('continue-card');
+  const candidates = library.filter(entry => entry.lastOpenedAt && entry.progress > 0 && entry.progress < 98)
+    .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt).slice(0, 4);
+  rail.replaceChildren();
+  if (!candidates.length) { rail.style.display = 'none'; return; }
+  const fragment = document.createDocumentFragment();
+  candidates.forEach(entry => {
+    const item = document.createElement('article');
+    item.className = 'continue-item';
+    item.tabIndex = 0;
+    item.innerHTML = `<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}</div><div><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div><div class="progress-text">${Math.round(entry.progress)}% · about ${formatMinutes(estimatedBookMinutes(entry, true))} left</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
+    item.onclick = () => openBook(entry.id);
+    item.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBook(entry.id); } };
+    fragment.appendChild(item);
+  });
+  rail.appendChild(fragment);
+  rail.style.display = 'flex';
+  scheduleBookWarmup(candidates[0]);
+}
+
+function smartBook(entry, subtitle) {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'smart-book';
+  item.innerHTML = `<strong>${escapeHtml(entry.name)}</strong><span>${escapeHtml(subtitle || entry.author || 'Unknown author')}</span>`;
+  item.onclick = () => openBook(entry.id);
+  return item;
+}
+
+function renderSmartSections(searchQuery, filterValue) {
+  const root = document.getElementById('smart-sections');
+  root.replaceChildren();
+  if (searchQuery || filterValue !== 'all' || !library.length) { root.style.display = 'none'; return; }
+  const sections = [];
+  sections.push(['Recently added', [...library].sort((a,b) => b.addedAt - a.addedAt).slice(0,8), entry => entry.author]);
+  const unread = library.filter(entry => entry.progress === 0).slice(0,8);
+  if (unread.length) sections.push(['Unread', unread, entry => entry.author]);
+  const finished = library.filter(entry => entry.progress >= 98).slice(0,8);
+  if (finished.length) sections.push(['Finished', finished, entry => entry.author]);
+  const series = new Map();
+  library.filter(entry => entry.series).forEach(entry => {
+    if (!series.has(entry.series)) series.set(entry.series, []);
+    series.get(entry.series).push(entry);
+  });
+  if (series.size) {
+    const seriesEntries = [...series.entries()].slice(0,8).map(([name, entries]) => ({ ...entries[0], name, __subtitle: `${entries.length} book${entries.length === 1 ? '' : 's'}` }));
+    sections.splice(1, 0, ['Your series', seriesEntries, entry => entry.__subtitle]);
+  }
+  for (const [title, entries, subtitle] of sections) {
+    if (!entries.length) continue;
+    const section = document.createElement('section');
+    section.className = 'smart-section';
+    const heading = document.createElement('h3'); heading.textContent = title;
+    const rail = document.createElement('div'); rail.className = 'smart-rail';
+    entries.forEach(entry => rail.appendChild(smartBook(entry, subtitle(entry))));
+    section.append(heading, rail); root.appendChild(section);
+  }
+  root.style.display = root.childElementCount ? 'grid' : 'none';
+}
+
+function createShelfCard(entry) {
+  const card = document.createElement('article');
+  card.className = `book-card${bulkMode ? ' bulk-mode' : ''}${bulkSelection.has(entry.id) ? ' selected' : ''}`;
+  card.tabIndex = 0;
+  card.setAttribute('aria-label', `${entry.name} by ${entry.author || 'Unknown author'}`);
+  const seriesBadge = entry.series ? `<div class="series-tag">${escapeHtml(formatSeriesText(entry.series, entry.seriesIndex))}</div>` : '';
+  card.innerHTML = `${bulkMode ? `<input class="book-select" type="checkbox" aria-label="Select ${escapeHtml(entry.name)}" ${bulkSelection.has(entry.id) ? 'checked' : ''}>` : ''}<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}${entry.progress > 0 ? `<span class="spine-badge">${Math.round(entry.progress)}%</span>` : ''}<button type="button" class="book-menu-btn" aria-label="Details and actions for ${escapeHtml(entry.name)}">⋯</button></div><div class="book-meta-under">${seriesBadge}<div class="title" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</div><div class="author">${escapeHtml(entry.author || 'Unknown')}</div><div class="shelf-rating-widget">${renderRatingHtml(entry.id, entry.rating)}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
+  const activate = event => {
+    if (event.target.closest('.book-menu-btn,.star-btn')) return;
+    if (bulkMode) {
+      bulkSelection.has(entry.id) ? bulkSelection.delete(entry.id) : bulkSelection.add(entry.id);
+      updateBulkToolbar(); renderShelf();
+    } else openBook(entry.id);
+  };
+  card.onclick = activate;
+  card.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(event); } };
+  card.querySelector('.book-menu-btn').onclick = event => { event.stopPropagation(); openBookDetails(entry.id); };
+  return card;
+}
+
+function renderShelf(){
+  const shelf = document.getElementById('shelf');
+  shelf.classList.toggle('compact', document.getElementById('shelf-density')?.value === 'compact');
+  const empty = document.getElementById('shelf-empty');
+  const header = document.getElementById('shelf-header');
+  shelf.replaceChildren();
+  renderContinueCard();
+  if (!library.length) {
+    empty.style.display = 'block'; header.style.display = 'none'; document.getElementById('continue-card').style.display = 'none'; document.getElementById('smart-sections').style.display = 'none'; return;
+  }
+  empty.style.display = 'none'; header.style.display = 'flex';
+  const searchQuery = document.getElementById('shelf-search').value.trim().toLocaleLowerCase();
+  const filterValue = document.getElementById('shelf-filter').value;
+  const searchable = entry => `${entry.name || ''} ${entry.author || ''} ${entry.series || ''} ${entry.description || ''} ${entry.tags || ''} ${entry.isbn || ''}`.toLocaleLowerCase();
+  let filtered = searchQuery ? library.filter(entry => searchable(entry).includes(searchQuery)) : [...library];
+  if (filterValue === 'unread') filtered = filtered.filter(entry => entry.progress === 0);
+  else if (filterValue === 'finished') filtered = filtered.filter(entry => entry.progress >= 98);
+  else if (filterValue.startsWith('col_')) {
+    const collection = allCollections.find(item => item.id === filterValue.slice(4));
+    if (collection) filtered = filtered.filter(entry => collection.book_ids.includes(entry.id));
+  }
+  const sortValue = document.getElementById('shelf-sort').value;
+  filtered.sort((a,b) => {
+    if (sortValue === 'opened') return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0);
+    if (sortValue === 'title') return a.name.localeCompare(b.name);
+    if (sortValue === 'author') return (a.author || '').localeCompare(b.author || '');
+    if (sortValue === 'progress') return b.progress - a.progress;
+    if (sortValue === 'series') return (a.series || '\uffff').localeCompare(b.series || '\uffff') || (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0);
+    return (b.addedAt || 0) - (a.addedAt || 0);
+  });
+  document.getElementById('shelf-count').textContent = filtered.length === library.length ? `${library.length} book${library.length === 1 ? '' : 's'}` : `${filtered.length} of ${library.length} books`;
+  renderSmartSections(searchQuery, filterValue);
+  const fragment = document.createDocumentFragment();
+  filtered.forEach(entry => fragment.appendChild(createShelfCard(entry)));
+  shelf.appendChild(fragment);
+  saveShelfPreferences();
+}
+
+function toggleReaderMoreMenu(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('reader-more-menu');
+  const button = document.getElementById('reader-more-btn');
+  menu.hidden = !menu.hidden;
+  button?.setAttribute('aria-expanded', String(!menu.hidden));
+}
+
+function toggleBulkMode(force) {
+  bulkMode = typeof force === 'boolean' ? force : !bulkMode;
+  if (!bulkMode) bulkSelection.clear();
+  updateBulkToolbar(); renderShelf();
+}
+
+function updateBulkToolbar() {
+  const toolbar = document.getElementById('bulk-toolbar');
+  toolbar.hidden = !bulkMode;
+  document.getElementById('bulk-count').textContent = `${bulkSelection.size} selected`;
+  updateRoleAwareControls();
+}
+
+async function downloadBookOffline(id) {
+  setSyncState('saving', 'Downloading…');
+  const [fileResponse, coverResponse] = await Promise.all([
+    api.fetch(`/api/books/${id}/file`, { headers: {} }),
+    api.fetch(`/api/books/${id}/cover`, { headers: {} }).catch(() => null),
+  ]);
+  // Fully consume the responses so the service worker can finish its cache put.
+  await fileResponse.blob();
+  if (coverResponse?.ok) await coverResponse.blob();
+  setSyncState('saved', 'Available offline');
+}
+
+async function removeOfflineBook(id) {
+  const cacheNames = await caches.keys();
+  await Promise.all(cacheNames.map(async name => {
+    const cache = await caches.open(name);
+    const requests = await cache.keys();
+    await Promise.all(requests.filter(request => new URL(request.url).pathname.includes(`/api/books/${id}/`)).map(request => cache.delete(request)));
+  }));
+  showToast('Offline download removed.');
+}
+
+async function bulkDownloadOffline() {
+  for (const id of bulkSelection) await downloadBookOffline(id);
+  showToast(`${bulkSelection.size} book${bulkSelection.size === 1 ? '' : 's'} available offline.`); toggleBulkMode(false);
+}
+
+async function bulkAddToCollection() {
+  if (!requireAdmin('organize books')) return;
+  const name = prompt(`Collection name (${allCollections.map(item => item.name).join(', ')})`);
+  if (!name) return;
+  let collection = allCollections.find(item => item.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
+  if (!collection) collection = await api.createCollection(name.trim());
+  for (const id of bulkSelection) await api.addBookToCollection(id, collection.id);
+  await loadCollections(); showToast('Books added to collection.'); toggleBulkMode(false);
+}
+
+async function bulkRemoveFromCollection() {
+  if (!requireAdmin('organize books')) return;
+  const name = prompt(`Remove from collection (${allCollections.map(item => item.name).join(', ')})`);
+  if (!name) return;
+  const collection = allCollections.find(item => item.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
+  if (!collection) { showToast('Collection not found.'); return; }
+  for (const id of bulkSelection) await api.removeBookFromCollection(id, collection.id);
+  await loadCollections(); showToast('Books removed from collection.'); toggleBulkMode(false);
+}
+
+async function bulkEditSeries() {
+  if (!requireAdmin('edit shared book metadata')) return;
+  const series = prompt('Series name (leave blank to clear)');
+  if (series == null) return;
+  const ordered = [...bulkSelection].map(id => library.find(entry => entry.id === id)).filter(Boolean);
+  const startText = series.trim() ? prompt('Starting series number (optional; increments in shelf order)', '') : '';
+  if (startText == null) return;
+  const parsedStart = startText.trim() === '' ? null : Number(startText);
+  if (parsedStart != null && !Number.isFinite(parsedStart)) { showToast('Series number must be numeric.'); return; }
+  for (let index = 0; index < ordered.length; index++) {
+    const entry = ordered[index];
+    const updated = await api.updateBook(entry.id, {
+      series: series.trim() || null,
+      series_index: parsedStart == null ? null : parsedStart + index,
+    });
+    entry.series = updated.series || '';
+    entry.seriesIndex = updated.series_index;
+  }
+  showToast('Series details updated.'); toggleBulkMode(false); renderShelf();
+}
+
+async function bulkDeleteBooks() {
+  if (!requireAdmin('remove books')) return;
+  const confirmed = await showConfirmDialog({ title: 'Remove selected books', message: `Remove ${bulkSelection.size} selected books and their reading data?`, confirmText: 'Remove books', danger: true });
+  if (!confirmed) return;
+  for (const id of [...bulkSelection]) await api.deleteBook(id);
+  library = library.filter(entry => !bulkSelection.has(entry.id)); showToast('Selected books removed.'); toggleBulkMode(false);
+}
+
+async function openBookDetails(id) {
+  const entry = library.find(item => item.id === id);
+  if (!entry) return;
+  const modal = document.getElementById('book-details-modal');
+  document.getElementById('book-details-title').textContent = entry.name;
+  document.getElementById('book-details-content').innerHTML = `<div class="book-details-layout"><div class="book-details-cover" style="background:${entry.coverColor}">${coverMarkup(entry, 'book-details-cover')}</div><div><div class="book-detail-meta">${escapeHtml(entry.author || 'Unknown author')}<br>${entry.series ? escapeHtml(formatSeriesText(entry.series, entry.seriesIndex)) + '<br>' : ''}${(entry.fileSize / 1024 / 1024).toFixed(1)} MB · about ${formatMinutes(estimatedBookMinutes(entry))}<br>${entry.progress ? `${Math.round(entry.progress)}% read · ${formatMinutes(estimatedBookMinutes(entry, true))} remaining` : 'Unread'}${entry.isbn ? `<br>ISBN ${escapeHtml(entry.isbn)}` : ''}${entry.tags ? `<br>${escapeHtml(entry.tags)}` : ''}</div><p class="book-description">${escapeHtml(entry.description || 'No description available.')}</p></div></div>`;
+  const actions = document.getElementById('book-details-actions');
+  actions.innerHTML = `<button type="button" onclick="closeBookDetails(); openBook('${id}')">${entry.progress ? 'Continue reading' : 'Read'}</button><button type="button" onclick="downloadBookOffline('${id}').then(()=>showToast('Book is available offline.'))">Download for offline</button><button type="button" onclick="removeOfflineBook('${id}')">Remove download</button>${isCurrentUserAdmin() ? `<button type="button" onclick="openBookCollectionsModal('${id}')">Collections</button><button type="button" onclick="editBookMetadata('${id}')">Edit details</button><button type="button" onclick="closeBookDetails(); removeBook('${id}')">Remove book</button>` : ''}`;
+  modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false'); modal.querySelector('button')?.focus();
+}
+
+function closeBookDetails() { const modal = document.getElementById('book-details-modal'); modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); }
+
+async function editBookMetadata(id) {
+  const entry = library.find(item => item.id === id); if (!entry) return;
+  const title = prompt('Title', entry.name); if (title == null) return;
+  const author = prompt('Author', entry.author || ''); if (author == null) return;
+  const description = prompt('Description', entry.description || ''); if (description == null) return;
+  const tags = prompt('Tags', entry.tags || ''); if (tags == null) return;
+  const updated = await api.updateBook(id, { title, author, description, tags });
+  Object.assign(entry, { name: updated.title, author: updated.author, description: updated.description || '', tags: updated.tags || '' });
+  closeBookDetails(); renderShelf(); showToast('Book details updated.');
+}
+
+async function openNotebookModal() {
+  const modal = document.getElementById('notebook-modal'); modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false');
+  notebookItems = await api.getAllHighlights(); notebookTagFilter = ''; renderNotebook(); document.getElementById('notebook-search').focus();
+}
+
+function closeNotebookModal() { const modal = document.getElementById('notebook-modal'); modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); }
+
+function renderNotebook() {
+  const query = (document.getElementById('notebook-search')?.value || '').trim().toLocaleLowerCase();
+  const tags = [...new Set(notebookItems.flatMap(item => item.tags || []))].sort();
+  document.getElementById('notebook-tags').innerHTML = tags.map(tag => `<button class="tag-chip" type="button" onclick="notebookTagFilter='${escapeHtml(tag)}'; renderNotebook()">#${escapeHtml(tag)}</button>`).join('');
+  const filtered = notebookItems.filter(item => (!query || `${item.excerpt || ''} ${item.note || ''} ${item.book_title || ''} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(query)) && (!notebookTagFilter || (item.tags || []).includes(notebookTagFilter)));
+  document.getElementById('notebook-list').innerHTML = filtered.length ? filtered.map(item => `<article class="notebook-item"><small>${escapeHtml(item.book_title)} · ${escapeHtml(item.chapter || '')}</small><blockquote>${escapeHtml(item.excerpt || '')}</blockquote>${item.note ? `<p>${escapeHtml(item.note)}</p>` : ''}<div>${(item.tags || []).map(tag => `<span class="tag-chip">#${escapeHtml(tag)}</span>`).join(' ')} <button class="file-link-btn" onclick="editHighlightTags('${item.id}')">Edit tags</button> <button class="file-link-btn" onclick="closeNotebookModal(); openBook('${item.book_id}')">Open</button></div></article>`).join('') : '<p class="bookmark-empty">No matching highlights.</p>';
+}
+
+async function editHighlightTags(id) {
+  const item = notebookItems.find(value => value.id === id); if (!item) return;
+  const value = prompt('Comma-separated tags', (item.tags || []).join(', ')); if (value == null) return;
+  const updated = await api.updateHighlight(id, { tags: value.split(',') }); item.tags = updated.tags || []; renderNotebook();
+}
+
+function selectionText() { return pendingHighlightContext?.excerpt || ''; }
+async function copySelectionText() { const text = selectionText(); if (text) await navigator.clipboard.writeText(text); hideHighlightPopup(); showToast('Copied selection.'); }
+async function shareSelectionText() { const text = selectionText(); if (!text) return; if (navigator.share) await navigator.share({ text }); else await navigator.clipboard.writeText(text); hideHighlightPopup(); }
+function lookupSelectedWord() { const word = selectionText().trim().split(/\s+/)[0]?.replace(/[^\p{L}'-]/gu, ''); hideHighlightPopup(); if (word) lookupDictionary(word, window.innerWidth / 2, 100); }
+async function addNoteToSelection() {
+  const context = pendingHighlightContext; if (!context) return;
+  const note = prompt('Add a note'); if (note == null) return;
+  const saved = await resilientApiPost(`/api/books/${context.entry.id}/highlights`, { cfi_range: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, chapter: '' }, false, 'POST', context.requestOptions);
+  context.entry.highlights.push({ id: saved.id, cfi: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, tags: [] });
+  try { context.targetRendition.annotations.add('highlight', context.cfi, {}, null, 'epub-highlight', highlightStyle('#F2D94E')); } catch (_) {}
+  finishPendingHighlight(context); renderHighlights();
+}
+
+function updateGestureSettings() {
+  settings.gestures = { swipe: document.getElementById('gesture-swipe').checked, edge: document.getElementById('gesture-edge').checked, center: document.getElementById('gesture-center').checked };
+  saveSettings();
+}
+
+function syncGestureSettingsUI() {
+  const gestures = settings.gestures || {};
+  if (document.getElementById('gesture-swipe')) document.getElementById('gesture-swipe').checked = gestures.swipe !== false;
+  if (document.getElementById('gesture-edge')) document.getElementById('gesture-edge').checked = gestures.edge !== false;
+  if (document.getElementById('gesture-center')) document.getElementById('gesture-center').checked = gestures.center !== false;
+}
+
+function updateProgressEstimate() {
+  const entry = getCurrentEntry(); const target = document.getElementById('progress-remaining');
+  if (entry && target) target.textContent = `${formatMinutes(estimatedBookMinutes(entry, true))} left`;
+}
+
+function populateTtsVoices() {
+  const select = document.getElementById('tts-voice-select'); if (!select || !('speechSynthesis' in window)) return;
+  const voices = speechSynthesis.getVoices(); select.replaceChildren(...voices.map(voice => new Option(`${voice.name} (${voice.lang})`, voice.voiceURI, false, voice.voiceURI === ttsVoiceURI)));
+}
+
+function applyAppUpdate() { window.__pendingServiceWorker?.postMessage({ type: 'SKIP_WAITING' }); }
+function dismissInstallTip() { localStorage.setItem('endpaper_install_tip_dismissed', '1'); document.getElementById('install-tip').hidden = true; }
+
+async function saveReadingGoals() {
+  const goals = { dailyMinutes: Number(document.getElementById('goal-daily').value) || 0, weeklyHours: Number(document.getElementById('goal-weekly').value) || 0, booksPerYear: Number(document.getElementById('goal-books').value) || 0 };
+  await api.saveSettings({ 'reading-goals': goals }); showToast('Reading goals saved.');
+}
+
+document.getElementById('shelf-search')?.setAttribute('oninput', 'scheduleShelfRender()');
+document.getElementById('shelf-filter')?.setAttribute('onchange', 'renderShelf()');
+document.getElementById('shelf-sort')?.setAttribute('onchange', 'renderShelf()');
+document.addEventListener('click', event => { if (!event.target.closest('#reader-more-menu,#reader-more-btn,#reader-bottom-actions')) { document.getElementById('reader-more-menu').hidden = true; document.getElementById('reader-more-btn')?.setAttribute('aria-expanded','false'); } });
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Tab') return;
+  const modal = document.querySelector('.modal.show[aria-modal="true"]'); if (!modal) return;
+  const focusable = [...modal.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item => !item.hidden);
+  if (!focusable.length) return;
+  if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); }
+  else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+});
+
+document.getElementById('tts-voice-select')?.addEventListener('change', event => { ttsVoiceURI = event.target.value; if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
+document.getElementById('tts-pitch')?.addEventListener('input', event => { ttsPitch = Number(event.target.value); if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
+document.getElementById('tts-sleep')?.addEventListener('change', event => { if (ttsSleepTimer) clearTimeout(ttsSleepTimer); const minutes = Number(event.target.value); if (minutes) ttsSleepTimer = setTimeout(() => { stopTts(); showToast('Sleep timer ended.'); }, minutes * 60_000); });
+if ('speechSynthesis' in window) { populateTtsVoices(); speechSynthesis.addEventListener?.('voiceschanged', populateTtsVoices); }
+new MutationObserver(updateProgressEstimate).observe(document.getElementById('progress-pct'), { childList: true, characterData: true, subtree: true });
+
+window.addEventListener('load', () => {
+  const isIosSafari = /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone;
+  if (isIosSafari && !localStorage.getItem('endpaper_install_tip_dismissed')) document.getElementById('install-tip').hidden = false;
+  restoreShelfPreferences(); syncGestureSettingsUI();
+});
+
 ````
 
 ---
 
 ## File: `server/src/index.js`
 
-*Relative Path: `server/src/index.js` | Size: 31.2 KB | Total Lines: 789*
+*Relative Path: `server/src/index.js` | Size: 36.5 KB | Total Lines: 892*
 
 ````javascript
 'use strict';
@@ -7630,7 +8587,10 @@ const { isUuid, isBookFilename, isCoverFilename } = require('./lib/validation');
 const db = require('./db');
 
 // ---------- Startup: clean stale tmp files ----------
-const TMP_DIR = path.resolve(__dirname, '../../data/tmp');
+const DATA_DIR = process.env.ENDPAPER_DATA_DIR
+  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
+  : path.resolve(__dirname, '../../data');
+const TMP_DIR = path.join(DATA_DIR, 'tmp');
 try {
   const ONE_HOUR = 60 * 60 * 1000;
   const now = Date.now();
@@ -7664,10 +8624,11 @@ const trustProxyVal = process.env.TRUST_PROXY;
 if (trustProxyVal !== undefined) {
   app.set('trust proxy', isNaN(Number(trustProxyVal)) ? (trustProxyVal === 'true' ? true : (trustProxyVal === 'false' ? false : trustProxyVal)) : Number(trustProxyVal));
 } else {
-  app.set('trust proxy', 1);
+  // Direct deployments must not trust spoofable forwarding headers. The
+  // supplied Docker/Caddy deployment sets TRUST_PROXY=1 explicitly.
+  app.set('trust proxy', false);
 }
 const PORT = process.env.PORT || 3001;
-const DATA_DIR = path.resolve(__dirname, '../../data');
 const MAX_IMPORT_BYTES = Math.min(Math.max(Number(process.env.IMPORT_MAX_BYTES) || 500 * 1024 * 1024, 1), 2 * 1024 * 1024 * 1024);
 const MAX_IMPORT_ENTRIES = 5000;
 
@@ -7689,6 +8650,8 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.dictionaryapi.dev; media-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -7705,6 +8668,30 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api', authMiddleware);
+
+// Deduplicate replayed offline writes after an uncertain network outcome.
+// The frontend sends a stable UUID for every queued mutation.
+app.use('/api', (req, res, next) => {
+  if (!req.user_id || !['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+  const operationId = req.get('Idempotency-Key');
+  if (!operationId) return next();
+  if (!isUuid(operationId)) return res.status(400).json({ error: 'Invalid Idempotency-Key' });
+  const existing = db.prepare('SELECT response_json FROM client_operations WHERE user_id = ? AND operation_id = ?').get(req.user_id, operationId);
+  if (existing) return res.json(existing.response_json ? JSON.parse(existing.response_json) : { ok: true, replayed: true });
+  const originalJson = res.json.bind(res);
+  res.json = payload => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      try {
+        db.prepare('INSERT OR IGNORE INTO client_operations (user_id, operation_id, response_json) VALUES (?, ?, ?)')
+          .run(req.user_id, operationId, JSON.stringify(payload == null ? { ok: true } : payload));
+      } catch (error) {
+        logger.warn({ err: error }, 'Could not persist idempotency receipt');
+      }
+    }
+    return originalJson(payload);
+  };
+  next();
+});
 
 // ---------- API Routes ----------
 app.use(authRoutes);
@@ -7811,6 +8798,9 @@ function normalizeBackupBook(value) {
     author: backupText(value.author, 'book author', { max: 500 }),
     series: backupText(value.series, 'book series', { max: 500 }),
     series_index: backupNumber(value.series_index, 'book series index', { min: -1_000_000, max: 1_000_000 }),
+    description: backupText(value.description, 'book description', { max: 5000 }),
+    isbn: backupText(value.isbn, 'book ISBN', { max: 500 }),
+    tags: backupText(value.tags, 'book tags', { max: 500 }),
     filename: value.filename,
     file_format: 'epub',
     file_size: backupNumber(value.file_size, 'book file size', { min: 0, max: MAX_IMPORT_BYTES, integer: true }),
@@ -7865,6 +8855,7 @@ function normalizeHighlight(value) {
     note: backupText(value.note, 'highlight note', { max: 2000 }),
     color,
     chapter: backupText(value.chapter, 'highlight chapter', { max: 500 }),
+    tags: backupText(value.tags, 'highlight tags', { max: 2000 }),
     created_at: backupTimestamp(value.created_at, 'highlight created time', { fallback: new Date().toISOString() }),
   };
 }
@@ -7879,6 +8870,7 @@ function normalizeReadingSession(value) {
     started_at: backupTimestamp(value.started_at, 'session start time', { required: true }),
     ended_at: backupTimestamp(value.ended_at, 'session end time'),
     duration_seconds: backupNumber(value.duration_seconds, 'session duration', { min: 0, max: 2_147_483_647, integer: true }),
+    client_id: backupText(value.client_id, 'session client', { max: 100 }),
   };
 }
 
@@ -8010,9 +9002,9 @@ function createUserIdMap(backupUsers) {
 
 function importBackupData(backup, backupUserIds, unmatchedUsers) {
   const insertBook = db.prepare(`
-    INSERT INTO books (id, title, author, series, series_index, filename, file_format,
+    INSERT INTO books (id, title, author, series, series_index, description, isbn, tags, filename, file_format,
                        file_size, cover_path, cover_color, added_at)
-    VALUES (@id, @title, @author, @series, @series_index, @filename, @file_format,
+    VALUES (@id, @title, @author, @series, @series_index, @description, @isbn, @tags, @filename, @file_format,
             @file_size, @cover_path, @cover_color, @added_at)
   `);
   const getBookById = db.prepare('SELECT id, filename FROM books WHERE id = ?');
@@ -8040,12 +9032,12 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
     VALUES (@id, @user_id, @book_id, @cfi, @label, @chapter, @progress_percent, @created_at)
   `);
   const insertHighlight = db.prepare(`
-    INSERT OR IGNORE INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter, created_at)
-    VALUES (@id, @user_id, @book_id, @cfi_range, @excerpt, @note, @color, @chapter, @created_at)
+    INSERT OR IGNORE INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter, tags, created_at)
+    VALUES (@id, @user_id, @book_id, @cfi_range, @excerpt, @note, @color, @chapter, @tags, @created_at)
   `);
   const insertReadingSession = db.prepare(`
-    INSERT OR IGNORE INTO reading_sessions (id, user_id, book_id, started_at, ended_at, duration_seconds)
-    VALUES (@id, @user_id, @book_id, @started_at, @ended_at, @duration_seconds)
+    INSERT OR IGNORE INTO reading_sessions (id, user_id, book_id, started_at, ended_at, duration_seconds, client_id)
+    VALUES (@id, @user_id, @book_id, @started_at, @ended_at, @duration_seconds, @client_id)
   `);
   const insertSetting = db.prepare(`
     INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (@user_id, @key, @value)
@@ -8155,7 +9147,7 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
  * identities only, so passphrase hashes, roles, and auth sessions never leave
  * this server.
  */
-app.post('/api/export', requireAdmin, (req, res) => {
+app.all('/api/export', requireAdmin, (req, res) => {
   try {
     const books = db.prepare('SELECT * FROM books').all();
 
@@ -8249,12 +9241,33 @@ const importUpload = multer({
 
 function openZip(zipPath) {
   return new Promise((resolve, reject) => {
-    yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+    yauzl.open(zipPath, { lazyEntries: true, autoClose: false, validateEntrySizes: true }, (err, zipfile) => {
       if (err) return reject(err);
       const entries = new Map();
-      zipfile.on('entry', entry => entries.set(entry.fileName, entry));
-      zipfile.on('end', () => resolve({ zipfile, entries }));
-      zipfile.on('error', reject);
+      let totalBytes = 0;
+      let settled = false;
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        try { zipfile.close(); } catch (_) {}
+        reject(error);
+      };
+      zipfile.on('entry', entry => {
+        totalBytes += entry.uncompressedSize || 0;
+        if (entries.size + 1 > MAX_IMPORT_ENTRIES) return fail(importError('Backup contains too many files'));
+        if (totalBytes > MAX_IMPORT_BYTES) return fail(importError('Backup is too large to import'));
+        const ratio = (entry.uncompressedSize || 0) / Math.max(1, entry.compressedSize || 0);
+        if (ratio > 200) return fail(importError('Backup contains an unsafe compressed entry'));
+        entries.set(entry.fileName, entry);
+        zipfile.readEntry();
+      });
+      zipfile.on('end', () => {
+        if (settled) return;
+        settled = true;
+        resolve({ zipfile, entries });
+      });
+      zipfile.on('error', fail);
+      zipfile.readEntry();
     });
   });
 }
@@ -8272,8 +9285,34 @@ function readEntry(zipfile, entry, maxBytes) {
   });
 }
 
+function streamEntryToFile(zipfile, entry, destination, maxBytes) {
+  return new Promise((resolve, reject) => {
+    if (entry.uncompressedSize > maxBytes) return reject(importError('Backup entry is too large'));
+    zipfile.openReadStream(entry, (error, readStream) => {
+      if (error) return reject(error);
+      let observed = 0;
+      const writeStream = fs.createWriteStream(destination, { flags: 'wx', mode: 0o600 });
+      const fail = failure => {
+        readStream.destroy();
+        writeStream.destroy();
+        fs.promises.unlink(destination).catch(() => {}).finally(() => reject(failure));
+      };
+      readStream.on('data', chunk => {
+        observed += chunk.length;
+        if (observed > maxBytes || observed > entry.uncompressedSize + 1024) fail(importError('Backup entry exceeded its declared size'));
+      });
+      readStream.on('error', fail);
+      writeStream.on('error', fail);
+      writeStream.on('finish', resolve);
+      readStream.pipe(writeStream);
+    });
+  });
+}
+
 app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, res) => {
   let zipfile = null;
+  let stageDir = null;
+  const promotedFiles = [];
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -8318,7 +9357,9 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, r
     validateArchiveAssets(files, dump, BOOKS_DIR, COVERS_DIR);
     const { userIds, unmatchedUsers } = createUserIdMap(dump.users);
 
-    // Restore files
+    // Extract assets into an isolated stage first. No live library path is
+    // modified until every archive entry has streamed and validated.
+    stageDir = await fs.promises.mkdtemp(path.join(DATA_DIR, 'tmp', 'import-'));
     let restoredFiles = 0;
     for (const file of files) {
       const destination = path.join(file.directory === 'books' ? BOOKS_DIR : COVERS_DIR, file.filename);
@@ -8326,26 +9367,45 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, r
         if (!isRegularFile(destination)) throw importError('A local library asset is not a regular file');
         continue;
       }
-      try {
-        const fileData = await readEntry(zipfile, file.entry, MAX_IMPORT_BYTES);
-        fs.writeFileSync(destination, fileData, { flag: 'wx' });
-        restoredFiles++;
-      } catch (err) {
-        if (err && err.code === 'EEXIST' && isRegularFile(destination)) continue;
-        throw err;
-      }
+      const stagedPath = path.join(stageDir, `${file.directory}-${file.filename}`);
+      await streamEntryToFile(zipfile, file.entry, stagedPath, MAX_IMPORT_BYTES);
+      file.stagedPath = stagedPath;
     }
 
-    const results = importBackupData(dump, userIds, unmatchedUsers);
+    // Promote staged files with exclusive renames, then compensate if the DB
+    // transaction fails. Existing files are deliberately left untouched.
+    for (const file of files) {
+      if (!file.stagedPath) continue;
+      const destination = path.join(file.directory === 'books' ? BOOKS_DIR : COVERS_DIR, file.filename);
+      if (fs.existsSync(destination)) continue;
+      await fs.promises.rename(file.stagedPath, destination);
+      promotedFiles.push(destination);
+      restoredFiles++;
+    }
+
+    let results;
+    try {
+      results = importBackupData(dump, userIds, unmatchedUsers);
+    } catch (error) {
+      await Promise.all(promotedFiles.map(filePath => fs.promises.unlink(filePath).catch(() => {})));
+      throw error;
+    }
     
     zipfile.close();
     try { fs.unlinkSync(req.file.path); } catch (e) {}
+    if (stageDir && path.resolve(stageDir).startsWith(path.resolve(path.join(DATA_DIR, 'tmp')) + path.sep)) {
+      await fs.promises.rm(stageDir, { recursive: true, force: true });
+      stageDir = null;
+    }
 
     res.json({ ok: true, restored_files: restoredFiles, ...results });
   } catch (err) {
     if (zipfile) zipfile.close();
     if (req.file && fs.existsSync(req.file.path)) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
+    if (stageDir && path.resolve(stageDir).startsWith(path.resolve(path.join(DATA_DIR, 'tmp')) + path.sep)) {
+      await fs.promises.rm(stageDir, { recursive: true, force: true }).catch(() => {});
     }
     logger.error('Import error:', err);
     res.status(err.status || 500).json({ error: err.status ? err.message : 'Import failed' });
@@ -8403,13 +9463,14 @@ function gracefulShutdown(signal) {
 }
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
 ````
 
 ---
 
 ## File: `server/src/db.js`
 
-*Relative Path: `server/src/db.js` | Size: 19.6 KB | Total Lines: 518*
+*Relative Path: `server/src/db.js` | Size: 23.2 KB | Total Lines: 586*
 
 ````javascript
 'use strict';
@@ -8418,7 +9479,9 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = path.resolve(__dirname, '../../data');
+const DATA_DIR = process.env.ENDPAPER_DATA_DIR
+  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
+  : path.resolve(__dirname, '../../data');
 const DB_PATH = path.join(DATA_DIR, 'endpaper.db');
 
 // Ensure data directories exist
@@ -8435,6 +9498,20 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 // Give concurrent readers and writers a chance to finish instead of failing immediately.
 db.pragma('busy_timeout = 5000');
+
+// Back up an existing database before the first structural change in this
+// process. PRAGMA user_version is the ordered migration marker; older builds
+// inferred state solely from columns, which made partial upgrades difficult to
+// reason about and could mutate data before a safety copy existed.
+const TARGET_SCHEMA_VERSION = 3;
+const startingSchemaVersion = Number(db.pragma('user_version', { simple: true })) || 0;
+const existingTableCount = db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().n;
+if (existingTableCount > 0 && startingSchemaVersion < TARGET_SCHEMA_VERSION && fs.existsSync(DB_PATH)) {
+  const earlyBackupDir = path.join(DATA_DIR, 'backups');
+  fs.mkdirSync(earlyBackupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  fs.copyFileSync(DB_PATH, path.join(earlyBackupDir, `endpaper-pre-migration-v${startingSchemaVersion}-to-v${TARGET_SCHEMA_VERSION}-${stamp}.db`));
+}
 
 // ---------- Schema migration ----------
 
@@ -8538,7 +9615,8 @@ db.exec(`
     book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     ended_at TEXT,
-    duration_seconds INTEGER
+    duration_seconds INTEGER,
+    client_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -8559,6 +9637,14 @@ db.exec(`
     PRIMARY KEY(user_id, key)
   );
 
+  CREATE TABLE IF NOT EXISTS client_operations (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    operation_id TEXT NOT NULL,
+    response_json TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, operation_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_books_added_at ON books(added_at DESC);
   CREATE INDEX IF NOT EXISTS idx_user_books_user ON user_books(user_id);
   CREATE INDEX IF NOT EXISTS idx_user_books_opened ON user_books(user_id, last_opened_at DESC);
@@ -8566,7 +9652,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_highlights_book_created ON highlights(book_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON reading_sessions(started_at);
   CREATE INDEX IF NOT EXISTS idx_sessions_open ON reading_sessions(ended_at);
+  CREATE INDEX IF NOT EXISTS idx_bookmarks_user_book_progress ON bookmarks(user_id, book_id, progress_percent);
+  CREATE INDEX IF NOT EXISTS idx_highlights_user_book_created ON highlights(user_id, book_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_sessions_user_book_started ON reading_sessions(user_id, book_id, started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_client_operations_created ON client_operations(created_at);
 `);
+
+function addColumnIfMissing(table, definition) {
+  const name = definition.trim().split(/\s+/)[0];
+  const columns = db.pragma(`table_info(${table})`);
+  if (!columns.some(column => column.name === name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+}
+
+addColumnIfMissing('books', 'description TEXT');
+addColumnIfMissing('books', 'isbn TEXT');
+addColumnIfMissing('books', 'tags TEXT');
+addColumnIfMissing('highlights', 'tags TEXT');
+addColumnIfMissing('reading_sessions', 'client_id TEXT');
 
 // Authentication sessions are server-side records as well as browser cookies.
 // Older databases did not record an expiry, so add and backfill the column
@@ -8670,6 +9772,22 @@ const collectionsHasUserId = collectionsCols.some(c => c.name === 'user_id');
 if (collectionsHasUserId) {
   console.log("Migrating collections table back to global schema...");
   db.transaction(() => {
+    const legacyCollections = db.prepare('SELECT id, name FROM collections ORDER BY id').all();
+    const canonicalByName = new Map();
+    for (const collection of legacyCollections) {
+      const key = collection.name.toLocaleLowerCase();
+      const canonical = canonicalByName.get(key);
+      if (!canonical) {
+        canonicalByName.set(key, collection);
+        continue;
+      }
+      const memberships = db.prepare('SELECT book_id FROM book_collections WHERE collection_id = ?').all(collection.id);
+      for (const membership of memberships) {
+        db.prepare('INSERT OR IGNORE INTO book_collections (book_id, collection_id) VALUES (?, ?)').run(membership.book_id, canonical.id);
+      }
+      db.prepare('DELETE FROM book_collections WHERE collection_id = ?').run(collection.id);
+      db.prepare('DELETE FROM collections WHERE id = ?').run(collection.id);
+    }
     db.exec(`
       CREATE TABLE collections_global (
         id TEXT PRIMARY KEY,
@@ -8694,20 +9812,6 @@ const bookCols = db.pragma('table_info(books)');
 if (!bookCols.some(c => c.name === 'file_hash')) {
   console.log('Migrating books table to add file_hash column...');
   db.exec('ALTER TABLE books ADD COLUMN file_hash TEXT;');
-  const existingBooks = db.prepare('SELECT id, filename FROM books').all();
-  const updateHash = db.prepare('UPDATE books SET file_hash = ? WHERE id = ?');
-  const crypto = require('crypto');
-  for (const b of existingBooks) {
-    const fpath = path.join(DATA_DIR, 'books', b.filename);
-    if (fs.existsSync(fpath)) {
-      try {
-        const hash = crypto.createHash('sha256').update(fs.readFileSync(fpath)).digest('hex');
-        updateHash.run(hash, b.id);
-      } catch (e) {
-        console.error('Could not hash book', b.filename, e);
-      }
-    }
-  }
 }
 // Function to create a pre-migration backup before any structural data changes
 function backupDatabaseBeforeMigration(label) {
@@ -8842,7 +9946,7 @@ for (const dup of duplicateUsers) {
     ORDER BY created_at ASC
   `).all(dup.lower_name);
   for (let i = 1; i < usersWithCase.length; i++) {
-    const newName = `${usersWithCase[i].username}_${Date.now()}`;
+    const newName = `${usersWithCase[i].username}_${usersWithCase[i].id.slice(0, 8)}_${i}`;
     db.prepare('UPDATE users SET username = ? WHERE id = ?').run(newName, usersWithCase[i].id);
   }
 }
@@ -8869,12 +9973,37 @@ for (const dup of duplicateCollections) {
     ORDER BY id ASC
   `).all(dup.lower_name);
   for (let i = 1; i < collectionsWithCase.length; i++) {
-    const newName = `${collectionsWithCase[i].name}_${Date.now()}`;
+    const newName = `${collectionsWithCase[i].name}_${collectionsWithCase[i].id.slice(0, 8)}_${i}`;
     db.prepare('UPDATE collections SET name = ? WHERE id = ?').run(newName, collectionsWithCase[i].id);
   }
 }
 
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name_nocase ON collections(name COLLATE NOCASE);');
+db.pragma(`user_version = ${TARGET_SCHEMA_VERSION}`);
+
+// Hash legacy files without blocking startup or reading whole EPUBs into RAM.
+// One file is processed at a time and the unique index resolves races safely.
+setImmediate(async () => {
+  const crypto = require('crypto');
+  const missing = db.prepare('SELECT id, filename FROM books WHERE file_hash IS NULL').all();
+  const updateHash = db.prepare('UPDATE books SET file_hash = ? WHERE id = ? AND file_hash IS NULL');
+  for (const item of missing) {
+    const filePath = path.join(DATA_DIR, 'books', item.filename);
+    if (!fs.existsSync(filePath)) continue;
+    try {
+      const hash = crypto.createHash('sha256');
+      await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', chunk => hash.update(chunk));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+      });
+      updateHash.run(hash.digest('hex'), item.id);
+    } catch (error) {
+      console.error('Could not hash book', item.filename, error);
+    }
+  }
+});
 
 // ---------- Periodic session pruning ----------
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
@@ -8929,6 +10058,7 @@ runBackup();
 setInterval(runBackup, BACKUP_INTERVAL_MS);
 
 module.exports = db;
+
 ````
 
 ---
@@ -9006,13 +10136,14 @@ function authMiddleware(req, res, next) {
 }
 
 module.exports = { authMiddleware };
+
 ````
 
 ---
 
 ## File: `server/src/lib/epubMeta.js`
 
-*Relative Path: `server/src/lib/epubMeta.js` | Size: 5.9 KB | Total Lines: 169*
+*Relative Path: `server/src/lib/epubMeta.js` | Size: 9.1 KB | Total Lines: 225*
 
 ````javascript
 'use strict';
@@ -9032,15 +10163,42 @@ const parser = new XMLParser({
 
 const MAX_XML_BYTES = 1 * 1024 * 1024;
 const MAX_COVER_BYTES = 20 * 1024 * 1024;
+const MAX_ARCHIVE_ENTRIES = 10_000;
+const MAX_ARCHIVE_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;
+const MAX_COMPRESSION_RATIO = 200;
+const MAX_COVER_PIXELS = 40 * 1024 * 1024;
 
 function openZip(epubPath) {
   return new Promise((resolve, reject) => {
-    yauzl.open(epubPath, { lazyEntries: false, autoClose: false }, (err, zipfile) => {
+    yauzl.open(epubPath, { lazyEntries: true, autoClose: false, validateEntrySizes: true }, (err, zipfile) => {
       if (err) return reject(err);
       const entries = new Map();
-      zipfile.on('entry', entry => entries.set(entry.fileName.toLowerCase(), entry));
-      zipfile.on('end', () => resolve({ zipfile, entries }));
-      zipfile.on('error', reject);
+      let entryCount = 0;
+      let totalBytes = 0;
+      let finished = false;
+      const fail = error => {
+        if (finished) return;
+        finished = true;
+        try { zipfile.close(); } catch (_) {}
+        reject(error);
+      };
+      zipfile.on('entry', entry => {
+        entryCount++;
+        totalBytes += entry.uncompressedSize || 0;
+        const compressed = Math.max(1, entry.compressedSize || 0);
+        if (entryCount > MAX_ARCHIVE_ENTRIES) return fail(new Error('EPUB contains too many files'));
+        if (totalBytes > MAX_ARCHIVE_UNCOMPRESSED_BYTES) return fail(new Error('EPUB expands to too much data'));
+        if ((entry.uncompressedSize || 0) / compressed > MAX_COMPRESSION_RATIO) return fail(new Error('EPUB entry compression ratio is unsafe'));
+        entries.set(entry.fileName.toLowerCase(), entry);
+        zipfile.readEntry();
+      });
+      zipfile.on('end', () => {
+        if (finished) return;
+        finished = true;
+        resolve({ zipfile, entries });
+      });
+      zipfile.on('error', fail);
+      zipfile.readEntry();
     });
   });
 }
@@ -9075,7 +10233,18 @@ async function validateEpub(epubPath) {
       throw new Error('The uploaded file is not a valid EPUB');
     }
     
-    await readEntry(zipfile, containerEntry, MAX_XML_BYTES); // Validate size
+    const containerData = await readEntry(zipfile, containerEntry, MAX_XML_BYTES);
+    const container = parser.parse(containerData.toString('utf8'));
+    const rootfile = container?.container?.rootfiles?.rootfile;
+    const root = Array.isArray(rootfile) ? rootfile[0] : rootfile;
+    const opfPath = root && root['@_full-path'];
+    if (!opfPath || !entries.has(String(opfPath).toLowerCase())) throw new Error('The EPUB package document is missing');
+    const opfData = await readEntry(zipfile, entries.get(String(opfPath).toLowerCase()), MAX_XML_BYTES);
+    const opf = parser.parse(opfData.toString('utf8'));
+    const pkg = opf.package || opf['opf:package'];
+    const manifestItems = pkg?.manifest?.item;
+    const spineItems = pkg?.spine?.itemref;
+    if (!pkg || !manifestItems || !spineItems) throw new Error('The EPUB package has no readable manifest or spine');
   } finally {
     zipfile.close();
   }
@@ -9083,7 +10252,7 @@ async function validateEpub(epubPath) {
 
 async function extractMeta(epubPath, coverId, coversDir) {
   const { zipfile, entries } = await openZip(epubPath);
-  const result = { title: '', author: '', series: null, seriesIndex: null, coverPath: null };
+  const result = { title: '', author: '', series: null, seriesIndex: null, description: null, isbn: null, tags: null, coverPath: null };
 
   try {
     const containerEntry = entries.get('meta-inf/container.xml');
@@ -9125,11 +10294,24 @@ async function extractMeta(epubPath, coverId, coversDir) {
         result.author = typeof dcCreator === 'string' ? dcCreator : (dcCreator['#text'] || '');
       }
     }
+    const description = metadata['dc:description'];
+    if (description) result.description = typeof description === 'string' ? description : (description['#text'] || null);
+    const subjects = metadata['dc:subject'];
+    if (subjects) {
+      const subjectList = Array.isArray(subjects) ? subjects : [subjects];
+      result.tags = subjectList.map(subject => typeof subject === 'string' ? subject : subject['#text']).filter(Boolean).join(', ') || null;
+    }
+    const identifiers = Array.isArray(metadata['dc:identifier']) ? metadata['dc:identifier'] : (metadata['dc:identifier'] ? [metadata['dc:identifier']] : []);
+    const isbn = identifiers.map(identifier => typeof identifier === 'string' ? identifier : identifier['#text']).find(value => /(?:97[89])?\d{9}[\dX]/i.test(String(value || '').replace(/[-\s]/g, '')));
+    result.isbn = isbn ? String(isbn).trim() : null;
 
     const metas = Array.isArray(metadata.meta) ? metadata.meta : (metadata.meta ? [metadata.meta] : []);
     for (const m of metas) {
       if (m['@_name'] === 'calibre:series') result.series = m['@_content'] || null;
-      if (m['@_name'] === 'calibre:series_index') result.seriesIndex = parseFloat(m['@_content']) || null;
+      if (m['@_name'] === 'calibre:series_index') {
+        const parsed = parseFloat(m['@_content']);
+        result.seriesIndex = Number.isFinite(parsed) ? parsed : null;
+      }
     }
 
     let coverHref = null;
@@ -9164,7 +10346,12 @@ async function extractMeta(epubPath, coverId, coversDir) {
         const coverOutPath = path.join(coversDir, coverFilename);
         
         try {
-          await sharp(coverData)
+          const image = sharp(coverData, { limitInputPixels: MAX_COVER_PIXELS, failOn: 'error' });
+          const imageMeta = await image.metadata();
+          if (imageMeta.width && imageMeta.height && imageMeta.width * imageMeta.height > MAX_COVER_PIXELS) {
+            throw new Error('Cover image dimensions are too large');
+          }
+          await image
             .resize({ width: 400, withoutEnlargement: true })
             .webp({ quality: 80 })
             .toFile(coverOutPath);
@@ -9183,6 +10370,7 @@ async function extractMeta(epubPath, coverId, coversDir) {
 }
 
 module.exports = { extractMeta, validateEpub };
+
 ````
 
 ---
@@ -9236,6 +10424,7 @@ const crypto = require('crypto');
   meta.file_hash = fileHash;
   parentPort.postMessage({ success: true, meta });
 })();
+
 ````
 
 ---
@@ -9275,8 +10464,8 @@ async function main() {
   const passphrase = args[1];
   const username = (args[2] || 'admin').trim();
 
-  if (passphrase.length < 4) {
-    console.error('Error: Passphrase must be at least 4 characters.');
+  if (passphrase.length < 12) {
+    console.error('Error: Passphrase must be at least 12 characters.');
     process.exit(1);
   }
   if (!username) {
@@ -9314,6 +10503,7 @@ main().catch(err => {
   console.error('Failed to set passphrase:', err);
   process.exit(1);
 });
+
 ````
 
 ---
@@ -9374,13 +10564,14 @@ function validateUuidParam(...paramNames) {
 }
 
 module.exports = { isUuid, isBookFilename, isCoverFilename, text, number, validateUuidParam };
+
 ````
 
 ---
 
 ## File: `server/src/routes/auth.js`
 
-*Relative Path: `server/src/routes/auth.js` | Size: 3.8 KB | Total Lines: 118*
+*Relative Path: `server/src/routes/auth.js` | Size: 4.1 KB | Total Lines: 127*
 
 ````javascript
 'use strict';
@@ -9412,6 +10603,15 @@ const createSessionAndPrune = db.transaction((token, userId) => {
 
 // Rate limit failed login attempts without blocking a household that shares
 // one public IP and signs in successfully from several devices.
+const normalizeLoginName = (req) => String((req.body && req.body.username) || '').trim().toLocaleLowerCase('en-US');
+const loginIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { error: 'Too many login attempts from this network. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+});
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -9419,7 +10619,7 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  keyGenerator: (req) => req.ip + ':' + (req.body.username || ''),
+  keyGenerator: (req) => req.ip + ':' + normalizeLoginName(req),
 });
 
 /**
@@ -9427,7 +10627,7 @@ const loginLimiter = rateLimit({
  * Body: { username: "...", passphrase: "..." }
  * On success: sets httpOnly session cookie (90-day expiry)
  */
-router.post('/api/login', loginLimiter, async (req, res) => {
+router.post('/api/login', loginIpLimiter, loginLimiter, async (req, res) => {
   try {
     const { username, passphrase } = req.body || {};
     const trimmedUsername = typeof username === 'string' ? username.trim() : '';
@@ -9500,13 +10700,14 @@ router.get('/api/session', (req, res) => {
 });
 
 module.exports = router;
+
 ````
 
 ---
 
 ## File: `server/src/routes/books.js`
 
-*Relative Path: `server/src/routes/books.js` | Size: 19.8 KB | Total Lines: 512*
+*Relative Path: `server/src/routes/books.js` | Size: 23.4 KB | Total Lines: 575*
 
 ````javascript
 'use strict';
@@ -9525,9 +10726,53 @@ const { requireAdmin } = require('./users');
 
 const router = express.Router();
 
-const DATA_DIR = path.resolve(__dirname, '../../../data');
+const DATA_DIR = process.env.ENDPAPER_DATA_DIR
+  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
+  : path.resolve(__dirname, '../../../data');
 const BOOKS_DIR = path.join(DATA_DIR, 'books');
 const COVERS_DIR = path.join(DATA_DIR, 'covers');
+const MAX_WORKERS = Math.max(1, Math.min(4, Number(process.env.EPUB_WORKERS) || 2));
+const WORKER_TIMEOUT_MS = Math.max(10_000, Number(process.env.EPUB_WORKER_TIMEOUT_MS) || 120_000);
+let activeWorkers = 0;
+const workerQueue = [];
+
+function drainWorkerQueue() {
+  while (activeWorkers < MAX_WORKERS && workerQueue.length) {
+    const job = workerQueue.shift();
+    activeWorkers++;
+    let settled = false;
+    const worker = new Worker(path.join(__dirname, '../lib/epubWorker.js'), { workerData: job.workerData });
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      activeWorkers--;
+      if (error) job.reject(error); else job.resolve(value);
+      drainWorkerQueue();
+    };
+    const timeout = setTimeout(() => {
+      worker.terminate().catch(() => {});
+      finish(new Error('EPUB processing timed out'));
+    }, WORKER_TIMEOUT_MS);
+    worker.on('message', message => {
+      if (message.success) finish(null, message.meta);
+      else {
+        const error = new Error(message.error);
+        error.validationError = message.validationError;
+        finish(error);
+      }
+    });
+    worker.on('error', error => finish(error));
+    worker.on('exit', code => { if (code !== 0) finish(new Error(`Worker stopped with exit code ${code}`)); });
+  }
+}
+
+function runEpubWorker(workerData) {
+  return new Promise((resolve, reject) => {
+    workerQueue.push({ workerData, resolve, reject });
+    drainWorkerQueue();
+  });
+}
 
 // Spine colors for books without covers (matches frontend)
 const SPINE_COLORS = ['#3F5D4C','#7A3B32','#3B4A6B','#6B4C3B','#5B3F5D','#2C4237','#8A6A2F','#43506B'];
@@ -9566,7 +10811,7 @@ router.get('/api/books', (req, res) => {
   if (filter === 'unread') {
     whereClauses.push('IFNULL(ub.progress_percent, 0) = 0');
   } else if (filter === 'finished') {
-    whereClauses.push('IFNULL(ub.progress_percent, 0) >= 95');
+    whereClauses.push('IFNULL(ub.progress_percent, 0) >= 98');
   } else if (filter.startsWith('col_')) {
     const colId = filter.substring(4);
     whereClauses.push('b.id IN (SELECT book_id FROM book_collections WHERE collection_id = ?)');
@@ -9575,9 +10820,9 @@ router.get('/api/books', (req, res) => {
 
   // Search
   if (search) {
-    whereClauses.push('(b.title LIKE ? OR b.author LIKE ?)');
-    whereParams.push(`%${search}%`);
-    whereParams.push(`%${search}%`);
+    const literalSearch = search.replace(/[\\%_]/g, '\\$&');
+    whereClauses.push("(b.title LIKE ? ESCAPE '\\' OR b.author LIKE ? ESCAPE '\\' OR b.series LIKE ? ESCAPE '\\' OR b.description LIKE ? ESCAPE '\\' OR b.tags LIKE ? ESCAPE '\\' OR b.isbn LIKE ? ESCAPE '\\')");
+    for (let index = 0; index < 6; index++) whereParams.push(`%${literalSearch}%`);
   }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -9599,7 +10844,7 @@ router.get('/api/books', (req, res) => {
   const total = db.prepare(countSql).get(...queryParams, ...whereParams).n;
 
   const dataSql = `
-    SELECT b.id, b.title, b.author, b.series, b.series_index, b.cover_path, b.cover_color,
+    SELECT b.id, b.title, b.author, b.series, b.series_index, b.description, b.isbn, b.tags, b.cover_path, b.cover_color,
            IFNULL(ub.status, 'unread') as status, ub.rating, IFNULL(ub.progress_percent, 0) as progress_percent, ub.last_location_cfi,
            b.added_at, ub.last_opened_at, b.file_size
      FROM books b
@@ -9612,18 +10857,18 @@ router.get('/api/books', (req, res) => {
   const books = db.prepare(dataSql).all(...queryParams, ...whereParams, limit, offset);
 
   // Continue reading book (always fetch latest opened globally for the user)
-  let continueBook = null;
+  let continueBooks = [];
   if (page === 1 && !search && filter === 'all') {
-    continueBook = db.prepare(`
-      SELECT b.id, b.title, b.author, b.series, b.series_index, b.cover_path, b.cover_color,
+    continueBooks = db.prepare(`
+      SELECT b.id, b.title, b.author, b.series, b.series_index, b.description, b.isbn, b.tags, b.cover_path, b.cover_color,
              IFNULL(ub.status, 'unread') as status, ub.rating, IFNULL(ub.progress_percent, 0) as progress_percent, ub.last_location_cfi,
              b.added_at, ub.last_opened_at, b.file_size
       FROM books b
       JOIN user_books ub ON b.id = ub.book_id AND ub.user_id = ?
-      WHERE ub.last_opened_at IS NOT NULL
+      WHERE ub.last_opened_at IS NOT NULL AND ub.progress_percent > 0 AND ub.progress_percent < 98
       ORDER BY ub.last_opened_at DESC
-      LIMIT 1
-    `).get(req.user_id);
+      LIMIT 4
+    `).all(req.user_id);
   }
 
   res.json({
@@ -9631,7 +10876,8 @@ router.get('/api/books', (req, res) => {
     total,
     page,
     totalPages: Math.ceil(total / limit),
-    continueBook: continueBook || null
+    continueBooks,
+    continueBook: continueBooks[0] || null
   });
 });
 
@@ -9644,6 +10890,7 @@ router.get('/api/books', (req, res) => {
 router.post('/api/books', upload.single('file'), async (req, res) => {
   let destPath = null;
   let coverPath = null;
+  let uploadedFileHash = null;
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -9657,29 +10904,7 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
     // Verify, move, hash, and extract metadata in a background worker
     let meta;
     try {
-      meta = await new Promise((resolve, reject) => {
-        const worker = new Worker(path.join(__dirname, '../lib/epubWorker.js'), {
-          workerData: {
-            tmpPath: req.file.path,
-            destPath: destPath,
-            id: id,
-            coversDir: COVERS_DIR
-          }
-        });
-        worker.on('message', (msg) => {
-          if (msg.success) {
-            resolve(msg.meta);
-          } else {
-            const err = new Error(msg.error);
-            err.validationError = msg.validationError;
-            reject(err);
-          }
-        });
-        worker.on('error', reject);
-        worker.on('exit', (code) => {
-          if (code !== 0) reject(new Error(`Worker stopped with exit code ${code}`));
-        });
-      });
+      meta = await runEpubWorker({ tmpPath: req.file.path, destPath, id, coversDir: COVERS_DIR });
       
       if (meta._extractError) {
         console.error('Metadata extraction error:', meta._extractError);
@@ -9696,6 +10921,7 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
 
     // Check for duplicate uploads via off-thread computed SHA-256 hash
     const fileHash = meta.file_hash;
+    uploadedFileHash = fileHash;
     if (fileHash) {
       const existingBook = db.prepare('SELECT id, title FROM books WHERE file_hash = ?').get(fileHash);
       if (existingBook) {
@@ -9724,7 +10950,10 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
       title,
       author: text(meta.author, { max: 500, field: 'author' }),
       series: text(meta.series, { max: 500, field: 'series' }),
-      series_index: meta.seriesIndex || null,
+      series_index: Number.isFinite(meta.seriesIndex) ? meta.seriesIndex : null,
+      description: meta.description || null,
+      isbn: meta.isbn || null,
+      tags: meta.tags || null,
       filename,
       file_format: 'epub',
       file_size: fileSize,
@@ -9737,18 +10966,15 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
       last_location_cfi: null,
     };
 
-    db.prepare(`
-      INSERT INTO books (id, title, author, series, series_index, filename, file_format,
-                         file_size, file_hash, cover_path, cover_color)
-      VALUES (@id, @title, @author, @series, @series_index, @filename, @file_format,
-              @file_size, @file_hash, @cover_path, @cover_color)
-    `).run(book);
-
-    // Initial user_books record
-    db.prepare(`
-      INSERT INTO user_books (user_id, book_id, status, progress_percent)
-      VALUES (?, ?, 'unread', 0)
-    `).run(req.user_id, id);
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO books (id, title, author, series, series_index, description, isbn, tags, filename, file_format,
+                           file_size, file_hash, cover_path, cover_color)
+        VALUES (@id, @title, @author, @series, @series_index, @description, @isbn, @tags, @filename, @file_format,
+                @file_size, @file_hash, @cover_path, @cover_color)
+      `).run(book);
+      db.prepare(`INSERT INTO user_books (user_id, book_id, status, progress_percent) VALUES (?, ?, 'unread', 0)`).run(req.user_id, id);
+    })();
 
     // Return the full book row
     const inserted = db.prepare(`
@@ -9773,7 +10999,11 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
       }
     }
     console.error('Upload error:', err);
-    const isClientError = /valid EPUB|must be/.test(err.message);
+    if (err && (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed: books.file_hash/.test(err.message || ''))) {
+      const existing = uploadedFileHash ? db.prepare('SELECT id, title FROM books WHERE file_hash = ?').get(uploadedFileHash) : null;
+      return res.status(409).json({ error: 'This book is already in the library', book_id: existing && existing.id, title: existing && existing.title });
+    }
+    const isClientError = /valid EPUB|must be|too many|too large|compression ratio|timed out/i.test(err.message);
     res.status(isClientError ? 400 : 500).json({ error: isClientError ? err.message : 'Upload failed' });
   }
 });
@@ -9821,9 +11051,25 @@ router.get('/api/books/:id/file', validateUuidParam('id'), (req, res) => {
 
   const range = req.headers.range;
   if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+    if (!/^bytes=\d*-\d*$/.test(range) || range.includes(',')) {
+      res.setHeader('Content-Range', `bytes */${totalSize}`);
+      return res.status(416).end();
+    }
+    const parts = range.slice(6).split('-');
+    let start;
+    let end;
+    if (parts[0] === '') {
+      const suffixLength = parseInt(parts[1], 10);
+      if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+        res.setHeader('Content-Range', `bytes */${totalSize}`);
+        return res.status(416).end();
+      }
+      start = Math.max(0, totalSize - suffixLength);
+      end = totalSize - 1;
+    } else {
+      start = parseInt(parts[0], 10);
+      end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+    }
 
     if (isNaN(start) || isNaN(end) || start < 0 || start > end || start >= totalSize) {
       res.setHeader('Content-Range', `bytes */${totalSize}`);
@@ -9870,7 +11116,7 @@ router.get('/api/books/:id/cover', validateUuidParam('id'), (req, res) => {
   const ext = path.extname(book.cover_path).toLowerCase();
   const mimeTypes = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp' };
   res.setHeader('Content-Type', mimeTypes[ext] || 'image/jpeg');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'private, max-age=86400');
   const stream = fs.createReadStream(coverPath);
   stream.on('error', () => {
     if (!res.headersSent) res.status(500).json({ error: 'Could not read cover image' });
@@ -9894,7 +11140,7 @@ router.patch('/api/books/:id', validateUuidParam('id'), (req, res) => {
 
   const user = db.prepare("SELECT is_admin FROM users WHERE id = ?").get(req.user_id);
   const isAdmin = !!(user && user.is_admin);
-  const changesSharedMetadata = req.body.title !== undefined || req.body.author !== undefined;
+  const changesSharedMetadata = ['title', 'author', 'series', 'series_index', 'description', 'isbn', 'tags'].some(key => req.body[key] !== undefined);
   if (changesSharedMetadata && !isAdmin) {
     return res.status(403).json({ error: 'Admin privileges required to edit shared book metadata' });
   }
@@ -9936,6 +11182,16 @@ router.patch('/api/books/:id', validateUuidParam('id'), (req, res) => {
       bookValues.author = text(req.body.author, { max: 500, field: 'author' });
       bookUpdates.push('author = @author');
     }
+    for (const field of ['series', 'description', 'isbn', 'tags']) {
+      if (req.body[field] !== undefined) {
+        bookValues[field] = text(req.body[field], { max: field === 'description' ? 5000 : 500, field });
+        bookUpdates.push(`${field} = @${field}`);
+      }
+    }
+    if (req.body.series_index !== undefined) {
+      bookValues.series_index = number(req.body.series_index, { min: -1000000, max: 1000000, nullable: true, field: 'series_index' });
+      bookUpdates.push('series_index = @series_index');
+    }
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -9954,7 +11210,7 @@ router.patch('/api/books/:id', validateUuidParam('id'), (req, res) => {
       // Auto-update status based on progress
       const newProgress = userBookValues.progress_percent !== undefined ? userBookValues.progress_percent : book.progress_percent;
       const currentStatus = userBookValues.status || book.status;
-      if (newProgress >= 95 && currentStatus !== 'finished') {
+      if (newProgress >= 98 && currentStatus !== 'finished') {
         userBookValues.status = 'finished';
         if (!userBookUpdates.includes('status = @status')) userBookUpdates.push('status = @status');
       } else if (newProgress > 0 && currentStatus === 'unread') {
@@ -10004,22 +11260,31 @@ router.delete('/api/books/:id', validateUuidParam('id'), requireAdmin, (req, res
   const book = db.prepare('SELECT id, filename, cover_path FROM books WHERE id = ?').get(req.params.id);
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
-  db.prepare('DELETE FROM books WHERE id = ?').run(req.params.id);
-
-  if (isBookFilename(book.filename)) {
-    const filePath = path.join(BOOKS_DIR, book.filename);
-    try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch(e) { console.error('Error deleting epub:', e); }
+  const staged = [];
+  try {
+    const stage = (source, label) => {
+      if (!source || !fs.existsSync(source)) return;
+      const destination = path.join(DATA_DIR, 'tmp', `delete-${book.id}-${label}-${randomUUID()}`);
+      fs.renameSync(source, destination);
+      staged.push({ source, destination });
+    };
+    if (isBookFilename(book.filename)) stage(path.join(BOOKS_DIR, book.filename), 'book');
+    if (book.cover_path && isCoverFilename(book.cover_path)) stage(path.join(COVERS_DIR, book.cover_path), 'cover');
+    db.prepare('DELETE FROM books WHERE id = ?').run(req.params.id);
+  } catch (error) {
+    for (const item of staged.reverse()) {
+      try { if (fs.existsSync(item.destination)) fs.renameSync(item.destination, item.source); } catch (_) {}
+    }
+    console.error('Error staging book deletion:', error);
+    return res.status(500).json({ error: 'Could not remove book files safely' });
   }
-
-  if (book.cover_path && isCoverFilename(book.cover_path)) {
-    const coverPath = path.join(COVERS_DIR, book.cover_path);
-    try { if (fs.existsSync(coverPath)) fs.unlinkSync(coverPath); } catch(e) { console.error('Error deleting cover:', e); }
-  }
+  for (const item of staged) fs.promises.unlink(item.destination).catch(error => console.error('Error finalizing book deletion:', error));
 
   res.json({ ok: true });
 });
 
 module.exports = router;
+
 ````
 
 ---
@@ -10087,6 +11352,7 @@ router.delete('/api/bookmarks/:id', validateUuidParam('id'), (req, res) => {
 });
 
 module.exports = router;
+
 ````
 
 ---
@@ -10233,13 +11499,14 @@ router.delete('/api/books/:id/collections/:collectionId', validateUuidParam('id'
 });
 
 module.exports = router;
+
 ````
 
 ---
 
 ## File: `server/src/routes/highlights.js`
 
-*Relative Path: `server/src/routes/highlights.js` | Size: 3.5 KB | Total Lines: 104*
+*Relative Path: `server/src/routes/highlights.js` | Size: 5.0 KB | Total Lines: 131*
 
 ````javascript
 'use strict';
@@ -10259,6 +11526,28 @@ function color(value) {
 
 const router = express.Router();
 
+function tags(value) {
+  if (value == null || value === '') return null;
+  const values = Array.isArray(value) ? value : String(value).split(',');
+  const normalized = [...new Set(values.map(item => String(item).trim().toLowerCase()).filter(Boolean))];
+  if (normalized.length > 12 || normalized.some(item => item.length > 40)) throw new Error('tags are invalid');
+  return JSON.stringify(normalized);
+}
+
+router.get('/api/highlights', (req, res) => {
+  const query = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const tag = typeof req.query.tag === 'string' ? req.query.tag.trim().toLowerCase() : '';
+  let rows = db.prepare(`
+    SELECT h.*, b.title AS book_title, b.author AS book_author
+    FROM highlights h JOIN books b ON b.id = h.book_id
+    WHERE h.user_id = ? ORDER BY h.created_at DESC
+  `).all(req.user_id);
+  rows = rows.map(row => ({ ...row, tags: row.tags ? JSON.parse(row.tags) : [] }));
+  if (query) rows = rows.filter(row => `${row.excerpt || ''} ${row.note || ''} ${row.chapter || ''} ${row.book_title || ''}`.toLowerCase().includes(query));
+  if (tag) rows = rows.filter(row => row.tags.includes(tag));
+  res.json(rows);
+});
+
 /**
  * GET /api/books/:id/highlights
  * Returns all highlights for a book.
@@ -10267,7 +11556,7 @@ router.get('/api/books/:id/highlights', validateUuidParam('id'), (req, res) => {
   const highlights = db.prepare(
     'SELECT * FROM highlights WHERE book_id = ? AND user_id = ? ORDER BY created_at ASC'
   ).all(req.params.id, req.user_id);
-  res.json(highlights);
+  res.json(highlights.map(item => ({ ...item, tags: item.tags ? JSON.parse(item.tags) : [] })));
 });
 
 /**
@@ -10278,25 +11567,26 @@ router.post('/api/books/:id/highlights', validateUuidParam('id'), (req, res) => 
   const book = db.prepare('SELECT id FROM books WHERE id = ?').get(req.params.id);
   if (!book) return res.status(404).json({ error: 'Book not found' });
 
-  let cfiRange, safeExcerpt, safeNote, safeColor, safeChapter;
+  let cfiRange, safeExcerpt, safeNote, safeColor, safeChapter, safeTags;
   try {
     cfiRange = text(req.body.cfi_range, { required: true, max: 10000, field: 'cfi_range' });
     safeExcerpt = text(req.body.excerpt, { max: 1000, field: 'excerpt' });
     safeNote = text(req.body.note, { max: 2000, field: 'note' });
     safeColor = color(req.body.color);
     safeChapter = text(req.body.chapter, { max: 500, field: 'chapter' });
+    safeTags = tags(req.body.tags);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 
   const id = randomUUID();
   db.prepare(`
-    INSERT INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, req.user_id, req.params.id, cfiRange, safeExcerpt, safeNote, safeColor, safeChapter);
+    INSERT INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter, tags)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, req.user_id, req.params.id, cfiRange, safeExcerpt, safeNote, safeColor, safeChapter, safeTags);
 
   const highlight = db.prepare('SELECT * FROM highlights WHERE id = ?').get(id);
-  res.status(201).json(highlight);
+  res.status(201).json({ ...highlight, tags: highlight.tags ? JSON.parse(highlight.tags) : [] });
 });
 
 /**
@@ -10319,6 +11609,10 @@ router.patch('/api/highlights/:id', validateUuidParam('id'), (req, res) => {
       values.note = text(req.body.note, { max: 2000, field: 'note' });
       updates.push('note = @note');
     }
+    if (req.body.tags !== undefined) {
+      values.tags = tags(req.body.tags);
+      updates.push('tags = @tags');
+    }
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -10332,7 +11626,7 @@ router.patch('/api/highlights/:id', validateUuidParam('id'), (req, res) => {
   db.prepare(`UPDATE highlights SET ${updates.join(', ')} WHERE id = @id AND user_id = @user_id`).run(values);
 
   const updated = db.prepare('SELECT * FROM highlights WHERE id = ?').get(req.params.id);
-  res.json(updated);
+  res.json({ ...updated, tags: updated.tags ? JSON.parse(updated.tags) : [] });
 });
 
 /**
@@ -10345,13 +11639,14 @@ router.delete('/api/highlights/:id', validateUuidParam('id'), (req, res) => {
 });
 
 module.exports = router;
+
 ````
 
 ---
 
 ## File: `server/src/routes/sessions.js`
 
-*Relative Path: `server/src/routes/sessions.js` | Size: 5 KB | Total Lines: 153*
+*Relative Path: `server/src/routes/sessions.js` | Size: 8.7 KB | Total Lines: 232*
 
 ````javascript
 'use strict';
@@ -10378,6 +11673,9 @@ function closeSession(session, endedAt) {
  */
 router.post('/api/sessions/start', (req, res) => {
   const { book_id } = req.body;
+  const clientId = typeof req.body.client_id === 'string' && req.body.client_id.length <= 100
+    ? req.body.client_id
+    : 'legacy-client';
   if (!book_id) return res.status(400).json({ error: 'book_id is required' });
 
   const book = db.prepare('SELECT id FROM books WHERE id = ?').get(book_id);
@@ -10390,13 +11688,13 @@ router.post('/api/sessions/start', (req, res) => {
   // any abandoned single-user sessions before starting the new one so stats do
   // not silently lose that reading time.
   db.transaction(() => {
-    const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL AND user_id = ?').all(req.user_id);
+    const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL AND user_id = ? AND COALESCE(client_id, ?) = ?').all(req.user_id, clientId, clientId);
     for (const session of openSessions) closeSession(session, started_at);
-    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at) VALUES (?, ?, ?, ?)')
-      .run(id, req.user_id, book_id, started_at);
+    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at, client_id) VALUES (?, ?, ?, ?, ?)')
+      .run(id, req.user_id, book_id, started_at, clientId);
   })();
 
-  res.status(201).json({ id, book_id, started_at });
+  res.status(201).json({ id, book_id, started_at, client_id: clientId });
 });
 
 /**
@@ -10421,7 +11719,7 @@ router.post('/api/sessions/:id/end', validateUuidParam('id'), (req, res) => {
  * - average reading pace (seconds per book)
  */
 router.get('/api/stats', (req, res) => {
-  // Time read this week
+  // Rolling seven days (the UI labels this precisely rather than “this week”).
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const weekRow = db.prepare(`
     SELECT COALESCE(SUM(duration_seconds), 0) as total
@@ -10433,9 +11731,9 @@ router.get('/api/stats', (req, res) => {
     SELECT COALESCE(SUM(duration_seconds), 0) as total FROM reading_sessions WHERE user_id = ?
   `).get(req.user_id);
 
-  // Books finished (progress >= 95%)
+  // Books finished (global completion threshold is 98%).
   const finishedRow = db.prepare(`
-    SELECT COUNT(*) as total FROM user_books WHERE progress_percent >= 95 AND user_id = ?
+    SELECT COUNT(*) as total FROM user_books WHERE progress_percent >= 98 AND user_id = ?
   `).get(req.user_id);
 
   // Timezone resolution: validate client timezone
@@ -10458,20 +11756,35 @@ router.get('/api/stats', (req, res) => {
     }
   };
 
-  // Reading streak: calculate distinct reader local calendar days.
-  const cutoff = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
+  // Reading streak: every local date touched by a session counts, including a
+  // session crossing midnight. There is no artificial historical cutoff.
   const sessionRows = db.prepare(`
-    SELECT started_at FROM reading_sessions
-    WHERE started_at >= ? AND user_id = ?
+    SELECT rs.started_at, COALESCE(rs.ended_at, CURRENT_TIMESTAMP) AS ended_at,
+           COALESCE(rs.duration_seconds, 0) AS duration_seconds,
+           rs.book_id, b.title
+    FROM reading_sessions rs
+    LEFT JOIN books b ON b.id = rs.book_id
+    WHERE rs.user_id = ?
     ORDER BY started_at DESC
-  `).all(cutoff, req.user_id);
+  `).all(req.user_id);
 
   const daySet = new Set();
+  const dailySeconds = new Map();
+  const monthlySeconds = new Map();
   for (const row of sessionRows) {
     if (row.started_at) {
-      const d = new Date(row.started_at);
-      if (!isNaN(d.getTime())) {
-        daySet.add(getLocalDateKey(d));
+      const start = new Date(row.started_at);
+      const end = new Date(row.ended_at || row.started_at);
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        daySet.add(getLocalDateKey(start));
+        daySet.add(getLocalDateKey(end));
+        for (let cursor = start.getTime() + 6 * 3600000; cursor < end.getTime(); cursor += 6 * 3600000) {
+          daySet.add(getLocalDateKey(new Date(cursor)));
+        }
+        const key = getLocalDateKey(start);
+        dailySeconds.set(key, (dailySeconds.get(key) || 0) + Number(row.duration_seconds || 0));
+        const month = key.slice(0, 7);
+        monthlySeconds.set(month, (monthlySeconds.get(month) || 0) + Number(row.duration_seconds || 0));
       }
     }
   }
@@ -10497,22 +11810,84 @@ router.get('/api/stats', (req, res) => {
     }
   }
 
+  const sortedDays = [...daySet].sort();
+  let longestStreak = 0;
+  let run = 0;
+  let previous = null;
+  for (const key of sortedDays) {
+    const stamp = Date.parse(`${key}T00:00:00Z`);
+    run = previous != null && stamp - previous === 86400000 ? run + 1 : 1;
+    longestStreak = Math.max(longestStreak, run);
+    previous = stamp;
+  }
+
+  const previousWeekStart = new Date(Date.now() - 14 * 86400000).toISOString();
+  const previousWeekEnd = weekAgo;
+  const previousWeek = db.prepare(`
+    SELECT COALESCE(SUM(duration_seconds), 0) AS total FROM reading_sessions
+    WHERE started_at >= ? AND started_at < ? AND user_id = ?
+  `).get(previousWeekStart, previousWeekEnd, req.user_id).total;
+  const averageSession = db.prepare(`
+    SELECT COALESCE(AVG(duration_seconds), 0) AS value FROM reading_sessions
+    WHERE user_id = ? AND duration_seconds > 0
+  `).get(req.user_id).value;
+  const mostRead = db.prepare(`
+    SELECT rs.book_id, b.title, SUM(rs.duration_seconds) AS seconds
+    FROM reading_sessions rs JOIN books b ON b.id = rs.book_id
+    WHERE rs.user_id = ? AND rs.duration_seconds > 0
+    GROUP BY rs.book_id, b.title ORDER BY seconds DESC LIMIT 5
+  `).all(req.user_id);
+  const daily = [];
+  for (let offset = 13; offset >= 0; offset--) {
+    const date = new Date(Date.now() - offset * 86400000);
+    const key = getLocalDateKey(date);
+    daily.push({ date: key, seconds: dailySeconds.get(key) || 0 });
+  }
+  const monthly = [...monthlySeconds.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-12)
+    .map(([month, seconds]) => ({ month, seconds }));
+  const paceRows = db.prepare(`
+    SELECT b.file_size, ub.progress_percent, COALESCE(SUM(rs.duration_seconds), 0) AS seconds
+    FROM user_books ub
+    JOIN books b ON b.id = ub.book_id
+    LEFT JOIN reading_sessions rs ON rs.book_id = ub.book_id AND rs.user_id = ub.user_id
+    WHERE ub.user_id = ? AND ub.progress_percent > 0
+    GROUP BY ub.book_id, b.file_size, ub.progress_percent
+    HAVING seconds >= 300
+  `).all(req.user_id);
+  const paceSeconds = paceRows.reduce((sum, row) => sum + Number(row.seconds || 0), 0);
+  const estimatedBytesRead = paceRows.reduce((sum, row) => {
+    return sum + Number(row.file_size || 0) * Math.min(100, Math.max(0, Number(row.progress_percent || 0))) / 100;
+  }, 0);
+  const readingBytesPerMinute = paceSeconds > 0
+    ? Math.round(estimatedBytesRead / (paceSeconds / 60))
+    : null;
+
   res.json({
     time_read_this_week: weekRow.total,
     time_read_total: totalRow.total,
     books_finished: finishedRow.total,
     reading_streak_days: streak,
+    longest_streak_days: longestStreak,
+    previous_7_days: previousWeek,
+    average_session_seconds: Math.round(averageSession || 0),
+    reading_bytes_per_minute: readingBytesPerMinute,
+    daily,
+    monthly,
+    most_read: mostRead,
   });
 });
 
 module.exports = router;
+
 ````
 
 ---
 
 ## File: `server/src/routes/settings.js`
 
-*Relative Path: `server/src/routes/settings.js` | Size: 2 KB | Total Lines: 70*
+*Relative Path: `server/src/routes/settings.js` | Size: 2.0 KB | Total Lines: 70*
 
 ````javascript
 'use strict';
@@ -10584,13 +11959,14 @@ router.put('/api/settings', (req, res) => {
 });
 
 module.exports = router;
+
 ````
 
 ---
 
 ## File: `server/src/routes/users.js`
 
-*Relative Path: `server/src/routes/users.js` | Size: 4.9 KB | Total Lines: 139*
+*Relative Path: `server/src/routes/users.js` | Size: 5.1 KB | Total Lines: 145*
 
 ````javascript
 'use strict';
@@ -10635,8 +12011,11 @@ router.post('/api/users', requireAdmin, async (req, res) => {
     if (!username || typeof username !== 'string' || username.trim().length === 0 || username.length > 255) {
       return res.status(400).json({ error: 'A valid username is required' });
     }
-    if (!passphrase || typeof passphrase !== 'string' || passphrase.length < 4 || passphrase.length > 1024) {
-      return res.status(400).json({ error: 'A valid passphrase (min 4 characters) is required' });
+    if (!passphrase || typeof passphrase !== 'string' || passphrase.length < 12 || passphrase.length > 1024) {
+      return res.status(400).json({ error: 'A valid passphrase (min 12 characters) is required' });
+    }
+    if (is_admin !== undefined && typeof is_admin !== 'boolean') {
+      return res.status(400).json({ error: 'is_admin must be a boolean' });
     }
 
     const existing = db.prepare('SELECT id FROM users WHERE lower(username) = lower(?)').get(username.trim());
@@ -10679,7 +12058,10 @@ router.patch('/api/users/:id', validateUuidParam('id'), requireAdmin, async (req
 
     let newAdmin = existing.is_admin;
     if (is_admin !== undefined) {
-      const parsedAdmin = Boolean(is_admin) ? 1 : 0;
+      if (typeof is_admin !== 'boolean') {
+        return res.status(400).json({ error: 'is_admin must be a boolean' });
+      }
+      const parsedAdmin = is_admin ? 1 : 0;
       if (req.params.id === req.user_id && parsedAdmin === 0) {
         return res.status(400).json({ error: 'You cannot remove your own admin privileges' });
       }
@@ -10688,8 +12070,8 @@ router.patch('/api/users/:id', validateUuidParam('id'), requireAdmin, async (req
 
     let newHash = null;
     if (passphrase !== undefined) {
-      if (typeof passphrase !== 'string' || passphrase.length < 4 || passphrase.length > 1024) {
-        return res.status(400).json({ error: 'A valid passphrase (min 4 characters) is required' });
+      if (typeof passphrase !== 'string' || passphrase.length < 12 || passphrase.length > 1024) {
+        return res.status(400).json({ error: 'A valid passphrase (min 12 characters) is required' });
       }
       newHash = await bcrypt.hash(passphrase, 10);
     }
@@ -10731,6 +12113,178 @@ router.delete('/api/users/:id', validateUuidParam('id'), requireAdmin, (req, res
 
 module.exports = router;
 module.exports.requireAdmin = requireAdmin;
+
+````
+
+---
+
+## File: `server/test/api-smoke.test.js`
+
+*Relative Path: `server/test/api-smoke.test.js` | Size: 4.2 KB | Total Lines: 118*
+
+````javascript
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
+const fs = require('node:fs/promises');
+const net = require('node:net');
+const { randomUUID } = require('node:crypto');
+const { execFile, spawn } = require('node:child_process');
+const { promisify } = require('node:util');
+
+const execFileAsync = promisify(execFile);
+const serverRoot = path.resolve(__dirname, '..');
+
+async function reservePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close(error => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+async function waitForHealth(baseUrl, child) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`Server exited early with code ${child.exitCode}`);
+    try {
+      const response = await fetch(`${baseUrl}/healthz`);
+      if (response.ok) return;
+    } catch (_) {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('Timed out waiting for the test server');
+}
+
+test('authenticated API enforces roles, exposes stats, and deduplicates writes', { timeout: 40_000 }, async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'endpaper-api-'));
+  const port = await reservePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const env = {
+    ...process.env,
+    ENDPAPER_DATA_DIR: dataDir,
+    PORT: String(port),
+    LOG_LEVEL: 'silent',
+    NODE_ENV: 'test',
+  };
+  let child;
+
+  try {
+    await execFileAsync(process.execPath, ['src/lib/passphrase.js', '--set', 'correct horse battery', 'admin'], {
+      cwd: serverRoot,
+      env,
+      timeout: 20_000,
+    });
+
+    child = spawn(process.execPath, ['src/index.js'], {
+      cwd: serverRoot,
+      env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let childError = '';
+    child.stderr.on('data', chunk => { childError += chunk.toString(); });
+    await waitForHealth(baseUrl, child);
+
+    const login = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'ADMIN', passphrase: 'correct horse battery' }),
+    });
+    assert.equal(login.status, 200, childError);
+    const setCookie = login.headers.get('set-cookie') || '';
+    assert.match(setCookie, /endpaper_session=/);
+    assert.match(setCookie, /HttpOnly/i);
+    assert.match(setCookie, /SameSite=Strict/i);
+    const cookie = setCookie.split(';', 1)[0];
+
+    const invalidRole = await fetch(`${baseUrl}/api/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ username: 'reader', passphrase: 'another secure phrase', is_admin: 'true' }),
+    });
+    assert.equal(invalidRole.status, 400);
+
+    const operationId = randomUUID();
+    const create = () => fetch(`${baseUrl}/api/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': operationId },
+      body: JSON.stringify({ username: 'reader', passphrase: 'another secure phrase', is_admin: false }),
+    });
+    const firstCreate = await create();
+    assert.equal(firstCreate.status, 201);
+    const firstUser = await firstCreate.json();
+    const replayCreate = await create();
+    assert.equal(replayCreate.status, 200);
+    assert.deepEqual(await replayCreate.json(), firstUser);
+
+    const stats = await fetch(`${baseUrl}/api/stats?tz=Asia%2FKolkata`, { headers: { Cookie: cookie } });
+    assert.equal(stats.status, 200);
+    const payload = await stats.json();
+    assert.ok(Array.isArray(payload.daily));
+    assert.ok(Array.isArray(payload.monthly));
+    assert.equal(payload.reading_bytes_per_minute, null);
+  } finally {
+    if (child && child.exitCode === null) {
+      child.kill('SIGTERM');
+      await Promise.race([
+        new Promise(resolve => child.once('exit', resolve)),
+        new Promise(resolve => setTimeout(resolve, 3_000)),
+      ]);
+    }
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+````
+
+---
+
+## File: `server/test/validation.test.js`
+
+*Relative Path: `server/test/validation.test.js` | Size: 1.7 KB | Total Lines: 35*
+
+````javascript
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const { text, number, isUuid, isBookFilename, isCoverFilename } = require('../src/lib/validation');
+
+test('validation accepts expected library identifiers and rejects traversal', () => {
+  assert.equal(isUuid('123e4567-e89b-42d3-a456-426614174000'), true);
+  assert.equal(isBookFilename('123e4567-e89b-42d3-a456-426614174000.epub'), true);
+  assert.equal(isBookFilename('../book.epub'), false);
+  assert.equal(isCoverFilename('123e4567-e89b-42d3-a456-426614174000.webp'), true);
+  assert.equal(isCoverFilename('..\\cover.webp'), false);
+});
+
+test('text and number enforce bounds without coercing invalid values', () => {
+  assert.equal(text('  A title  ', { required: true, max: 20, field: 'title' }), 'A title');
+  assert.throws(() => text('', { required: true, field: 'title' }), /required/);
+  assert.equal(number(98, { min: 0, max: 100, field: 'progress' }), 98);
+  assert.throws(() => number('not-a-number', { field: 'progress' }), /number/);
+});
+
+test('frontend keeps security and reader regression invariants', () => {
+  const publicDir = path.resolve(__dirname, '../../public');
+  const app = fs.readFileSync(path.join(publicDir, 'app.js'), 'utf8');
+  const html = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf8');
+  assert.doesNotMatch(app, /allow-same-origin allow-scripts/);
+  assert.match(app, /pct\s*>=\s*98/);
+  assert.doesNotMatch(html, /cdnjs\.cloudflare\.com|fonts\.googleapis\.com/);
+  assert.match(html, /\/jszip\.min\.js/);
+  assert.match(html, /\/epub\.min\.js/);
+  assert.ok(fs.existsSync(path.join(publicDir, 'jszip.min.js')));
+});
+
 ````
 
 ---

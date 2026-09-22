@@ -15,8 +15,10 @@ Use an admin account for yourself and add friends and family as readers from **A
 
 - **Shared library shelf** - One EPUB catalogue with cover art and shared collections for everyone.
 - **Private reading state** - Per-user progress, status, ratings, bookmarks, highlights, reading time, and settings.
-- **Full EPUB reader** - Paginated and scrolled layouts, customizable fonts, themes, and spacing.
-- **Search, sorting, and filters** - Find books by title or author, browse collections, and sort by progress or recency.
+- **Full EPUB reader** - Paginated and scrolled layouts, customizable fonts, themes, spacing, gestures, text-to-speech controls, and in-book search.
+- **Library discovery** - Smart shelves, multi-book continue reading, metadata search, sorting, filters, bulk actions, and a global highlights notebook.
+- **Offline-first PWA** - Explicit per-book downloads, range-aware offline reading, queued reading-state sync, and safe deferred updates.
+- **Reading insights** - Goals, streaks, comparisons, monthly trends, favorite books, and personalized time estimates.
 - **Admin tools** - Create reader/admin accounts and maintain the shared catalogue.
 - **Backup and restore** - Admin-only backup exports and imports for the shared library and supported personal reading data.
 - **Responsive UI** - Works across phones, tablets, and desktop browsers.
@@ -47,7 +49,7 @@ Endpaper requires Node.js 20 or newer.
 
 ```bash
 cd server
-npm install
+npm ci
 
 # Create the first admin account. Replace both values with your own.
 npm run set-passphrase -- "a long unique passphrase" admin
@@ -69,6 +71,8 @@ Once signed in as an admin, use **Admin Settings** to create reader accounts for
 ## Backups
 
 Export and import are admin-only. An export includes EPUBs, covers, shared books and collections, and supported personal reading data. It excludes credentials, admin status, and login sessions.
+
+The server's automatic daily files in `data/backups/` are SQLite snapshots for database recovery; they do not contain EPUB or cover files. Back up the complete `data/` directory or download an in-app export when you need a portable, full-library backup.
 
 Import is a merge: existing shared books are preserved and missing shared records are added. Local users and their roles are never changed. Personal data from a backup is applied only when its username exactly matches an existing local account; data for other usernames is skipped. Export before importing a backup from another device, and import only archives you trust.
 
@@ -96,7 +100,7 @@ Because Endpaper is a lightweight Node.js + SQLite application, you do **not** n
    ```bash
    git clone <your-repo-url> /opt/endpaper
    cd /opt/endpaper/server
-   npm install
+   npm ci --omit=dev
 
    # Create your initial admin account
    node src/lib/passphrase.js --set "your-secure-passphrase" admin
@@ -150,7 +154,7 @@ git pull origin main
 
 # 2. Install any dependency updates
 cd server
-npm install --production
+npm ci --omit=dev
 
 # 3. Restart the application seamlessly
 pm2 restart endpaper

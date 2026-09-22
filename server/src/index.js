@@ -13,7 +13,10 @@ const { isUuid, isBookFilename, isCoverFilename } = require('./lib/validation');
 const db = require('./db');
 
 // ---------- Startup: clean stale tmp files ----------
-const TMP_DIR = path.resolve(__dirname, '../../data/tmp');
+const DATA_DIR = process.env.ENDPAPER_DATA_DIR
+  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
+  : path.resolve(__dirname, '../../data');
+const TMP_DIR = path.join(DATA_DIR, 'tmp');
 try {
   const ONE_HOUR = 60 * 60 * 1000;
   const now = Date.now();
@@ -47,10 +50,11 @@ const trustProxyVal = process.env.TRUST_PROXY;
 if (trustProxyVal !== undefined) {
   app.set('trust proxy', isNaN(Number(trustProxyVal)) ? (trustProxyVal === 'true' ? true : (trustProxyVal === 'false' ? false : trustProxyVal)) : Number(trustProxyVal));
 } else {
-  app.set('trust proxy', 1);
+  // Direct deployments must not trust spoofable forwarding headers. The
+  // supplied Docker/Caddy deployment sets TRUST_PROXY=1 explicitly.
+  app.set('trust proxy', false);
 }
 const PORT = process.env.PORT || 3001;
-const DATA_DIR = path.resolve(__dirname, '../../data');
 const MAX_IMPORT_BYTES = Math.min(Math.max(Number(process.env.IMPORT_MAX_BYTES) || 500 * 1024 * 1024, 1), 2 * 1024 * 1024 * 1024);
 const MAX_IMPORT_ENTRIES = 5000;
 
@@ -72,6 +76,8 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.dictionaryapi.dev; media-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
@@ -88,6 +94,30 @@ app.use('/api', (req, res, next) => {
   next();
 });
 app.use('/api', authMiddleware);
+
+// Deduplicate replayed offline writes after an uncertain network outcome.
+// The frontend sends a stable UUID for every queued mutation.
+app.use('/api', (req, res, next) => {
+  if (!req.user_id || !['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
+  const operationId = req.get('Idempotency-Key');
+  if (!operationId) return next();
+  if (!isUuid(operationId)) return res.status(400).json({ error: 'Invalid Idempotency-Key' });
+  const existing = db.prepare('SELECT response_json FROM client_operations WHERE user_id = ? AND operation_id = ?').get(req.user_id, operationId);
+  if (existing) return res.json(existing.response_json ? JSON.parse(existing.response_json) : { ok: true, replayed: true });
+  const originalJson = res.json.bind(res);
+  res.json = payload => {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      try {
+        db.prepare('INSERT OR IGNORE INTO client_operations (user_id, operation_id, response_json) VALUES (?, ?, ?)')
+          .run(req.user_id, operationId, JSON.stringify(payload == null ? { ok: true } : payload));
+      } catch (error) {
+        logger.warn({ err: error }, 'Could not persist idempotency receipt');
+      }
+    }
+    return originalJson(payload);
+  };
+  next();
+});
 
 // ---------- API Routes ----------
 app.use(authRoutes);
@@ -194,6 +224,9 @@ function normalizeBackupBook(value) {
     author: backupText(value.author, 'book author', { max: 500 }),
     series: backupText(value.series, 'book series', { max: 500 }),
     series_index: backupNumber(value.series_index, 'book series index', { min: -1_000_000, max: 1_000_000 }),
+    description: backupText(value.description, 'book description', { max: 5000 }),
+    isbn: backupText(value.isbn, 'book ISBN', { max: 500 }),
+    tags: backupText(value.tags, 'book tags', { max: 500 }),
     filename: value.filename,
     file_format: 'epub',
     file_size: backupNumber(value.file_size, 'book file size', { min: 0, max: MAX_IMPORT_BYTES, integer: true }),
@@ -248,6 +281,7 @@ function normalizeHighlight(value) {
     note: backupText(value.note, 'highlight note', { max: 2000 }),
     color,
     chapter: backupText(value.chapter, 'highlight chapter', { max: 500 }),
+    tags: backupText(value.tags, 'highlight tags', { max: 2000 }),
     created_at: backupTimestamp(value.created_at, 'highlight created time', { fallback: new Date().toISOString() }),
   };
 }
@@ -262,6 +296,7 @@ function normalizeReadingSession(value) {
     started_at: backupTimestamp(value.started_at, 'session start time', { required: true }),
     ended_at: backupTimestamp(value.ended_at, 'session end time'),
     duration_seconds: backupNumber(value.duration_seconds, 'session duration', { min: 0, max: 2_147_483_647, integer: true }),
+    client_id: backupText(value.client_id, 'session client', { max: 100 }),
   };
 }
 
@@ -393,9 +428,9 @@ function createUserIdMap(backupUsers) {
 
 function importBackupData(backup, backupUserIds, unmatchedUsers) {
   const insertBook = db.prepare(`
-    INSERT INTO books (id, title, author, series, series_index, filename, file_format,
+    INSERT INTO books (id, title, author, series, series_index, description, isbn, tags, filename, file_format,
                        file_size, cover_path, cover_color, added_at)
-    VALUES (@id, @title, @author, @series, @series_index, @filename, @file_format,
+    VALUES (@id, @title, @author, @series, @series_index, @description, @isbn, @tags, @filename, @file_format,
             @file_size, @cover_path, @cover_color, @added_at)
   `);
   const getBookById = db.prepare('SELECT id, filename FROM books WHERE id = ?');
@@ -423,12 +458,12 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
     VALUES (@id, @user_id, @book_id, @cfi, @label, @chapter, @progress_percent, @created_at)
   `);
   const insertHighlight = db.prepare(`
-    INSERT OR IGNORE INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter, created_at)
-    VALUES (@id, @user_id, @book_id, @cfi_range, @excerpt, @note, @color, @chapter, @created_at)
+    INSERT OR IGNORE INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter, tags, created_at)
+    VALUES (@id, @user_id, @book_id, @cfi_range, @excerpt, @note, @color, @chapter, @tags, @created_at)
   `);
   const insertReadingSession = db.prepare(`
-    INSERT OR IGNORE INTO reading_sessions (id, user_id, book_id, started_at, ended_at, duration_seconds)
-    VALUES (@id, @user_id, @book_id, @started_at, @ended_at, @duration_seconds)
+    INSERT OR IGNORE INTO reading_sessions (id, user_id, book_id, started_at, ended_at, duration_seconds, client_id)
+    VALUES (@id, @user_id, @book_id, @started_at, @ended_at, @duration_seconds, @client_id)
   `);
   const insertSetting = db.prepare(`
     INSERT OR IGNORE INTO settings (user_id, key, value) VALUES (@user_id, @key, @value)
@@ -538,7 +573,7 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
  * identities only, so passphrase hashes, roles, and auth sessions never leave
  * this server.
  */
-app.post('/api/export', requireAdmin, (req, res) => {
+app.all('/api/export', requireAdmin, (req, res) => {
   try {
     const books = db.prepare('SELECT * FROM books').all();
 
@@ -632,12 +667,33 @@ const importUpload = multer({
 
 function openZip(zipPath) {
   return new Promise((resolve, reject) => {
-    yauzl.open(zipPath, { lazyEntries: false }, (err, zipfile) => {
+    yauzl.open(zipPath, { lazyEntries: true, autoClose: false, validateEntrySizes: true }, (err, zipfile) => {
       if (err) return reject(err);
       const entries = new Map();
-      zipfile.on('entry', entry => entries.set(entry.fileName, entry));
-      zipfile.on('end', () => resolve({ zipfile, entries }));
-      zipfile.on('error', reject);
+      let totalBytes = 0;
+      let settled = false;
+      const fail = error => {
+        if (settled) return;
+        settled = true;
+        try { zipfile.close(); } catch (_) {}
+        reject(error);
+      };
+      zipfile.on('entry', entry => {
+        totalBytes += entry.uncompressedSize || 0;
+        if (entries.size + 1 > MAX_IMPORT_ENTRIES) return fail(importError('Backup contains too many files'));
+        if (totalBytes > MAX_IMPORT_BYTES) return fail(importError('Backup is too large to import'));
+        const ratio = (entry.uncompressedSize || 0) / Math.max(1, entry.compressedSize || 0);
+        if (ratio > 200) return fail(importError('Backup contains an unsafe compressed entry'));
+        entries.set(entry.fileName, entry);
+        zipfile.readEntry();
+      });
+      zipfile.on('end', () => {
+        if (settled) return;
+        settled = true;
+        resolve({ zipfile, entries });
+      });
+      zipfile.on('error', fail);
+      zipfile.readEntry();
     });
   });
 }
@@ -655,8 +711,34 @@ function readEntry(zipfile, entry, maxBytes) {
   });
 }
 
+function streamEntryToFile(zipfile, entry, destination, maxBytes) {
+  return new Promise((resolve, reject) => {
+    if (entry.uncompressedSize > maxBytes) return reject(importError('Backup entry is too large'));
+    zipfile.openReadStream(entry, (error, readStream) => {
+      if (error) return reject(error);
+      let observed = 0;
+      const writeStream = fs.createWriteStream(destination, { flags: 'wx', mode: 0o600 });
+      const fail = failure => {
+        readStream.destroy();
+        writeStream.destroy();
+        fs.promises.unlink(destination).catch(() => {}).finally(() => reject(failure));
+      };
+      readStream.on('data', chunk => {
+        observed += chunk.length;
+        if (observed > maxBytes || observed > entry.uncompressedSize + 1024) fail(importError('Backup entry exceeded its declared size'));
+      });
+      readStream.on('error', fail);
+      writeStream.on('error', fail);
+      writeStream.on('finish', resolve);
+      readStream.pipe(writeStream);
+    });
+  });
+}
+
 app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, res) => {
   let zipfile = null;
+  let stageDir = null;
+  const promotedFiles = [];
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -701,7 +783,9 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, r
     validateArchiveAssets(files, dump, BOOKS_DIR, COVERS_DIR);
     const { userIds, unmatchedUsers } = createUserIdMap(dump.users);
 
-    // Restore files
+    // Extract assets into an isolated stage first. No live library path is
+    // modified until every archive entry has streamed and validated.
+    stageDir = await fs.promises.mkdtemp(path.join(DATA_DIR, 'tmp', 'import-'));
     let restoredFiles = 0;
     for (const file of files) {
       const destination = path.join(file.directory === 'books' ? BOOKS_DIR : COVERS_DIR, file.filename);
@@ -709,26 +793,45 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, r
         if (!isRegularFile(destination)) throw importError('A local library asset is not a regular file');
         continue;
       }
-      try {
-        const fileData = await readEntry(zipfile, file.entry, MAX_IMPORT_BYTES);
-        fs.writeFileSync(destination, fileData, { flag: 'wx' });
-        restoredFiles++;
-      } catch (err) {
-        if (err && err.code === 'EEXIST' && isRegularFile(destination)) continue;
-        throw err;
-      }
+      const stagedPath = path.join(stageDir, `${file.directory}-${file.filename}`);
+      await streamEntryToFile(zipfile, file.entry, stagedPath, MAX_IMPORT_BYTES);
+      file.stagedPath = stagedPath;
     }
 
-    const results = importBackupData(dump, userIds, unmatchedUsers);
+    // Promote staged files with exclusive renames, then compensate if the DB
+    // transaction fails. Existing files are deliberately left untouched.
+    for (const file of files) {
+      if (!file.stagedPath) continue;
+      const destination = path.join(file.directory === 'books' ? BOOKS_DIR : COVERS_DIR, file.filename);
+      if (fs.existsSync(destination)) continue;
+      await fs.promises.rename(file.stagedPath, destination);
+      promotedFiles.push(destination);
+      restoredFiles++;
+    }
+
+    let results;
+    try {
+      results = importBackupData(dump, userIds, unmatchedUsers);
+    } catch (error) {
+      await Promise.all(promotedFiles.map(filePath => fs.promises.unlink(filePath).catch(() => {})));
+      throw error;
+    }
     
     zipfile.close();
     try { fs.unlinkSync(req.file.path); } catch (e) {}
+    if (stageDir && path.resolve(stageDir).startsWith(path.resolve(path.join(DATA_DIR, 'tmp')) + path.sep)) {
+      await fs.promises.rm(stageDir, { recursive: true, force: true });
+      stageDir = null;
+    }
 
     res.json({ ok: true, restored_files: restoredFiles, ...results });
   } catch (err) {
     if (zipfile) zipfile.close();
     if (req.file && fs.existsSync(req.file.path)) {
       try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
+    if (stageDir && path.resolve(stageDir).startsWith(path.resolve(path.join(DATA_DIR, 'tmp')) + path.sep)) {
+      await fs.promises.rm(stageDir, { recursive: true, force: true }).catch(() => {});
     }
     logger.error('Import error:', err);
     res.status(err.status || 500).json({ error: err.status ? err.message : 'Import failed' });

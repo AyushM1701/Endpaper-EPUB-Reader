@@ -40,8 +40,11 @@ router.post('/api/users', requireAdmin, async (req, res) => {
     if (!username || typeof username !== 'string' || username.trim().length === 0 || username.length > 255) {
       return res.status(400).json({ error: 'A valid username is required' });
     }
-    if (!passphrase || typeof passphrase !== 'string' || passphrase.length < 4 || passphrase.length > 1024) {
-      return res.status(400).json({ error: 'A valid passphrase (min 4 characters) is required' });
+    if (!passphrase || typeof passphrase !== 'string' || passphrase.length < 12 || passphrase.length > 1024) {
+      return res.status(400).json({ error: 'A valid passphrase (min 12 characters) is required' });
+    }
+    if (is_admin !== undefined && typeof is_admin !== 'boolean') {
+      return res.status(400).json({ error: 'is_admin must be a boolean' });
     }
 
     const existing = db.prepare('SELECT id FROM users WHERE lower(username) = lower(?)').get(username.trim());
@@ -84,7 +87,10 @@ router.patch('/api/users/:id', validateUuidParam('id'), requireAdmin, async (req
 
     let newAdmin = existing.is_admin;
     if (is_admin !== undefined) {
-      const parsedAdmin = Boolean(is_admin) ? 1 : 0;
+      if (typeof is_admin !== 'boolean') {
+        return res.status(400).json({ error: 'is_admin must be a boolean' });
+      }
+      const parsedAdmin = is_admin ? 1 : 0;
       if (req.params.id === req.user_id && parsedAdmin === 0) {
         return res.status(400).json({ error: 'You cannot remove your own admin privileges' });
       }
@@ -93,8 +99,8 @@ router.patch('/api/users/:id', validateUuidParam('id'), requireAdmin, async (req
 
     let newHash = null;
     if (passphrase !== undefined) {
-      if (typeof passphrase !== 'string' || passphrase.length < 4 || passphrase.length > 1024) {
-        return res.status(400).json({ error: 'A valid passphrase (min 4 characters) is required' });
+      if (typeof passphrase !== 'string' || passphrase.length < 12 || passphrase.length > 1024) {
+        return res.status(400).json({ error: 'A valid passphrase (min 12 characters) is required' });
       }
       newHash = await bcrypt.hash(passphrase, 10);
     }

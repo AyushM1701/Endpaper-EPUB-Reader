@@ -8,25 +8,43 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Endpaper">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%23C9973F'/%3E%3Cstop offset='100%25' stop-color='%23A9803F'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='96' fill='%23F6F1E7'/%3E%3Crect x='176' y='96' width='160' height='320' rx='8' fill='url(%23g)'/%3E%3Crect x='316' y='96' width='24' height='320' rx='4' fill='rgba(0,0,0,0.15)'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="/jszip.min.js"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
 <script src="/epub.min.js"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
 <link rel="stylesheet" href="app.css">
 
   <script>
     if ('serviceWorker' in navigator) {
       let refreshing = false;
+      let hadController = Boolean(navigator.serviceWorker.controller);
       navigator.serviceWorker.addEventListener('controllerchange', () => {
+        // clients.claim() also fires during the first install. There is no old
+        // application shell to replace in that case, so avoid a surprise reload.
+        if (!hadController) {
+          hadController = true;
+          return;
+        }
         if (refreshing) return;
         refreshing = true;
-        window.location.reload();
+        if (document.body.classList.contains('reader-active')) {
+          window.__reloadAfterReader = true;
+        } else {
+          window.location.reload();
+        }
       });
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').then((reg) => {
+          const announce = () => {
+            if (!reg.waiting) return;
+            window.__pendingServiceWorker = reg.waiting;
+            document.getElementById('update-banner')?.removeAttribute('hidden');
+          };
+          announce();
+          reg.addEventListener('updatefound', () => reg.installing?.addEventListener('statechange', () => {
+            if (reg.installing?.state === 'installed' && navigator.serviceWorker.controller) announce();
+          }));
           reg.update().catch(() => {});
         }).catch(err => console.error('SW registration failed:', err));
       });
@@ -83,6 +101,9 @@
       <button class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Toggle fullscreen" style="display:none;" onclick="toggleFullscreen()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M8 21H4a1 1 0 0 1-1-1v-4M16 21h4a1 1 0 0 0 1-1v-4"/></svg>
       </button>
+      <button class="icon-btn" id="reader-more-btn" title="More reading tools" aria-label="More reading tools" aria-expanded="false" style="display:none;" onclick="toggleReaderMoreMenu(event)">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+      </button>
       <button class="icon-btn" id="help-toggle" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onclick="openShortcutsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 1.7-2.3 3.3"/><line x1="12" y1="17" x2="12" y2="17.1"/></svg>
       </button>
@@ -107,6 +128,14 @@
       <input type="file" id="file-input" accept=".epub" multiple hidden>
       <input type="file" id="import-input" accept=".zip" style="display:none;" data-admin-only hidden>
     </div>
+    <span id="sync-status" class="sync-status" data-state="saved" hidden aria-live="polite"></span>
+    <div id="reader-more-menu" class="reader-more-menu" hidden>
+      <button type="button" onclick="toggleDrawer('search'); toggleReaderMoreMenu()">Search book</button>
+      <button type="button" onclick="toggleDrawer('bookmarks'); toggleReaderMoreMenu()">Notebook</button>
+      <button type="button" onclick="document.getElementById('tts-btn').click(); toggleReaderMoreMenu()">Read aloud</button>
+      <button type="button" onclick="toggleFullscreen(); toggleReaderMoreMenu()">Fullscreen</button>
+      <button type="button" onclick="openShortcutsModal(); toggleReaderMoreMenu()">Help</button>
+    </div>
   </div>
 
   <!-- Library -->
@@ -122,14 +151,15 @@
       <div id="dropzone" hidden>Drag an .epub file here, or use "Add book" above</div>
       <p id="empty-import-row" data-admin-only hidden style="margin-top:18px; font-size:13px;">Already have a backup? <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import backup</button></p>
     </div>
-    <div id="continue-card" style="display:none;"></div>
+    <div id="continue-card" class="continue-rail" style="display:none;"></div>
+    <div id="smart-sections" style="display:none;"></div>
     <div id="shelf-header" style="display:none;">
       <div class="shelf-title-group">
         <h2>Shared library</h2>
         <span id="shelf-count" class="shelf-badge"></span>
       </div>
       <div class="shelf-controls">
-        <input id="shelf-search" class="shelf-select" type="search" placeholder="Search books…" aria-label="Search library" oninput="renderShelf()">
+        <input id="shelf-search" class="shelf-select" type="search" placeholder="Search books…" aria-label="Search library" oninput="scheduleShelfRender()">
         <select id="shelf-filter" class="shelf-select" onchange="renderShelf()">
           <option value="all">All Books</option>
           <option value="unread">Unread</option>
@@ -144,10 +174,16 @@
           <option value="author">Author</option>
           <option value="progress">Progress</option>
         </select>
+        <select id="shelf-density" class="shelf-select" aria-label="Shelf density" onchange="renderShelf()">
+          <option value="comfortable">Comfortable</option>
+          <option value="compact">Compact</option>
+        </select>
         <button type="button" class="file-link-btn" onclick="openStatsModal()" title="Reading statistics">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px; height:13px; margin-right:4px;"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
           Stats
         </button>
+        <button type="button" class="file-link-btn" onclick="openNotebookModal()">Notebook</button>
+        <button type="button" class="file-link-btn" id="bulk-select-btn" onclick="toggleBulkMode()">Select</button>
         <div class="admin-library-tools dropdown-wrap" data-admin-only hidden role="group" aria-label="Shared library tools">
           <button type="button" class="file-link-btn dropdown-toggle" id="library-tools-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleLibraryToolsMenu(event)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px; height:13px; margin-right:4px;"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
@@ -171,6 +207,15 @@
         </div>
       </div>
     </div>
+    <div id="bulk-toolbar" hidden aria-live="polite">
+      <span id="bulk-count">0 selected</span>
+      <button type="button" onclick="bulkDownloadOffline()">Download offline</button>
+      <button type="button" data-admin-only hidden onclick="bulkAddToCollection()">Add to collection</button>
+      <button type="button" data-admin-only hidden onclick="bulkRemoveFromCollection()">Remove from collection</button>
+      <button type="button" data-admin-only hidden onclick="bulkEditSeries()">Edit series</button>
+      <button type="button" data-admin-only hidden onclick="bulkDeleteBooks()">Remove</button>
+      <button type="button" onclick="toggleBulkMode(false)">Cancel</button>
+    </div>
     <div id="shelf"></div>
   </div>
 
@@ -184,6 +229,13 @@
         <div id="bookmark-ticks"></div>
       </div>
       <span id="progress-pct">0%</span>
+      <span id="progress-remaining" aria-live="polite"></span>
+      <div id="reader-bottom-actions">
+        <button type="button" onclick="toggleDrawer('settings')" aria-label="Reading appearance">Aa</button>
+        <button type="button" onclick="toggleBookmark()" aria-label="Bookmark this page">♧</button>
+        <button type="button" onclick="toggleDrawer('toc')" aria-label="Contents">☰</button>
+        <button type="button" onclick="toggleReaderMoreMenu(event)" aria-label="More">•••</button>
+      </div>
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
@@ -319,6 +371,12 @@
         <label class="setting-label" for="letter-spacing-slider">Letter spacing — <span id="letter-spacing-val">Normal</span></label>
         <input type="range" class="mini" id="letter-spacing-slider" min="0" max="3" step="1" value="0" aria-valuetext="Normal letter spacing">
       </div>
+      <div class="setting-group gesture-settings">
+        <span class="setting-label">Gestures &amp; tap zones</span>
+        <label><input type="checkbox" id="gesture-swipe" checked onchange="updateGestureSettings()"> Swipe to turn pages</label>
+        <label><input type="checkbox" id="gesture-edge" checked onchange="updateGestureSettings()"> Edge tap zones</label>
+        <label><input type="checkbox" id="gesture-center" checked onchange="updateGestureSettings()"> Center tap toggles controls</label>
+      </div>
     </aside>
   </div>
 
@@ -333,6 +391,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:13px; height:13px; margin-right:3px;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
     <span>Listen</span>
   </button>
+  <button type="button" class="popup-action-btn" onclick="addNoteToSelection()">Note</button>
+  <button type="button" class="popup-action-btn" onclick="lookupSelectedWord()">Define</button>
+  <button type="button" class="popup-action-btn" onclick="copySelectionText()">Copy</button>
+  <button type="button" class="popup-action-btn" onclick="shareSelectionText()">Share</button>
   <button type="button" id="highlight-remove-btn" style="display:none;" onclick="removeCurrentHighlight()">Remove</button>
 </div>
 
@@ -360,6 +422,11 @@
       <button type="button" class="tts-ctrl-btn rate-btn" id="tts-rate-btn" title="Change speech rate" aria-label="Change speech rate" onclick="cycleTtsRate()">
         <span id="tts-rate-label">1.0×</span>
       </button>
+      <select id="tts-voice-select" class="tts-select" aria-label="Voice"></select>
+      <label class="tts-compact-label">Pitch <input id="tts-pitch" type="range" min="0.5" max="2" value="1" step="0.1"></label>
+      <select id="tts-sleep" class="tts-select" aria-label="Sleep timer">
+        <option value="0">No timer</option><option value="10">10 min</option><option value="20">20 min</option><option value="30">30 min</option>
+      </select>
       <button type="button" class="tts-ctrl-btn stop-btn" id="tts-stop-btn" title="Stop reading aloud" aria-label="Stop reading aloud" onclick="stopTts()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -386,12 +453,22 @@
       </div>
       <div class="stat-card">
         <div class="stat-number" id="stat-week">0h</div>
-        <div class="stat-label">Read This Week</div>
+        <div class="stat-label">Last 7 Days</div>
       </div>
       <div class="stat-card">
         <div class="stat-number" id="stat-total">0h</div>
         <div class="stat-label">Total Time Read</div>
       </div>
+    </div>
+    <div id="stats-chart" class="stats-chart" aria-label="Reading minutes over the last 14 days"></div>
+    <div id="stats-comparison" class="stats-summary"></div>
+    <div id="stats-most-read" class="stats-summary"></div>
+    <div class="reading-goals">
+      <h4>Optional goals</h4>
+      <label>Daily minutes <input id="goal-daily" type="number" min="0" max="1440" step="5"></label>
+      <label>Weekly hours <input id="goal-weekly" type="number" min="0" max="168" step="0.5"></label>
+      <label>Books per year <input id="goal-books" type="number" min="0" max="1000"></label>
+      <button type="button" onclick="saveReadingGoals()">Save goals</button>
     </div>
     <div class="close-row" style="text-align:right;"><button type="button" class="new-collection-btn" onclick="closeStatsModal()">Close</button></div>
   </div>
@@ -441,7 +518,7 @@
         </div>
         <div class="admin-field">
           <label for="new-user-passphrase">Passphrase</label>
-          <input type="password" id="new-user-passphrase" class="new-collection-input" autocomplete="new-password" minlength="4" required>
+          <input type="password" id="new-user-passphrase" class="new-collection-input" autocomplete="new-password" minlength="12" required>
         </div>
         <label class="admin-role-option" for="new-user-isadmin">
           <input type="checkbox" id="new-user-isadmin">
@@ -488,7 +565,7 @@
       <p id="reset-passphrase-user-label" style="font-size: 13px; color: var(--ink-soft); margin: 8px 0 14px;"></p>
       <div class="admin-field">
         <label for="reset-passphrase-input">New Passphrase</label>
-        <input type="password" id="reset-passphrase-input" class="new-collection-input" autocomplete="new-password" minlength="4" required placeholder="Minimum 4 characters">
+        <input type="password" id="reset-passphrase-input" class="new-collection-input" autocomplete="new-password" minlength="12" required placeholder="Minimum 12 characters">
       </div>
       <div class="admin-create-actions" style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
         <button type="button" class="file-link-btn" onclick="closeResetPassphraseModal()" style="padding: 8px 12px;">Cancel</button>
@@ -496,6 +573,35 @@
       </div>
     </form>
   </div>
+</div>
+
+<div id="book-details-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="book-details-title" aria-hidden="true">
+  <div class="modal-card book-details-card">
+    <div class="modal-title"><h3 id="book-details-title">Book details</h3><button type="button" class="modal-close" onclick="closeBookDetails()" aria-label="Close">×</button></div>
+    <div id="book-details-content"></div>
+    <div id="book-details-actions" class="modal-actions"></div>
+  </div>
+</div>
+
+<div id="notebook-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="notebook-title" aria-hidden="true">
+  <div class="modal-card notebook-card">
+    <div class="modal-title"><h3 id="notebook-title">Notebook</h3><button type="button" class="modal-close" onclick="closeNotebookModal()" aria-label="Close">×</button></div>
+    <input id="notebook-search" type="search" placeholder="Search highlights, notes, books, or tags…" oninput="renderNotebook()">
+    <div id="notebook-tags"></div>
+    <div id="notebook-list"></div>
+  </div>
+</div>
+
+<div id="install-tip" class="install-tip" hidden>
+  <strong>Install Endpaper</strong>
+  <span>In Safari, tap Share, then “Add to Home Screen” for fullscreen reading and reliable offline access.</span>
+  <button type="button" onclick="dismissInstallTip()">Got it</button>
+</div>
+
+<div id="update-banner" class="update-banner" hidden>
+  <span>A new Endpaper version is ready.</span>
+  <button type="button" onclick="applyAppUpdate()">Update now</button>
+  <button type="button" onclick="this.parentElement.hidden=true">Later</button>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>

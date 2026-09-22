@@ -27,6 +27,15 @@ const createSessionAndPrune = db.transaction((token, userId) => {
 
 // Rate limit failed login attempts without blocking a household that shares
 // one public IP and signs in successfully from several devices.
+const normalizeLoginName = (req) => String((req.body && req.body.username) || '').trim().toLocaleLowerCase('en-US');
+const loginIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  message: { error: 'Too many login attempts from this network. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+});
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
@@ -34,7 +43,7 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  keyGenerator: (req) => req.ip + ':' + (req.body.username || ''),
+  keyGenerator: (req) => req.ip + ':' + normalizeLoginName(req),
 });
 
 /**
@@ -42,7 +51,7 @@ const loginLimiter = rateLimit({
  * Body: { username: "...", passphrase: "..." }
  * On success: sets httpOnly session cookie (90-day expiry)
  */
-router.post('/api/login', loginLimiter, async (req, res) => {
+router.post('/api/login', loginIpLimiter, loginLimiter, async (req, res) => {
   try {
     const { username, passphrase } = req.body || {};
     const trimmedUsername = typeof username === 'string' ? username.trim() : '';

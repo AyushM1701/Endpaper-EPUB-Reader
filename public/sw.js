@@ -1,4 +1,4 @@
-const BUILD_VERSION = 'v10.11.0-20260922';
+const BUILD_VERSION = 'v12.0.0-20260922';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const STATIC_ASSETS = [
@@ -6,15 +6,35 @@ const STATIC_ASSETS = [
   '/index.html',
   '/app.css',
   '/app.js',
+  '/jszip.min.js',
   '/epub.min.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-maskable-512.png',
+  '/icons/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
   );
 });
+
+async function cachedRangeResponse(request, cached) {
+  const range = request.headers.get('range');
+  if (!range || !cached) return cached;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+  if (!match) return new Response(null, { status: 416 });
+  const blob = await cached.blob();
+  let start = match[1] ? Number(match[1]) : Math.max(0, blob.size - Number(match[2] || 0));
+  let end = match[2] && match[1] ? Number(match[2]) : blob.size - 1;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= blob.size) {
+    return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${blob.size}` } });
+  }
+  end = Math.min(end, blob.size - 1);
+  return new Response(blob.slice(start, end + 1), { status: 206, headers: { 'Content-Type': cached.headers.get('Content-Type') || 'application/epub+zip', 'Content-Length': String(end - start + 1), 'Content-Range': `bytes ${start}-${end}/${blob.size}`, 'Accept-Ranges': 'bytes' } });
+}
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -63,42 +83,37 @@ self.addEventListener('fetch', (e) => {
 
   // Book files and covers: Network first with runtime cache fallback and background cache write
   if (url.pathname.includes('/api/books/') && (url.pathname.includes('/file') || url.pathname.includes('/cover'))) {
+    const cacheRequest = new Request(e.request.url, { credentials: 'same-origin' });
     e.respondWith(
       fetch(e.request).then((fetchRes) => {
         if (fetchRes && fetchRes.status === 200) {
           const resClone = fetchRes.clone();
-          caches.open(RUNTIME_CACHE_NAME).then((cache) => cache.put(e.request, resClone)).catch(() => {});
+          caches.open(RUNTIME_CACHE_NAME).then((cache) => cache.put(cacheRequest, resClone)).catch(() => {});
         }
         return fetchRes;
       }).catch(() => {
-        return caches.open(RUNTIME_CACHE_NAME).then((cache) => cache.match(e.request));
+        return caches.open(RUNTIME_CACHE_NAME).then(async cache => cachedRangeResponse(e.request, await cache.match(cacheRequest)));
       })
     );
     return;
   }
 
-  // Other API endpoints: Network first, fallback to offline cache if present
+  // Personal API payloads are deliberately not placed in a shared service-
+  // worker cache. Return an explicit offline response instead of pretending a
+  // cache fallback exists (and avoid leaking one account's data to another).
   if (url.pathname.startsWith('/api/')) {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
+      fetch(e.request).catch(() => new Response(JSON.stringify({ error: 'Offline' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      }))
     );
     return;
   }
 
-  // External CDNs & Google Fonts: Stale-While-Revalidate with caching
+  // External lookups (currently the optional dictionary service) are managed
+  // by the bounded application cache rather than an unbounded CacheStorage.
   if (url.origin !== location.origin) {
-    e.respondWith(
-      caches.match(e.request).then((cachedRes) => {
-        const fetchPromise = fetch(e.request).then((fetchRes) => {
-          if (fetchRes && fetchRes.status === 200) {
-            const resClone = fetchRes.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(e.request, resClone)).catch(() => {});
-          }
-          return fetchRes;
-        }).catch(() => null);
-        return cachedRes || fetchPromise;
-      })
-    );
     return;
   }
 

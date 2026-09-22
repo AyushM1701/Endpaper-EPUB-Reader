@@ -55,6 +55,8 @@ function clearReaderAssetCaches() {
   epubBlobCache.clear();
   epubBlobRequests.clear();
   epubLocationCache.clear();
+  bookSearchIndex.clear();
+  bookTextIndex.clear();
   epubBlobCacheBytes = 0;
 }
 
@@ -86,6 +88,7 @@ const api = {
       const err = new Error(data.error || `Request failed (${res.status})`);
       err.status = res.status;
       err.data = data;
+      err.isOffline = res.status === 503 && data.error === 'Offline';
       err.book_id = data.book_id;
       err.title = data.title;
       throw err;
@@ -97,7 +100,7 @@ const api = {
     const res = await this.fetch('/api/sessions/start', {
       ...opts,
       method: 'POST',
-      body: JSON.stringify({ book_id: bookId }),
+      body: JSON.stringify({ book_id: bookId, client_id: CLIENT_ID }),
     });
     return res.json();
   },
@@ -109,8 +112,18 @@ const api = {
   },
 
   async getBooks(opts = {}) {
-    const res = await this.fetch('/api/books?limit=10000', opts);
-    return res.json();
+    const books = [];
+    let page = 1;
+    let firstPayload = null;
+    do {
+      const res = await this.fetch(`/api/books?limit=100&page=${page}`, opts);
+      const payload = await res.json();
+      if (!firstPayload) firstPayload = payload;
+      books.push(...(Array.isArray(payload) ? payload : (payload.books || [])));
+      if (Array.isArray(payload) || page >= (payload.totalPages || 1)) break;
+      page++;
+    } while (page <= 10_000);
+    return { ...(firstPayload || {}), books, page: 1, totalPages: 1 };
   },
 
   async uploadBook(file) {
@@ -233,6 +246,11 @@ const api = {
     return res.json();
   },
 
+  async getAllHighlights(query = '', opts = {}) {
+    const res = await this.fetch(`/api/highlights?q=${encodeURIComponent(query)}`, opts);
+    return res.json();
+  },
+
   async addHighlight(bookId, data, opts = {}) {
     const res = await this.fetch(`/api/books/${bookId}/highlights`, {
       ...opts,
@@ -312,6 +330,10 @@ let readerAbortController = null;
 let activeReaderRequest = null;
 let isDraggingProgressSlider = false;
 let seekLockUntil = 0;
+let lastReaderInteractionAt = 0;
+let personalReadingBytesPerMinute = 4200;
+const CLIENT_ID = sessionStorage.getItem('endpaper_client_id') || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+sessionStorage.setItem('endpaper_client_id', CLIENT_ID);
 
 function showToast(message, action = null) {
   const toast = document.getElementById('toast');
@@ -435,6 +457,7 @@ const DEFAULT_READER_SETTINGS = Object.freeze({
   marginIdx: 1,
   letterSpacingIdx: 0,
   layout: 'paginated',
+  gestures: { swipe: true, edge: true, center: true },
 });
 
 const settings = { ...DEFAULT_READER_SETTINGS };
@@ -474,6 +497,7 @@ function normalizeSettings() {
   settings.marginIdx = Number.isInteger(settings.marginIdx) ? Math.max(0, Math.min(MARGIN_LABELS.length - 1, settings.marginIdx)) : 1;
   settings.letterSpacingIdx = Number.isInteger(settings.letterSpacingIdx) ? Math.max(0, Math.min(SPACING_VALUES.length - 1, settings.letterSpacingIdx)) : 0;
   if (!['paginated', 'scrolled'].includes(settings.layout)) settings.layout = 'paginated';
+  settings.gestures = { swipe: true, edge: true, center: true, ...(settings.gestures || {}) };
 }
 
 /* ---------------- Auth gate ---------------- */
@@ -492,7 +516,7 @@ async function handleLogin(e) {
   const userIn = document.getElementById('username-input');
   const passIn = document.getElementById('passphrase-input');
   const username = userIn.value.trim();
-  const passphrase = passIn.value.trim();
+  const passphrase = passIn.value;
 
   if (!username) { errEl.textContent = 'Please enter a username.'; return false; }
   if (!passphrase) { errEl.textContent = 'Please enter a passphrase.'; return false; }
@@ -548,6 +572,9 @@ async function logout() {
     currentSessionId = null;
   }
   setCurrentUser(null);
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_RUNTIME_CACHE' });
+  }
   showLoginGate();
   document.getElementById('username-input').focus();
   showToast('You have been logged out.');
@@ -599,14 +626,24 @@ async function handleFiles(fileList){
   const progressEl = document.getElementById('upload-progress');
   const progressText = document.getElementById('upload-progress-text');
   progressEl.classList.add('show');
+  progressText.replaceChildren();
+  const uploadHeading = document.createElement('strong');
+  uploadHeading.textContent = `Adding ${epubFiles.length} book${epubFiles.length === 1 ? '' : 's'}`;
+  const uploadList = document.createElement('div');
+  const uploadRows = epubFiles.map(file => {
+    const row = document.createElement('div');
+    row.className = 'upload-status-row';
+    row.textContent = `${file.name} — waiting`;
+    uploadList.appendChild(row);
+    return row;
+  });
+  progressText.append(uploadHeading, uploadList);
 
   let uploaded = 0;
   let lastAddedBookId = null;
   for (let i = 0; i < epubFiles.length; i++) {
     const file = epubFiles[i];
-    progressText.textContent = epubFiles.length > 1
-      ? `Uploading ${i + 1} of ${epubFiles.length}…`
-      : `Uploading “${file.name}”…`;
+    uploadRows[i].textContent = `${file.name} — uploading…`;
     try {
       const bookData = await api.uploadBook(file);
       const entry = {
@@ -618,6 +655,9 @@ async function handleFiles(fileList){
         rating: bookData.rating != null ? Number(bookData.rating) : null,
         coverColor: bookData.cover_color,
         coverPath: bookData.cover_path,
+        description: bookData.description || '',
+        isbn: bookData.isbn || '',
+        tags: bookData.tags || '',
         progress: bookData.progress_percent || 0,
         status: bookData.status || 'unread',
         lastLocationCfi: bookData.last_location_cfi,
@@ -631,6 +671,7 @@ async function handleFiles(fileList){
       renderShelf();
       lastAddedBookId = entry.id;
       uploaded++;
+      uploadRows[i].textContent = `${file.name} — added`;
     } catch(err) {
       console.error('Upload failed:', err);
       if (err.status === 409 || (err.message && err.message.toLowerCase().includes('already in the library'))) {
@@ -643,6 +684,7 @@ async function handleFiles(fileList){
       } else {
         showToast(`Could not add “${file.name}”: ${err.message}`);
       }
+      uploadRows[i].textContent = `${file.name} — ${err.status === 409 ? 'already in library' : 'failed'}`;
     }
   }
   progressEl.classList.remove('show');
@@ -894,6 +936,10 @@ async function showShelf(){
       if (isActiveAccount(saveAccountVersion)) console.error('Could not end reading session:', e);
     }
   }
+  if (window.__reloadAfterReader && isActiveAccount(saveAccountVersion)) {
+    window.__reloadAfterReader = false;
+    window.location.reload();
+  }
 }
 
 /* ---------------- Layout (paginated vs scrolled) ---------------- */
@@ -903,10 +949,10 @@ function renditionOptions(){
       width: '100%', height: '100%',
       flow: 'scrolled', manager: 'continuous',
       snap: false,
-      sandbox: 'allow-same-origin allow-scripts',
+      sandbox: 'allow-same-origin',
     };
   }
-  return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto', sandbox: 'allow-same-origin allow-scripts' };
+  return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto', sandbox: 'allow-same-origin' };
 }
 
 function setLayout(mode){
@@ -997,6 +1043,7 @@ function isInteractiveReaderTarget(target) {
 
 function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel) {
   if (!rendition) return false;
+  lastReaderInteractionAt = Date.now();
   const dx = ex - sx;
   const dy = ey - sy;
 
@@ -1004,7 +1051,7 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
   if (win && win.getSelection && !win.getSelection().isCollapsed) return false;
 
   // 1. Horizontal swipe gesture in paginated mode
-  if (settings.layout === 'paginated') {
+  if (settings.layout === 'paginated' && settings.gestures.swipe) {
     const swipeThreshold = 30; // Responsive threshold for mobile swipe
     if (Math.abs(dx) >= swipeThreshold && Math.abs(dx) > Math.abs(dy) * 1.1 && dt < 800) {
       if (dx < 0) turnPage('next');
@@ -1015,7 +1062,7 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
 
   // 2. Clean tap: tap-to-turn zones (left 25% = prev, right 25% = next, center = toggle controls)
   if (!isCancel && !moved && Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 450) {
-    if (settings.layout === 'paginated') {
+    if (settings.layout === 'paginated' && settings.gestures.edge) {
       if (ex < width * 0.25) {
         turnPage('prev');
         return true;
@@ -1024,8 +1071,10 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
         return true;
       }
     }
-    toggleReaderChrome();
-    return true;
+    if (settings.gestures.center) {
+      toggleReaderChrome();
+      return true;
+    }
   }
   return false;
 }
@@ -1150,6 +1199,13 @@ function getSafeCfi(targetRendition) {
     const loc = r.currentLocation();
     if (!loc || typeof loc.then === 'function') return null;
     return (loc.start && loc.start.cfi) || null;
+  } catch (_) { return null; }
+}
+
+async function getCurrentLocationSafe(targetRendition = rendition) {
+  try {
+    if (!targetRendition || !targetRendition.currentLocation) return null;
+    return await Promise.resolve(targetRendition.currentLocation());
   } catch (_) { return null; }
 }
 
@@ -1315,18 +1371,15 @@ function tuneScrollContainer(targetRendition = rendition, entry = getCurrentEntr
     el.__endpaperScrollListenerBound = true;
     let scrollRaf = null;
     el.addEventListener('scroll', () => {
+      lastReaderInteractionAt = Date.now();
       if (scrollRaf) return;
-      scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = requestAnimationFrame(async () => {
         scrollRaf = null;
         if (!isReaderRequestCurrent(request, book, targetRendition)) return;
         const currentEntry = entry || getCurrentEntry();
         if (!currentEntry) return;
-        try {
-          const loc = targetRendition.currentLocation && targetRendition.currentLocation();
-          if (loc && loc.start) {
-            updateReaderLocation(currentEntry, loc, book, targetRendition, request);
-          }
-        } catch (_) {}
+        const loc = await getCurrentLocationSafe(targetRendition);
+        if (loc && loc.start && isReaderRequestCurrent(request, book, targetRendition)) updateReaderLocation(currentEntry, loc, book, targetRendition, request);
       });
     }, { passive: true });
   }
@@ -1419,6 +1472,7 @@ function getLocationsKey(bookId) {
 /* ---------------- Opening a book ---------------- */
 async function openBook(id){
   const entry = library.find(b => b.id === id);
+  lastReaderInteractionAt = Date.now();
   if (!entry || !currentUser) return;
   if (currentBookId === id && rendition) return;
   if (currentBookId && (book || rendition || currentSessionId)) {
@@ -1455,6 +1509,7 @@ async function openBook(id){
   document.getElementById('bookmark-toggle').style.display = 'flex';
   if (document.getElementById('tts-btn')) document.getElementById('tts-btn').style.display = 'flex';
   if (document.getElementById('fullscreen-btn')) document.getElementById('fullscreen-btn').style.display = 'flex';
+  if (document.getElementById('reader-more-btn')) document.getElementById('reader-more-btn').style.display = 'flex';
   document.getElementById('upload-btn').style.display = 'none';
 
   if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
@@ -1592,8 +1647,12 @@ async function openBook(id){
       ? (cb) => window.requestIdleCallback(cb, { timeout: 4000 })
       : (cb) => setTimeout(cb, 100);
 
-    scheduleLocations(async () => {
+    const generateWhenQuiet = () => scheduleLocations(async () => {
       if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+      if (Date.now() - lastReaderInteractionAt < 2500) {
+        generateWhenQuiet();
+        return;
+      }
       try {
         await targetBook.locations.generate(1024);
         if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
@@ -1911,10 +1970,10 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
     }
 }
 
-function syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request) {
+async function syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request) {
   if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-  const location = targetRendition.currentLocation && targetRendition.currentLocation();
-  if (location) updateReaderLocation(entry, location, targetBook, targetRendition, request);
+  const location = await getCurrentLocationSafe(targetRendition);
+  if (location && isReaderRequestCurrent(request, targetBook, targetRendition)) updateReaderLocation(entry, location, targetBook, targetRendition, request);
 }
 
 /* ---------------- Bookmarks ---------------- */
@@ -1948,7 +2007,7 @@ async function toggleBookmark(){
   const context = createReaderMutationContext(entry);
   if (!context) return;
   const { targetBook, targetRendition, requestOptions } = context;
-  const loc = targetRendition.currentLocation();
+  const loc = await getCurrentLocationSafe(targetRendition);
   if (!loc || !loc.start) return;
   const cfi = loc.start.cfi;
 
@@ -2002,11 +2061,11 @@ async function toggleBookmark(){
   renderBookmarkTicks();
 }
 
-function updateBookmarkIcon(knownCfi){
+async function updateBookmarkIcon(knownCfi){
   const btn = document.getElementById('bookmark-toggle');
   const entry = getCurrentEntry();
   if (!entry || !rendition){ if (btn) btn.classList.remove('active'); return; }
-  const cfi = knownCfi !== undefined ? knownCfi : (rendition.currentLocation && rendition.currentLocation()?.start?.cfi || null);
+  const cfi = knownCfi !== undefined ? knownCfi : ((await getCurrentLocationSafe(rendition))?.start?.cfi || null);
   const bookmarked = !!cfi && entry.bookmarks.some(bm => bm.cfi === cfi);
   if (btn && btn.classList.contains('active') !== bookmarked) {
     btn.classList.toggle('active', bookmarked);
@@ -2242,7 +2301,7 @@ async function applyHighlight(color){
       });
     }
   } else {
-    const location = targetRendition.currentLocation && targetRendition.currentLocation();
+    const location = await getCurrentLocationSafe(targetRendition);
     const chapter = targetBook.navigation && location && location.start && targetBook.navigation.get(location.start.href);
     const chapterLabel = chapter ? chapter.label.trim() : 'Untitled section';
     const excerpt = context.excerpt || '';
@@ -2338,6 +2397,43 @@ function renderHighlights(){
 /* ---------------- Search ---------------- */
 let searchDebounce = null;
 let searchRequestVersion = 0;
+const bookSearchIndex = new Map();
+const bookTextIndex = new Map();
+
+async function getBookTextIndex(targetBook, bookId, isCurrentSearch) {
+  if (bookTextIndex.has(bookId)) return bookTextIndex.get(bookId);
+  const pending = (async () => {
+    const sections = [];
+    if (targetBook.spine && typeof targetBook.spine.each === 'function') {
+      targetBook.spine.each(section => sections.push(section));
+    }
+    const indexed = [];
+    for (const section of sections) {
+      if (!isCurrentSearch()) return null;
+      try {
+        const documentNode = await section.load(targetBook.load.bind(targetBook));
+        if (!isCurrentSearch()) return null;
+        const textContent = documentNode?.documentElement?.textContent || documentNode?.body?.textContent || '';
+        indexed.push({ section, text: textContent.normalize('NFKC').toLocaleLowerCase() });
+      } catch (_) {
+        indexed.push({ section, text: '' });
+      } finally {
+        if (typeof section.unload === 'function') section.unload();
+      }
+    }
+    return indexed;
+  })();
+  bookTextIndex.set(bookId, pending);
+  try {
+    const indexed = await pending;
+    if (!indexed) bookTextIndex.delete(bookId);
+    while (bookTextIndex.size > 3) bookTextIndex.delete(bookTextIndex.keys().next().value);
+    return indexed;
+  } catch (error) {
+    bookTextIndex.delete(bookId);
+    throw error;
+  }
+}
 document.getElementById('search-input').addEventListener('input', (e) => {
   clearTimeout(searchDebounce);
   const requestVersion = ++searchRequestVersion;
@@ -2365,18 +2461,27 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
   resultsEl.innerHTML = '';
   let results = [];
   try {
-    const sections = [];
-    if (targetBook.spine && typeof targetBook.spine.each === 'function') {
-      targetBook.spine.each(s => sections.push(s));
-    }
-    for (const section of sections){
-      try {
-        await section.load(targetBook.load.bind(targetBook));
-        if (!isCurrentSearch()) return;
-        const matches = section.find(query) || [];
-        matches.forEach(m => results.push({ cfi: m.cfi, excerpt: m.excerpt, href: section.href }));
-      } catch(e){ /* skip unreadable section */ }
-      if (results.length > 60) break;
+    const cacheKey = `${currentBookId}:${query.toLocaleLowerCase()}`;
+    const cached = bookSearchIndex.get(cacheKey);
+    if (cached) {
+      results = cached;
+    } else {
+      const indexedSections = await getBookTextIndex(targetBook, currentBookId, isCurrentSearch);
+      if (!indexedSections || !isCurrentSearch()) return;
+      const normalizedQuery = query.normalize('NFKC').toLocaleLowerCase();
+      const candidates = indexedSections.filter(item => item.text.includes(normalizedQuery));
+      for (const { section } of candidates){
+        try {
+          await section.load(targetBook.load.bind(targetBook));
+          if (!isCurrentSearch()) return;
+          const matches = section.find(query) || [];
+          matches.forEach(m => results.push({ cfi: m.cfi, excerpt: m.excerpt, href: section.href }));
+        } catch(e){ /* skip unreadable section */ }
+        finally { if (typeof section.unload === 'function') section.unload(); }
+        if (results.length > 60) break;
+      }
+      bookSearchIndex.set(cacheKey, results.slice(0, 61));
+      while (bookSearchIndex.size > 100) bookSearchIndex.delete(bookSearchIndex.keys().next().value);
     }
     if (!isCurrentSearch()) return;
     document.getElementById('search-status').textContent =
@@ -2732,65 +2837,103 @@ function toggleShellTheme(){
 
 /* ---------------- Persistence (API-backed) ---------------- */
 
-const OFFLINE_QUEUE_KEY = 'endpaper_offline_queue';
+const OFFLINE_QUEUE_PREFIX = 'endpaper_offline_queue:';
+const OFFLINE_QUEUE_MAX_ITEMS = 200;
+const OFFLINE_QUEUE_MAX_BYTES = 2 * 1024 * 1024;
+const OFFLINE_QUEUE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function offlineQueueKey() {
+  return currentUser && currentUser.username ? OFFLINE_QUEUE_PREFIX + encodeURIComponent(currentUser.username.toLocaleLowerCase()) : null;
+}
+
+function setSyncState(state, detail = '') {
+  const element = document.getElementById('sync-status');
+  if (!element) return;
+  element.dataset.state = state;
+  element.textContent = detail || ({ saved: 'Saved', saving: 'Saving…', syncing: 'Syncing…', offline: 'Offline', pending: 'Changes pending' }[state] || '');
+  element.hidden = !element.textContent;
+}
+
+function loadOfflineQueue() {
+  const key = offlineQueueKey();
+  if (!key) return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    const cutoff = Date.now() - OFFLINE_QUEUE_TTL_MS;
+    return Array.isArray(parsed) ? parsed.filter(item => item && item.ts >= cutoff && item.account === currentUser.username) : [];
+  } catch (_) { return []; }
+}
+
+function storeOfflineQueue(queue) {
+  const key = offlineQueueKey();
+  if (!key) return;
+  let bounded = queue.slice(-OFFLINE_QUEUE_MAX_ITEMS);
+  while (bounded.length && new Blob([JSON.stringify(bounded)]).size > OFFLINE_QUEUE_MAX_BYTES) bounded.shift();
+  if (bounded.length) localStorage.setItem(key, JSON.stringify(bounded));
+  else localStorage.removeItem(key);
+  setSyncState(bounded.length ? (navigator.onLine ? 'pending' : 'offline') : 'saved', bounded.length ? `${bounded.length} change${bounded.length === 1 ? '' : 's'} pending` : 'Saved');
+}
 
 async function resilientApiPost(url, body, isProgressSave = false, method = 'POST', opts = {}) {
+  const operationId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  setSyncState(navigator.onLine ? 'saving' : 'offline');
   try {
+    const headers = new Headers(opts.headers || {});
+    headers.set('Idempotency-Key', operationId);
     const res = await api.fetch(url, {
       ...opts,
+      headers,
       method,
       body: JSON.stringify(body),
     });
+    generateWhenQuiet();
+    setSyncState('saved');
     return await res.json().catch(() => ({ ok: true }));
   } catch (networkErr) {
     if (isAbortError(networkErr) || (networkErr && networkErr.message === 'Session expired')) {
       throw networkErr;
     }
-    try {
-      const queue = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
-      if (isProgressSave) {
-        const filtered = queue.filter(item => item.url !== url);
-        filtered.push({ url, body, method, ts: Date.now() });
-        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(filtered));
-      } else {
-        queue.push({ url, body, method, ts: Date.now() });
-        localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
-      }
-    } catch (_) {}
+    // HTTP failures are permanent/application errors, not evidence of being
+    // offline. Queue only a genuine fetch/network failure.
+    if (networkErr && networkErr.status && !networkErr.isOffline) throw networkErr;
+    const queue = loadOfflineQueue();
+    const item = { url, body, method, ts: Date.now(), operationId, account: currentUser.username };
+    const next = isProgressSave ? queue.filter(queued => queued.url !== url).concat(item) : queue.concat(item);
+    storeOfflineQueue(next);
     return { queued: true };
   }
 }
 
 async function flushOfflineQueue() {
   try {
-    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
-    if (!raw) return;
-    const queue = JSON.parse(raw);
+    const queue = loadOfflineQueue();
     if (!Array.isArray(queue) || !queue.length) return;
 
+    setSyncState('syncing');
     const failed = [];
-    for (const item of queue) {
+    for (let index = 0; index < queue.length; index++) {
+      const item = queue[index];
       try {
         await api.fetch(item.url, {
           method: item.method || 'POST',
+          headers: { 'Idempotency-Key': item.operationId },
           body: JSON.stringify(item.body),
         });
       } catch (e) {
-        if (e && e.message !== 'Session expired') {
-          failed.push(item);
+        if (e && e.message === 'Session expired') {
+          failed.push(...queue.slice(index));
+          break;
         }
+        if (!e || !e.status || e.isOffline) failed.push(item);
+        else console.error('Dropping permanently failed offline change', e);
       }
     }
-
-    if (failed.length) {
-      localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(failed));
-    } else {
-      localStorage.removeItem(OFFLINE_QUEUE_KEY);
-    }
+    storeOfflineQueue(failed);
   } catch (_) {}
 }
 
 window.addEventListener('online', flushOfflineQueue);
+window.addEventListener('offline', () => setSyncState('offline', loadOfflineQueue().length ? `${loadOfflineQueue().length} changes pending` : 'Offline'));
 
 let metaSaveTimer = null;
 let metaSaveAbortController = null;
@@ -2858,6 +3001,9 @@ async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
     rating: b.rating != null ? Number(b.rating) : null,
     coverColor: b.cover_color,
     coverPath: b.cover_path,
+    description: b.description || '',
+    isbn: b.isbn || '',
+    tags: b.tags || '',
     progress: b.progress_percent || 0,
     status: b.status || 'unread',
     lastLocationCfi: b.last_location_cfi,
@@ -2884,24 +3030,14 @@ async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
 /* ---------------- Export / Import ---------------- */
 async function exportLibrary(){
   if (!requireAdmin('create a library backup')) return;
-  try {
-    const res = await api.fetch('/api/export', {
-      method: 'POST',
-      headers: {},
-    });
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'endpaper-backup-' + new Date().toISOString().slice(0,10) + '.zip';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  } catch(err) {
-    console.error('Export failed:', err);
-    showToast('Export failed. Please try again.');
-  }
+  // Native navigation lets the browser stream directly to disk instead of
+  // buffering a potentially huge ZIP in JavaScript memory.
+  const link = document.createElement('a');
+  link.href = '/api/export';
+  link.download = '';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 document.getElementById('import-input').addEventListener('change', async (e) => {
@@ -3004,8 +3140,18 @@ async function boot(){
     return;
   }
   renderFontOptions();
+  restoreShelfPreferences();
+  syncGestureSettingsUI();
   renderShelf();
   updateSettingsUI();
+  api.getStats({ expectedAccountVersion: bootAccountVersion }).then(stats => {
+    if (!isActiveAccount(bootAccountVersion)) return;
+    const measured = Number(stats.reading_bytes_per_minute);
+    if (Number.isFinite(measured) && measured > 0) {
+      personalReadingBytesPerMinute = Math.min(50_000, Math.max(1_500, measured));
+      renderShelf();
+    }
+  }).catch(() => {});
   // Load collections after shelf is ready
   await loadCollections();
   if (!isActiveAccount(bootAccountVersion)) return;
@@ -3085,7 +3231,7 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   syncReaderPalette();
   document.getElementById('reader-view').classList.remove('active', 'scrolled');
   document.getElementById('shelf-view').style.display = 'block';
-  ['toc-toggle', 'search-toggle', 'settings-toggle', 'bookmarks-toggle', 'bookmark-toggle', 'tts-btn', 'fullscreen-btn'].forEach(id => {
+  ['toc-toggle', 'search-toggle', 'settings-toggle', 'bookmarks-toggle', 'bookmark-toggle', 'tts-btn', 'fullscreen-btn', 'reader-more-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -3155,6 +3301,22 @@ async function openStatsModal() {
     
     const totalHours = (stats.time_read_total / 3600).toFixed(1);
     document.getElementById('stat-total').textContent = totalHours.replace('.0', '') + 'h';
+
+    const chart = document.getElementById('stats-chart');
+    const daily = Array.isArray(stats.daily) ? stats.daily : [];
+    const maxSeconds = Math.max(60, ...daily.map(day => day.seconds || 0));
+    chart.innerHTML = daily.map(day => `<div class="stats-bar" style="height:${Math.max(2, Math.round((day.seconds || 0) / maxSeconds * 100))}%" title="${Math.round((day.seconds || 0) / 60)} minutes on ${escapeHtml(day.date)}"><span>${escapeHtml(day.date.slice(8))}</span></div>`).join('');
+    const change = stats.previous_7_days > 0 ? Math.round((stats.time_read_this_week - stats.previous_7_days) / stats.previous_7_days * 100) : null;
+    const recentMonths = (stats.monthly || []).slice(-6).map(month => `${month.month}: ${formatMinutes(Math.round(month.seconds / 60))}`).join(' · ');
+    document.getElementById('stats-comparison').textContent = `Longest streak: ${stats.longest_streak_days || 0} days · Average session: ${Math.round((stats.average_session_seconds || 0) / 60)} min${change == null ? '' : ` · ${change >= 0 ? '+' : ''}${change}% vs previous 7 days`}${recentMonths ? `\nMonthly: ${recentMonths}` : ''}`;
+    document.getElementById('stats-most-read').innerHTML = stats.most_read?.length ? `<strong>Most read</strong><br>${stats.most_read.map((item, index) => `${index + 1}. ${escapeHtml(item.title)} — ${formatMinutes(Math.round(item.seconds / 60))}`).join('<br>')}` : '';
+    try {
+      const prefs = await api.getSettings({ expectedAccountVersion });
+      const goals = prefs['reading-goals'] || {};
+      document.getElementById('goal-daily').value = goals.dailyMinutes || '';
+      document.getElementById('goal-weekly').value = goals.weeklyHours || '';
+      document.getElementById('goal-books').value = goals.booksPerYear || '';
+    } catch (_) {}
 
     const modal = document.getElementById('stats-modal');
     modal.classList.add('show');
@@ -3609,8 +3771,8 @@ async function handleResetPassphraseSubmit(event) {
   if (!resetPassphraseTargetId) return;
   const input = document.getElementById('reset-passphrase-input');
   const passphrase = input.value.trim();
-  if (!passphrase || passphrase.length < 4) {
-    showToast('Passphrase must be at least 4 characters.');
+  if (!passphrase || passphrase.length < 12) {
+    showToast('Passphrase must be at least 12 characters.');
     input.focus();
     return;
   }
@@ -3842,6 +4004,9 @@ let ttsIndex = 0;
 let ttsUtterance = null;
 let ttsIsPaused = false;
 let ttsRate = 1.0;
+let ttsPitch = 1.0;
+let ttsVoiceURI = '';
+let ttsSleepTimer = null;
 const TTS_RATES = [0.75, 1.0, 1.25, 1.5, 2.0];
 
 function splitIntoSentences(text) {
@@ -3977,7 +4142,9 @@ function speakCurrentTtsItem() {
 
   ttsUtterance = new SpeechSynthesisUtterance(item.text);
   ttsUtterance.rate = ttsRate;
-  ttsUtterance.pitch = 1.0;
+  ttsUtterance.pitch = ttsPitch;
+  const selectedVoice = speechSynthesis.getVoices().find(voice => voice.voiceURI === ttsVoiceURI);
+  if (selectedVoice) ttsUtterance.voice = selectedVoice;
 
   ttsUtterance.onend = () => {
     if (!ttsIsPaused) {
@@ -3998,29 +4165,32 @@ function speakCurrentTtsItem() {
           (ttsAdvancePromise || Promise.resolve()).then(() => {
             unlockTts();
             clearTimeout(pageTurnLockTimer);
-            setTimeout(() => {
+            setTimeout(async () => {
               // Match active section via currentLocation() rather than blindly
               // taking getContents()[0] which may be a preloaded prior section (R-11)
               let targetDoc = null;
               try {
-                const loc = rendition.currentLocation && rendition.currentLocation();
+                const loc = await getCurrentLocationSafe(rendition);
                 const activeHref = loc && loc.start && loc.start.href;
                 const contents = (rendition.getContents && rendition.getContents()) || [];
                 if (activeHref && contents.length > 0) {
-                  const activeBase = activeHref.split('#')[0].split('?')[0].split('/').pop();
-                  for (const c of contents) {
-                    const cHref = c.href || (c.section && c.section.href) || '';
-                    if (cHref.split('#')[0].split('?')[0].split('/').pop() === activeBase) {
-                      targetDoc = c.document;
-                      break;
-                    }
+                  const normalizeHref = value => decodeURIComponent(String(value || '').split('#')[0].split('?')[0]).replace(/^\.\//, '');
+                  const activePath = normalizeHref(activeHref);
+                  const exact = contents.filter(c => {
+                    const candidate = normalizeHref(c.href || (c.section && c.section.href));
+                    return candidate === activePath || candidate.endsWith('/' + activePath) || activePath.endsWith('/' + candidate);
+                  });
+                  if (exact.length === 1) targetDoc = exact[0].document;
+                  if (!targetDoc) {
+                    const activeBase = activePath.split('/').pop();
+                    const basenameMatches = contents.filter(c => normalizeHref(c.href || (c.section && c.section.href)).split('/').pop() === activeBase);
+                    if (basenameMatches.length === 1) targetDoc = basenameMatches[0].document;
                   }
                 }
-                if (!targetDoc && contents.length > 0) targetDoc = contents[0].document;
               } catch (_) {}
               if (!targetDoc) {
-                const iframe = document.querySelector('#viewer iframe');
-                if (iframe) targetDoc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
+                const iframes = document.querySelectorAll('#viewer iframe');
+                if (iframes.length === 1) targetDoc = iframes[0].contentDocument || (iframes[0].contentWindow && iframes[0].contentWindow.document);
               }
               if (targetDoc) {
                 const nextQueue = collectReadableItemsFromNode(null, targetDoc);
@@ -4077,6 +4247,8 @@ function stopTts() {
   ttsIndex = 0;
   ttsUtterance = null;
   ttsIsPaused = false;
+  if (ttsSleepTimer) clearTimeout(ttsSleepTimer);
+  ttsSleepTimer = null;
   clearTtsHighlights();
   updateTtsPlayerUI();
 }
@@ -4336,8 +4508,13 @@ async function lookupDictionary(word, x, y) {
     if (tooltip) tooltip.classList.add('hidden');
     return;
   }
+  const cacheKey = 'endpaper_dictionary_cache';
+  let dictionaryCache = {};
+  try { dictionaryCache = JSON.parse(localStorage.getItem(cacheKey) || '{}'); } catch (_) {}
+  const normalizedWord = word.toLocaleLowerCase();
   if (!navigator.onLine) {
-    showDictionaryUI(word, null, 'offline', x, y);
+    if (dictionaryCache[normalizedWord]) showDictionaryUI(word, dictionaryCache[normalizedWord].data, 'success', x, y);
+    else showDictionaryUI(word, null, 'offline', x, y);
     return;
   }
   try {
@@ -4347,6 +4524,11 @@ async function lookupDictionary(word, x, y) {
       return;
     }
     const data = await res.json();
+    try {
+      dictionaryCache[normalizedWord] = { data, ts: Date.now() };
+      const entries = Object.entries(dictionaryCache).sort((a,b) => b[1].ts - a[1].ts).slice(0, 200);
+      localStorage.setItem(cacheKey, JSON.stringify(Object.fromEntries(entries)));
+    } catch (_) {}
     showDictionaryUI(word, data, 'success', x, y);
   } catch (_) {
     showDictionaryUI(word, null, 'offline', x, y);
@@ -4377,3 +4559,389 @@ if (document.getElementById('export-highlights-btn')) {
     URL.revokeObjectURL(a.href);
   });
 }
+
+/* ---------------- Product experience extensions (R-24–R-55) ---------------- */
+let shelfRenderTimer = null;
+let bulkMode = false;
+const bulkSelection = new Set();
+let notebookItems = [];
+let notebookTagFilter = '';
+
+function shelfPreferenceKey() {
+  return currentUser?.username ? `endpaper_shelf:${currentUser.username.toLocaleLowerCase()}` : null;
+}
+
+function saveShelfPreferences() {
+  const key = shelfPreferenceKey();
+  if (!key) return;
+  localStorage.setItem(key, JSON.stringify({
+    search: document.getElementById('shelf-search')?.value || '',
+    filter: document.getElementById('shelf-filter')?.value || 'all',
+    sort: document.getElementById('shelf-sort')?.value || 'recent',
+    density: document.getElementById('shelf-density')?.value || 'comfortable',
+  }));
+}
+
+function restoreShelfPreferences() {
+  const key = shelfPreferenceKey();
+  if (!key) return;
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || '{}');
+    if (document.getElementById('shelf-search')) document.getElementById('shelf-search').value = value.search || '';
+    if (document.getElementById('shelf-filter') && [...document.getElementById('shelf-filter').options].some(option => option.value === value.filter)) document.getElementById('shelf-filter').value = value.filter;
+    if (document.getElementById('shelf-sort') && [...document.getElementById('shelf-sort').options].some(option => option.value === value.sort)) document.getElementById('shelf-sort').value = value.sort;
+    if (document.getElementById('shelf-density') && ['comfortable', 'compact'].includes(value.density)) document.getElementById('shelf-density').value = value.density;
+  } catch (_) {}
+}
+
+function scheduleShelfRender() {
+  clearTimeout(shelfRenderTimer);
+  shelfRenderTimer = setTimeout(renderShelf, 130);
+}
+
+function estimatedBookMinutes(entry, remainingOnly = false) {
+  const total = Math.max(10, Math.round((entry.fileSize || 1_000_000) / personalReadingBytesPerMinute));
+  return remainingOnly ? Math.max(0, Math.round(total * (1 - (entry.progress || 0) / 100))) : total;
+}
+
+function formatMinutes(minutes) {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${hours}h${rest ? ` ${rest}m` : ''}`;
+}
+
+function coverMarkup(entry, className = 'cover-img') {
+  return entry.coverPath
+    ? `<img class="${className}" src="/api/books/${entry.id}/cover" alt="" loading="lazy" decoding="async">`
+    : `<span class="spine-title">${escapeHtml(entry.name)}</span><span class="spine-author">${escapeHtml(entry.author || '')}</span>`;
+}
+
+function renderContinueCard(){
+  const rail = document.getElementById('continue-card');
+  const candidates = library.filter(entry => entry.lastOpenedAt && entry.progress > 0 && entry.progress < 98)
+    .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt).slice(0, 4);
+  rail.replaceChildren();
+  if (!candidates.length) { rail.style.display = 'none'; return; }
+  const fragment = document.createDocumentFragment();
+  candidates.forEach(entry => {
+    const item = document.createElement('article');
+    item.className = 'continue-item';
+    item.tabIndex = 0;
+    item.innerHTML = `<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}</div><div><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div><div class="progress-text">${Math.round(entry.progress)}% · about ${formatMinutes(estimatedBookMinutes(entry, true))} left</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
+    item.onclick = () => openBook(entry.id);
+    item.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBook(entry.id); } };
+    fragment.appendChild(item);
+  });
+  rail.appendChild(fragment);
+  rail.style.display = 'flex';
+  scheduleBookWarmup(candidates[0]);
+}
+
+function smartBook(entry, subtitle) {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'smart-book';
+  item.innerHTML = `<strong>${escapeHtml(entry.name)}</strong><span>${escapeHtml(subtitle || entry.author || 'Unknown author')}</span>`;
+  item.onclick = () => openBook(entry.id);
+  return item;
+}
+
+function renderSmartSections(searchQuery, filterValue) {
+  const root = document.getElementById('smart-sections');
+  root.replaceChildren();
+  if (searchQuery || filterValue !== 'all' || !library.length) { root.style.display = 'none'; return; }
+  const sections = [];
+  sections.push(['Recently added', [...library].sort((a,b) => b.addedAt - a.addedAt).slice(0,8), entry => entry.author]);
+  const unread = library.filter(entry => entry.progress === 0).slice(0,8);
+  if (unread.length) sections.push(['Unread', unread, entry => entry.author]);
+  const finished = library.filter(entry => entry.progress >= 98).slice(0,8);
+  if (finished.length) sections.push(['Finished', finished, entry => entry.author]);
+  const series = new Map();
+  library.filter(entry => entry.series).forEach(entry => {
+    if (!series.has(entry.series)) series.set(entry.series, []);
+    series.get(entry.series).push(entry);
+  });
+  if (series.size) {
+    const seriesEntries = [...series.entries()].slice(0,8).map(([name, entries]) => ({ ...entries[0], name, __subtitle: `${entries.length} book${entries.length === 1 ? '' : 's'}` }));
+    sections.splice(1, 0, ['Your series', seriesEntries, entry => entry.__subtitle]);
+  }
+  for (const [title, entries, subtitle] of sections) {
+    if (!entries.length) continue;
+    const section = document.createElement('section');
+    section.className = 'smart-section';
+    const heading = document.createElement('h3'); heading.textContent = title;
+    const rail = document.createElement('div'); rail.className = 'smart-rail';
+    entries.forEach(entry => rail.appendChild(smartBook(entry, subtitle(entry))));
+    section.append(heading, rail); root.appendChild(section);
+  }
+  root.style.display = root.childElementCount ? 'grid' : 'none';
+}
+
+function createShelfCard(entry) {
+  const card = document.createElement('article');
+  card.className = `book-card${bulkMode ? ' bulk-mode' : ''}${bulkSelection.has(entry.id) ? ' selected' : ''}`;
+  card.tabIndex = 0;
+  card.setAttribute('aria-label', `${entry.name} by ${entry.author || 'Unknown author'}`);
+  const seriesBadge = entry.series ? `<div class="series-tag">${escapeHtml(formatSeriesText(entry.series, entry.seriesIndex))}</div>` : '';
+  card.innerHTML = `${bulkMode ? `<input class="book-select" type="checkbox" aria-label="Select ${escapeHtml(entry.name)}" ${bulkSelection.has(entry.id) ? 'checked' : ''}>` : ''}<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}${entry.progress > 0 ? `<span class="spine-badge">${Math.round(entry.progress)}%</span>` : ''}<button type="button" class="book-menu-btn" aria-label="Details and actions for ${escapeHtml(entry.name)}">⋯</button></div><div class="book-meta-under">${seriesBadge}<div class="title" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</div><div class="author">${escapeHtml(entry.author || 'Unknown')}</div><div class="shelf-rating-widget">${renderRatingHtml(entry.id, entry.rating)}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
+  const activate = event => {
+    if (event.target.closest('.book-menu-btn,.star-btn')) return;
+    if (bulkMode) {
+      bulkSelection.has(entry.id) ? bulkSelection.delete(entry.id) : bulkSelection.add(entry.id);
+      updateBulkToolbar(); renderShelf();
+    } else openBook(entry.id);
+  };
+  card.onclick = activate;
+  card.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(event); } };
+  card.querySelector('.book-menu-btn').onclick = event => { event.stopPropagation(); openBookDetails(entry.id); };
+  return card;
+}
+
+function renderShelf(){
+  const shelf = document.getElementById('shelf');
+  shelf.classList.toggle('compact', document.getElementById('shelf-density')?.value === 'compact');
+  const empty = document.getElementById('shelf-empty');
+  const header = document.getElementById('shelf-header');
+  shelf.replaceChildren();
+  renderContinueCard();
+  if (!library.length) {
+    empty.style.display = 'block'; header.style.display = 'none'; document.getElementById('continue-card').style.display = 'none'; document.getElementById('smart-sections').style.display = 'none'; return;
+  }
+  empty.style.display = 'none'; header.style.display = 'flex';
+  const searchQuery = document.getElementById('shelf-search').value.trim().toLocaleLowerCase();
+  const filterValue = document.getElementById('shelf-filter').value;
+  const searchable = entry => `${entry.name || ''} ${entry.author || ''} ${entry.series || ''} ${entry.description || ''} ${entry.tags || ''} ${entry.isbn || ''}`.toLocaleLowerCase();
+  let filtered = searchQuery ? library.filter(entry => searchable(entry).includes(searchQuery)) : [...library];
+  if (filterValue === 'unread') filtered = filtered.filter(entry => entry.progress === 0);
+  else if (filterValue === 'finished') filtered = filtered.filter(entry => entry.progress >= 98);
+  else if (filterValue.startsWith('col_')) {
+    const collection = allCollections.find(item => item.id === filterValue.slice(4));
+    if (collection) filtered = filtered.filter(entry => collection.book_ids.includes(entry.id));
+  }
+  const sortValue = document.getElementById('shelf-sort').value;
+  filtered.sort((a,b) => {
+    if (sortValue === 'opened') return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0);
+    if (sortValue === 'title') return a.name.localeCompare(b.name);
+    if (sortValue === 'author') return (a.author || '').localeCompare(b.author || '');
+    if (sortValue === 'progress') return b.progress - a.progress;
+    if (sortValue === 'series') return (a.series || '\uffff').localeCompare(b.series || '\uffff') || (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0);
+    return (b.addedAt || 0) - (a.addedAt || 0);
+  });
+  document.getElementById('shelf-count').textContent = filtered.length === library.length ? `${library.length} book${library.length === 1 ? '' : 's'}` : `${filtered.length} of ${library.length} books`;
+  renderSmartSections(searchQuery, filterValue);
+  const fragment = document.createDocumentFragment();
+  filtered.forEach(entry => fragment.appendChild(createShelfCard(entry)));
+  shelf.appendChild(fragment);
+  saveShelfPreferences();
+}
+
+function toggleReaderMoreMenu(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('reader-more-menu');
+  const button = document.getElementById('reader-more-btn');
+  menu.hidden = !menu.hidden;
+  button?.setAttribute('aria-expanded', String(!menu.hidden));
+}
+
+function toggleBulkMode(force) {
+  bulkMode = typeof force === 'boolean' ? force : !bulkMode;
+  if (!bulkMode) bulkSelection.clear();
+  updateBulkToolbar(); renderShelf();
+}
+
+function updateBulkToolbar() {
+  const toolbar = document.getElementById('bulk-toolbar');
+  toolbar.hidden = !bulkMode;
+  document.getElementById('bulk-count').textContent = `${bulkSelection.size} selected`;
+  updateRoleAwareControls();
+}
+
+async function downloadBookOffline(id) {
+  setSyncState('saving', 'Downloading…');
+  const [fileResponse, coverResponse] = await Promise.all([
+    api.fetch(`/api/books/${id}/file`, { headers: {} }),
+    api.fetch(`/api/books/${id}/cover`, { headers: {} }).catch(() => null),
+  ]);
+  // Fully consume the responses so the service worker can finish its cache put.
+  await fileResponse.blob();
+  if (coverResponse?.ok) await coverResponse.blob();
+  setSyncState('saved', 'Available offline');
+}
+
+async function removeOfflineBook(id) {
+  const cacheNames = await caches.keys();
+  await Promise.all(cacheNames.map(async name => {
+    const cache = await caches.open(name);
+    const requests = await cache.keys();
+    await Promise.all(requests.filter(request => new URL(request.url).pathname.includes(`/api/books/${id}/`)).map(request => cache.delete(request)));
+  }));
+  showToast('Offline download removed.');
+}
+
+async function bulkDownloadOffline() {
+  for (const id of bulkSelection) await downloadBookOffline(id);
+  showToast(`${bulkSelection.size} book${bulkSelection.size === 1 ? '' : 's'} available offline.`); toggleBulkMode(false);
+}
+
+async function bulkAddToCollection() {
+  if (!requireAdmin('organize books')) return;
+  const name = prompt(`Collection name (${allCollections.map(item => item.name).join(', ')})`);
+  if (!name) return;
+  let collection = allCollections.find(item => item.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
+  if (!collection) collection = await api.createCollection(name.trim());
+  for (const id of bulkSelection) await api.addBookToCollection(id, collection.id);
+  await loadCollections(); showToast('Books added to collection.'); toggleBulkMode(false);
+}
+
+async function bulkRemoveFromCollection() {
+  if (!requireAdmin('organize books')) return;
+  const name = prompt(`Remove from collection (${allCollections.map(item => item.name).join(', ')})`);
+  if (!name) return;
+  const collection = allCollections.find(item => item.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
+  if (!collection) { showToast('Collection not found.'); return; }
+  for (const id of bulkSelection) await api.removeBookFromCollection(id, collection.id);
+  await loadCollections(); showToast('Books removed from collection.'); toggleBulkMode(false);
+}
+
+async function bulkEditSeries() {
+  if (!requireAdmin('edit shared book metadata')) return;
+  const series = prompt('Series name (leave blank to clear)');
+  if (series == null) return;
+  const ordered = [...bulkSelection].map(id => library.find(entry => entry.id === id)).filter(Boolean);
+  const startText = series.trim() ? prompt('Starting series number (optional; increments in shelf order)', '') : '';
+  if (startText == null) return;
+  const parsedStart = startText.trim() === '' ? null : Number(startText);
+  if (parsedStart != null && !Number.isFinite(parsedStart)) { showToast('Series number must be numeric.'); return; }
+  for (let index = 0; index < ordered.length; index++) {
+    const entry = ordered[index];
+    const updated = await api.updateBook(entry.id, {
+      series: series.trim() || null,
+      series_index: parsedStart == null ? null : parsedStart + index,
+    });
+    entry.series = updated.series || '';
+    entry.seriesIndex = updated.series_index;
+  }
+  showToast('Series details updated.'); toggleBulkMode(false); renderShelf();
+}
+
+async function bulkDeleteBooks() {
+  if (!requireAdmin('remove books')) return;
+  const confirmed = await showConfirmDialog({ title: 'Remove selected books', message: `Remove ${bulkSelection.size} selected books and their reading data?`, confirmText: 'Remove books', danger: true });
+  if (!confirmed) return;
+  for (const id of [...bulkSelection]) await api.deleteBook(id);
+  library = library.filter(entry => !bulkSelection.has(entry.id)); showToast('Selected books removed.'); toggleBulkMode(false);
+}
+
+async function openBookDetails(id) {
+  const entry = library.find(item => item.id === id);
+  if (!entry) return;
+  const modal = document.getElementById('book-details-modal');
+  document.getElementById('book-details-title').textContent = entry.name;
+  document.getElementById('book-details-content').innerHTML = `<div class="book-details-layout"><div class="book-details-cover" style="background:${entry.coverColor}">${coverMarkup(entry, 'book-details-cover')}</div><div><div class="book-detail-meta">${escapeHtml(entry.author || 'Unknown author')}<br>${entry.series ? escapeHtml(formatSeriesText(entry.series, entry.seriesIndex)) + '<br>' : ''}${(entry.fileSize / 1024 / 1024).toFixed(1)} MB · about ${formatMinutes(estimatedBookMinutes(entry))}<br>${entry.progress ? `${Math.round(entry.progress)}% read · ${formatMinutes(estimatedBookMinutes(entry, true))} remaining` : 'Unread'}${entry.isbn ? `<br>ISBN ${escapeHtml(entry.isbn)}` : ''}${entry.tags ? `<br>${escapeHtml(entry.tags)}` : ''}</div><p class="book-description">${escapeHtml(entry.description || 'No description available.')}</p></div></div>`;
+  const actions = document.getElementById('book-details-actions');
+  actions.innerHTML = `<button type="button" onclick="closeBookDetails(); openBook('${id}')">${entry.progress ? 'Continue reading' : 'Read'}</button><button type="button" onclick="downloadBookOffline('${id}').then(()=>showToast('Book is available offline.'))">Download for offline</button><button type="button" onclick="removeOfflineBook('${id}')">Remove download</button>${isCurrentUserAdmin() ? `<button type="button" onclick="openBookCollectionsModal('${id}')">Collections</button><button type="button" onclick="editBookMetadata('${id}')">Edit details</button><button type="button" onclick="closeBookDetails(); removeBook('${id}')">Remove book</button>` : ''}`;
+  modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false'); modal.querySelector('button')?.focus();
+}
+
+function closeBookDetails() { const modal = document.getElementById('book-details-modal'); modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); }
+
+async function editBookMetadata(id) {
+  const entry = library.find(item => item.id === id); if (!entry) return;
+  const title = prompt('Title', entry.name); if (title == null) return;
+  const author = prompt('Author', entry.author || ''); if (author == null) return;
+  const description = prompt('Description', entry.description || ''); if (description == null) return;
+  const tags = prompt('Tags', entry.tags || ''); if (tags == null) return;
+  const updated = await api.updateBook(id, { title, author, description, tags });
+  Object.assign(entry, { name: updated.title, author: updated.author, description: updated.description || '', tags: updated.tags || '' });
+  closeBookDetails(); renderShelf(); showToast('Book details updated.');
+}
+
+async function openNotebookModal() {
+  const modal = document.getElementById('notebook-modal'); modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false');
+  notebookItems = await api.getAllHighlights(); notebookTagFilter = ''; renderNotebook(); document.getElementById('notebook-search').focus();
+}
+
+function closeNotebookModal() { const modal = document.getElementById('notebook-modal'); modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); }
+
+function renderNotebook() {
+  const query = (document.getElementById('notebook-search')?.value || '').trim().toLocaleLowerCase();
+  const tags = [...new Set(notebookItems.flatMap(item => item.tags || []))].sort();
+  document.getElementById('notebook-tags').innerHTML = tags.map(tag => `<button class="tag-chip" type="button" onclick="notebookTagFilter='${escapeHtml(tag)}'; renderNotebook()">#${escapeHtml(tag)}</button>`).join('');
+  const filtered = notebookItems.filter(item => (!query || `${item.excerpt || ''} ${item.note || ''} ${item.book_title || ''} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(query)) && (!notebookTagFilter || (item.tags || []).includes(notebookTagFilter)));
+  document.getElementById('notebook-list').innerHTML = filtered.length ? filtered.map(item => `<article class="notebook-item"><small>${escapeHtml(item.book_title)} · ${escapeHtml(item.chapter || '')}</small><blockquote>${escapeHtml(item.excerpt || '')}</blockquote>${item.note ? `<p>${escapeHtml(item.note)}</p>` : ''}<div>${(item.tags || []).map(tag => `<span class="tag-chip">#${escapeHtml(tag)}</span>`).join(' ')} <button class="file-link-btn" onclick="editHighlightTags('${item.id}')">Edit tags</button> <button class="file-link-btn" onclick="closeNotebookModal(); openBook('${item.book_id}')">Open</button></div></article>`).join('') : '<p class="bookmark-empty">No matching highlights.</p>';
+}
+
+async function editHighlightTags(id) {
+  const item = notebookItems.find(value => value.id === id); if (!item) return;
+  const value = prompt('Comma-separated tags', (item.tags || []).join(', ')); if (value == null) return;
+  const updated = await api.updateHighlight(id, { tags: value.split(',') }); item.tags = updated.tags || []; renderNotebook();
+}
+
+function selectionText() { return pendingHighlightContext?.excerpt || ''; }
+async function copySelectionText() { const text = selectionText(); if (text) await navigator.clipboard.writeText(text); hideHighlightPopup(); showToast('Copied selection.'); }
+async function shareSelectionText() { const text = selectionText(); if (!text) return; if (navigator.share) await navigator.share({ text }); else await navigator.clipboard.writeText(text); hideHighlightPopup(); }
+function lookupSelectedWord() { const word = selectionText().trim().split(/\s+/)[0]?.replace(/[^\p{L}'-]/gu, ''); hideHighlightPopup(); if (word) lookupDictionary(word, window.innerWidth / 2, 100); }
+async function addNoteToSelection() {
+  const context = pendingHighlightContext; if (!context) return;
+  const note = prompt('Add a note'); if (note == null) return;
+  const saved = await resilientApiPost(`/api/books/${context.entry.id}/highlights`, { cfi_range: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, chapter: '' }, false, 'POST', context.requestOptions);
+  context.entry.highlights.push({ id: saved.id, cfi: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, tags: [] });
+  try { context.targetRendition.annotations.add('highlight', context.cfi, {}, null, 'epub-highlight', highlightStyle('#F2D94E')); } catch (_) {}
+  finishPendingHighlight(context); renderHighlights();
+}
+
+function updateGestureSettings() {
+  settings.gestures = { swipe: document.getElementById('gesture-swipe').checked, edge: document.getElementById('gesture-edge').checked, center: document.getElementById('gesture-center').checked };
+  saveSettings();
+}
+
+function syncGestureSettingsUI() {
+  const gestures = settings.gestures || {};
+  if (document.getElementById('gesture-swipe')) document.getElementById('gesture-swipe').checked = gestures.swipe !== false;
+  if (document.getElementById('gesture-edge')) document.getElementById('gesture-edge').checked = gestures.edge !== false;
+  if (document.getElementById('gesture-center')) document.getElementById('gesture-center').checked = gestures.center !== false;
+}
+
+function updateProgressEstimate() {
+  const entry = getCurrentEntry(); const target = document.getElementById('progress-remaining');
+  if (entry && target) target.textContent = `${formatMinutes(estimatedBookMinutes(entry, true))} left`;
+}
+
+function populateTtsVoices() {
+  const select = document.getElementById('tts-voice-select'); if (!select || !('speechSynthesis' in window)) return;
+  const voices = speechSynthesis.getVoices(); select.replaceChildren(...voices.map(voice => new Option(`${voice.name} (${voice.lang})`, voice.voiceURI, false, voice.voiceURI === ttsVoiceURI)));
+}
+
+function applyAppUpdate() { window.__pendingServiceWorker?.postMessage({ type: 'SKIP_WAITING' }); }
+function dismissInstallTip() { localStorage.setItem('endpaper_install_tip_dismissed', '1'); document.getElementById('install-tip').hidden = true; }
+
+async function saveReadingGoals() {
+  const goals = { dailyMinutes: Number(document.getElementById('goal-daily').value) || 0, weeklyHours: Number(document.getElementById('goal-weekly').value) || 0, booksPerYear: Number(document.getElementById('goal-books').value) || 0 };
+  await api.saveSettings({ 'reading-goals': goals }); showToast('Reading goals saved.');
+}
+
+document.getElementById('shelf-search')?.setAttribute('oninput', 'scheduleShelfRender()');
+document.getElementById('shelf-filter')?.setAttribute('onchange', 'renderShelf()');
+document.getElementById('shelf-sort')?.setAttribute('onchange', 'renderShelf()');
+document.addEventListener('click', event => { if (!event.target.closest('#reader-more-menu,#reader-more-btn,#reader-bottom-actions')) { document.getElementById('reader-more-menu').hidden = true; document.getElementById('reader-more-btn')?.setAttribute('aria-expanded','false'); } });
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Tab') return;
+  const modal = document.querySelector('.modal.show[aria-modal="true"]'); if (!modal) return;
+  const focusable = [...modal.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item => !item.hidden);
+  if (!focusable.length) return;
+  if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); }
+  else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+});
+
+document.getElementById('tts-voice-select')?.addEventListener('change', event => { ttsVoiceURI = event.target.value; if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
+document.getElementById('tts-pitch')?.addEventListener('input', event => { ttsPitch = Number(event.target.value); if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
+document.getElementById('tts-sleep')?.addEventListener('change', event => { if (ttsSleepTimer) clearTimeout(ttsSleepTimer); const minutes = Number(event.target.value); if (minutes) ttsSleepTimer = setTimeout(() => { stopTts(); showToast('Sleep timer ended.'); }, minutes * 60_000); });
+if ('speechSynthesis' in window) { populateTtsVoices(); speechSynthesis.addEventListener?.('voiceschanged', populateTtsVoices); }
+new MutationObserver(updateProgressEstimate).observe(document.getElementById('progress-pct'), { childList: true, characterData: true, subtree: true });
+
+window.addEventListener('load', () => {
+  const isIosSafari = /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone;
+  if (isIosSafari && !localStorage.getItem('endpaper_install_tip_dismissed')) document.getElementById('install-tip').hidden = false;
+  restoreShelfPreferences(); syncGestureSettingsUI();
+});

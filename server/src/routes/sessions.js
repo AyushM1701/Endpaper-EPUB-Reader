@@ -22,6 +22,9 @@ function closeSession(session, endedAt) {
  */
 router.post('/api/sessions/start', (req, res) => {
   const { book_id } = req.body;
+  const clientId = typeof req.body.client_id === 'string' && req.body.client_id.length <= 100
+    ? req.body.client_id
+    : 'legacy-client';
   if (!book_id) return res.status(400).json({ error: 'book_id is required' });
 
   const book = db.prepare('SELECT id FROM books WHERE id = ?').get(book_id);
@@ -34,13 +37,13 @@ router.post('/api/sessions/start', (req, res) => {
   // any abandoned single-user sessions before starting the new one so stats do
   // not silently lose that reading time.
   db.transaction(() => {
-    const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL AND user_id = ?').all(req.user_id);
+    const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL AND user_id = ? AND COALESCE(client_id, ?) = ?').all(req.user_id, clientId, clientId);
     for (const session of openSessions) closeSession(session, started_at);
-    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at) VALUES (?, ?, ?, ?)')
-      .run(id, req.user_id, book_id, started_at);
+    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at, client_id) VALUES (?, ?, ?, ?, ?)')
+      .run(id, req.user_id, book_id, started_at, clientId);
   })();
 
-  res.status(201).json({ id, book_id, started_at });
+  res.status(201).json({ id, book_id, started_at, client_id: clientId });
 });
 
 /**
@@ -65,7 +68,7 @@ router.post('/api/sessions/:id/end', validateUuidParam('id'), (req, res) => {
  * - average reading pace (seconds per book)
  */
 router.get('/api/stats', (req, res) => {
-  // Time read this week
+  // Rolling seven days (the UI labels this precisely rather than “this week”).
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const weekRow = db.prepare(`
     SELECT COALESCE(SUM(duration_seconds), 0) as total
@@ -77,9 +80,9 @@ router.get('/api/stats', (req, res) => {
     SELECT COALESCE(SUM(duration_seconds), 0) as total FROM reading_sessions WHERE user_id = ?
   `).get(req.user_id);
 
-  // Books finished (progress >= 95%)
+  // Books finished (global completion threshold is 98%).
   const finishedRow = db.prepare(`
-    SELECT COUNT(*) as total FROM user_books WHERE progress_percent >= 95 AND user_id = ?
+    SELECT COUNT(*) as total FROM user_books WHERE progress_percent >= 98 AND user_id = ?
   `).get(req.user_id);
 
   // Timezone resolution: validate client timezone
@@ -102,20 +105,35 @@ router.get('/api/stats', (req, res) => {
     }
   };
 
-  // Reading streak: calculate distinct reader local calendar days.
-  const cutoff = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
+  // Reading streak: every local date touched by a session counts, including a
+  // session crossing midnight. There is no artificial historical cutoff.
   const sessionRows = db.prepare(`
-    SELECT started_at FROM reading_sessions
-    WHERE started_at >= ? AND user_id = ?
+    SELECT rs.started_at, COALESCE(rs.ended_at, CURRENT_TIMESTAMP) AS ended_at,
+           COALESCE(rs.duration_seconds, 0) AS duration_seconds,
+           rs.book_id, b.title
+    FROM reading_sessions rs
+    LEFT JOIN books b ON b.id = rs.book_id
+    WHERE rs.user_id = ?
     ORDER BY started_at DESC
-  `).all(cutoff, req.user_id);
+  `).all(req.user_id);
 
   const daySet = new Set();
+  const dailySeconds = new Map();
+  const monthlySeconds = new Map();
   for (const row of sessionRows) {
     if (row.started_at) {
-      const d = new Date(row.started_at);
-      if (!isNaN(d.getTime())) {
-        daySet.add(getLocalDateKey(d));
+      const start = new Date(row.started_at);
+      const end = new Date(row.ended_at || row.started_at);
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+        daySet.add(getLocalDateKey(start));
+        daySet.add(getLocalDateKey(end));
+        for (let cursor = start.getTime() + 6 * 3600000; cursor < end.getTime(); cursor += 6 * 3600000) {
+          daySet.add(getLocalDateKey(new Date(cursor)));
+        }
+        const key = getLocalDateKey(start);
+        dailySeconds.set(key, (dailySeconds.get(key) || 0) + Number(row.duration_seconds || 0));
+        const month = key.slice(0, 7);
+        monthlySeconds.set(month, (monthlySeconds.get(month) || 0) + Number(row.duration_seconds || 0));
       }
     }
   }
@@ -141,11 +159,72 @@ router.get('/api/stats', (req, res) => {
     }
   }
 
+  const sortedDays = [...daySet].sort();
+  let longestStreak = 0;
+  let run = 0;
+  let previous = null;
+  for (const key of sortedDays) {
+    const stamp = Date.parse(`${key}T00:00:00Z`);
+    run = previous != null && stamp - previous === 86400000 ? run + 1 : 1;
+    longestStreak = Math.max(longestStreak, run);
+    previous = stamp;
+  }
+
+  const previousWeekStart = new Date(Date.now() - 14 * 86400000).toISOString();
+  const previousWeekEnd = weekAgo;
+  const previousWeek = db.prepare(`
+    SELECT COALESCE(SUM(duration_seconds), 0) AS total FROM reading_sessions
+    WHERE started_at >= ? AND started_at < ? AND user_id = ?
+  `).get(previousWeekStart, previousWeekEnd, req.user_id).total;
+  const averageSession = db.prepare(`
+    SELECT COALESCE(AVG(duration_seconds), 0) AS value FROM reading_sessions
+    WHERE user_id = ? AND duration_seconds > 0
+  `).get(req.user_id).value;
+  const mostRead = db.prepare(`
+    SELECT rs.book_id, b.title, SUM(rs.duration_seconds) AS seconds
+    FROM reading_sessions rs JOIN books b ON b.id = rs.book_id
+    WHERE rs.user_id = ? AND rs.duration_seconds > 0
+    GROUP BY rs.book_id, b.title ORDER BY seconds DESC LIMIT 5
+  `).all(req.user_id);
+  const daily = [];
+  for (let offset = 13; offset >= 0; offset--) {
+    const date = new Date(Date.now() - offset * 86400000);
+    const key = getLocalDateKey(date);
+    daily.push({ date: key, seconds: dailySeconds.get(key) || 0 });
+  }
+  const monthly = [...monthlySeconds.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-12)
+    .map(([month, seconds]) => ({ month, seconds }));
+  const paceRows = db.prepare(`
+    SELECT b.file_size, ub.progress_percent, COALESCE(SUM(rs.duration_seconds), 0) AS seconds
+    FROM user_books ub
+    JOIN books b ON b.id = ub.book_id
+    LEFT JOIN reading_sessions rs ON rs.book_id = ub.book_id AND rs.user_id = ub.user_id
+    WHERE ub.user_id = ? AND ub.progress_percent > 0
+    GROUP BY ub.book_id, b.file_size, ub.progress_percent
+    HAVING seconds >= 300
+  `).all(req.user_id);
+  const paceSeconds = paceRows.reduce((sum, row) => sum + Number(row.seconds || 0), 0);
+  const estimatedBytesRead = paceRows.reduce((sum, row) => {
+    return sum + Number(row.file_size || 0) * Math.min(100, Math.max(0, Number(row.progress_percent || 0))) / 100;
+  }, 0);
+  const readingBytesPerMinute = paceSeconds > 0
+    ? Math.round(estimatedBytesRead / (paceSeconds / 60))
+    : null;
+
   res.json({
     time_read_this_week: weekRow.total,
     time_read_total: totalRow.total,
     books_finished: finishedRow.total,
     reading_streak_days: streak,
+    longest_streak_days: longestStreak,
+    previous_7_days: previousWeek,
+    average_session_seconds: Math.round(averageSession || 0),
+    reading_bytes_per_minute: readingBytesPerMinute,
+    daily,
+    monthly,
+    most_read: mostRead,
   });
 });
 

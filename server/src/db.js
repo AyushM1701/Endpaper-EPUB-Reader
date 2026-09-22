@@ -4,7 +4,9 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = path.resolve(__dirname, '../../data');
+const DATA_DIR = process.env.ENDPAPER_DATA_DIR
+  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
+  : path.resolve(__dirname, '../../data');
 const DB_PATH = path.join(DATA_DIR, 'endpaper.db');
 
 // Ensure data directories exist
@@ -21,6 +23,20 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 // Give concurrent readers and writers a chance to finish instead of failing immediately.
 db.pragma('busy_timeout = 5000');
+
+// Back up an existing database before the first structural change in this
+// process. PRAGMA user_version is the ordered migration marker; older builds
+// inferred state solely from columns, which made partial upgrades difficult to
+// reason about and could mutate data before a safety copy existed.
+const TARGET_SCHEMA_VERSION = 3;
+const startingSchemaVersion = Number(db.pragma('user_version', { simple: true })) || 0;
+const existingTableCount = db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().n;
+if (existingTableCount > 0 && startingSchemaVersion < TARGET_SCHEMA_VERSION && fs.existsSync(DB_PATH)) {
+  const earlyBackupDir = path.join(DATA_DIR, 'backups');
+  fs.mkdirSync(earlyBackupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  fs.copyFileSync(DB_PATH, path.join(earlyBackupDir, `endpaper-pre-migration-v${startingSchemaVersion}-to-v${TARGET_SCHEMA_VERSION}-${stamp}.db`));
+}
 
 // ---------- Schema migration ----------
 
@@ -124,7 +140,8 @@ db.exec(`
     book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
     started_at TEXT NOT NULL,
     ended_at TEXT,
-    duration_seconds INTEGER
+    duration_seconds INTEGER,
+    client_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -145,6 +162,14 @@ db.exec(`
     PRIMARY KEY(user_id, key)
   );
 
+  CREATE TABLE IF NOT EXISTS client_operations (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    operation_id TEXT NOT NULL,
+    response_json TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, operation_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_books_added_at ON books(added_at DESC);
   CREATE INDEX IF NOT EXISTS idx_user_books_user ON user_books(user_id);
   CREATE INDEX IF NOT EXISTS idx_user_books_opened ON user_books(user_id, last_opened_at DESC);
@@ -152,7 +177,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_highlights_book_created ON highlights(book_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON reading_sessions(started_at);
   CREATE INDEX IF NOT EXISTS idx_sessions_open ON reading_sessions(ended_at);
+  CREATE INDEX IF NOT EXISTS idx_bookmarks_user_book_progress ON bookmarks(user_id, book_id, progress_percent);
+  CREATE INDEX IF NOT EXISTS idx_highlights_user_book_created ON highlights(user_id, book_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_sessions_user_book_started ON reading_sessions(user_id, book_id, started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_client_operations_created ON client_operations(created_at);
 `);
+
+function addColumnIfMissing(table, definition) {
+  const name = definition.trim().split(/\s+/)[0];
+  const columns = db.pragma(`table_info(${table})`);
+  if (!columns.some(column => column.name === name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+}
+
+addColumnIfMissing('books', 'description TEXT');
+addColumnIfMissing('books', 'isbn TEXT');
+addColumnIfMissing('books', 'tags TEXT');
+addColumnIfMissing('highlights', 'tags TEXT');
+addColumnIfMissing('reading_sessions', 'client_id TEXT');
 
 // Authentication sessions are server-side records as well as browser cookies.
 // Older databases did not record an expiry, so add and backfill the column
@@ -256,6 +297,22 @@ const collectionsHasUserId = collectionsCols.some(c => c.name === 'user_id');
 if (collectionsHasUserId) {
   console.log("Migrating collections table back to global schema...");
   db.transaction(() => {
+    const legacyCollections = db.prepare('SELECT id, name FROM collections ORDER BY id').all();
+    const canonicalByName = new Map();
+    for (const collection of legacyCollections) {
+      const key = collection.name.toLocaleLowerCase();
+      const canonical = canonicalByName.get(key);
+      if (!canonical) {
+        canonicalByName.set(key, collection);
+        continue;
+      }
+      const memberships = db.prepare('SELECT book_id FROM book_collections WHERE collection_id = ?').all(collection.id);
+      for (const membership of memberships) {
+        db.prepare('INSERT OR IGNORE INTO book_collections (book_id, collection_id) VALUES (?, ?)').run(membership.book_id, canonical.id);
+      }
+      db.prepare('DELETE FROM book_collections WHERE collection_id = ?').run(collection.id);
+      db.prepare('DELETE FROM collections WHERE id = ?').run(collection.id);
+    }
     db.exec(`
       CREATE TABLE collections_global (
         id TEXT PRIMARY KEY,
@@ -280,20 +337,6 @@ const bookCols = db.pragma('table_info(books)');
 if (!bookCols.some(c => c.name === 'file_hash')) {
   console.log('Migrating books table to add file_hash column...');
   db.exec('ALTER TABLE books ADD COLUMN file_hash TEXT;');
-  const existingBooks = db.prepare('SELECT id, filename FROM books').all();
-  const updateHash = db.prepare('UPDATE books SET file_hash = ? WHERE id = ?');
-  const crypto = require('crypto');
-  for (const b of existingBooks) {
-    const fpath = path.join(DATA_DIR, 'books', b.filename);
-    if (fs.existsSync(fpath)) {
-      try {
-        const hash = crypto.createHash('sha256').update(fs.readFileSync(fpath)).digest('hex');
-        updateHash.run(hash, b.id);
-      } catch (e) {
-        console.error('Could not hash book', b.filename, e);
-      }
-    }
-  }
 }
 // Function to create a pre-migration backup before any structural data changes
 function backupDatabaseBeforeMigration(label) {
@@ -428,7 +471,7 @@ for (const dup of duplicateUsers) {
     ORDER BY created_at ASC
   `).all(dup.lower_name);
   for (let i = 1; i < usersWithCase.length; i++) {
-    const newName = `${usersWithCase[i].username}_${Date.now()}`;
+    const newName = `${usersWithCase[i].username}_${usersWithCase[i].id.slice(0, 8)}_${i}`;
     db.prepare('UPDATE users SET username = ? WHERE id = ?').run(newName, usersWithCase[i].id);
   }
 }
@@ -455,12 +498,37 @@ for (const dup of duplicateCollections) {
     ORDER BY id ASC
   `).all(dup.lower_name);
   for (let i = 1; i < collectionsWithCase.length; i++) {
-    const newName = `${collectionsWithCase[i].name}_${Date.now()}`;
+    const newName = `${collectionsWithCase[i].name}_${collectionsWithCase[i].id.slice(0, 8)}_${i}`;
     db.prepare('UPDATE collections SET name = ? WHERE id = ?').run(newName, collectionsWithCase[i].id);
   }
 }
 
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_name_nocase ON collections(name COLLATE NOCASE);');
+db.pragma(`user_version = ${TARGET_SCHEMA_VERSION}`);
+
+// Hash legacy files without blocking startup or reading whole EPUBs into RAM.
+// One file is processed at a time and the unique index resolves races safely.
+setImmediate(async () => {
+  const crypto = require('crypto');
+  const missing = db.prepare('SELECT id, filename FROM books WHERE file_hash IS NULL').all();
+  const updateHash = db.prepare('UPDATE books SET file_hash = ? WHERE id = ? AND file_hash IS NULL');
+  for (const item of missing) {
+    const filePath = path.join(DATA_DIR, 'books', item.filename);
+    if (!fs.existsSync(filePath)) continue;
+    try {
+      const hash = crypto.createHash('sha256');
+      await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(filePath);
+        stream.on('data', chunk => hash.update(chunk));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+      });
+      updateHash.run(hash.digest('hex'), item.id);
+    } catch (error) {
+      console.error('Could not hash book', item.filename, error);
+    }
+  }
+});
 
 // ---------- Periodic session pruning ----------
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;

@@ -103,7 +103,7 @@ If you prefer not to use Docker, you can run Endpaper natively on your VPS using
 
 2. **Install dependencies:**
    ```bash
-   npm install
+   npm ci --omit=dev
    ```
 
 3. **Start the app with PM2:**
@@ -123,13 +123,15 @@ If you prefer not to use Docker, you can run Endpaper natively on your VPS using
 5. **Updating the app:**
    ```bash
    git pull origin main
-   npm install
+   npm ci --omit=dev
    pm2 restart endpaper
    ```
 
 ## Backups
 
 > **Important:** The VPS may hold the only copy of your library. Back up the entire `data/` directory regularly; it contains the SQLite database, EPUBs, and covers.
+
+Endpaper also writes automatic SQLite snapshots to `data/backups/`. Those snapshots protect the database during migrations and routine operation, but they are not full-library backups because EPUB and cover files are stored separately.
 
 ### Option 1: Manual backup
 
@@ -144,7 +146,7 @@ scp endpaper-backup-*.tar.gz your-local-machine:/backups/
 crontab -e
 ```
 
-Add a daily backup:
+Add a daily full-data backup:
 
 ```text
 0 3 * * * cd /opt/endpaper && tar czf /backups/endpaper-$(date +\%Y\%m\%d).tar.gz data/
