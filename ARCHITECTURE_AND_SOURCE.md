@@ -222,8 +222,11 @@ erDiagram
 - **Overlay Chrome Architecture (R-13)**:
   - `#topbar` and `#progress-bar` are removed from document flow during reader mode (`body.reader-active`) and become `position:fixed` overlays via CSS. Chrome show/hide now uses CSS `transform: translateY(±100%)` (slide animation) rather than `height:0` collapse.
   - This eliminates the viewport reflow that previously triggered EPUB.js's internal ResizeObserver on every chrome toggle — the root cause of the chapter-skip bug in scrolled mode.
-  - A `ResizeObserver` on `#topbar` keeps the `--chrome-topbar-height` CSS custom property accurate across all device profiles (including iPhone with `env(safe-area-inset-top)`), and `#viewer-wrap` uses this variable for `padding-top` so EPUB content stays below the overlay bar.
-  - `enterImmersiveReading()` / `exitImmersiveReading()` call `resizeReaderViewport()` directly (no deferred double-rAF) since chrome toggling no longer changes `#viewer-wrap` dimensions.
+  - The EPUB viewport is **permanently fullscreen** — its dimensions never change regardless of chrome state. On mobile (`≤768px`), `#app` is `position:fixed; inset:0`, `#reader-view` and `#viewer-wrap` are `position:absolute; inset:0; padding:0`. On desktop, `#viewer-wrap` is `flex:1` and fills all remaining height since the overlay bars are out of document flow.
+  - `#topbar` and `#progress-bar` are **translucent glass overlays**: `background: color-mix(in srgb, var(--paper) 88%, transparent)` + `backdrop-filter: blur(18px)` — they sit on top of the EPUB without consuming any layout space, and adapt automatically to all reading themes (Light/Sepia/Dark/Night).
+  - Chrome show/hide uses `transform: translateY(±110%)` + `opacity` only — no `height`, `padding`, or `flex` changes, so EPUB.js's `ResizeObserver` never fires.
+  - `enterImmersiveReading()` and `exitImmersiveReading()` no longer call `resizeReaderViewport()` — there is nothing to resize.
+  - **Auto-hide (Kindle/Apple Books UX)**: `showReaderChromeTemporarily(delay=3000)` shows the chrome and starts a 3-second timer; if no drawer is open when the timer fires, `enterImmersiveReading()` is called. Center-tap while chrome is hidden calls `showReaderChromeTemporarily()`; center-tap while chrome is visible calls `enterImmersiveReading()` immediately and cancels any pending timer. Chrome is also shown temporarily on book open (after the loading overlay hides).
 - **Robust Spine Progress Calculation**:
   - Employs a 4-tier location resolution strategy (`getSpineSection`):
     1. Standard EPUB.js `spine.get(cfi)`.
