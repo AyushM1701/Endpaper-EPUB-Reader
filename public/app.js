@@ -11,45 +11,51 @@ let allCollections = [];
 // Keep a small, account-scoped LRU of recently opened EPUBs. This avoids a
 // second download when a reader briefly returns to the shelf, without letting
 // a very large book pin an unbounded amount of mobile memory.
+// R-16: Store Blobs instead of ArrayBuffers so EPUB.js receives a blob:// URL
+// — the backing data lives outside the GC heap and no .slice() copy is needed.
 const EPUB_BUFFER_CACHE_MAX_BYTES = 24 * 1024 * 1024;
 const EPUB_BUFFER_CACHE_MAX_ITEM_BYTES = 12 * 1024 * 1024;
-const epubBufferCache = new Map();
-const epubBufferRequests = new Map();
+const epubBlobCache = new Map();     // key → Blob
+const epubBlobRequests = new Map();  // key → Promise<Blob>
 const epubLocationCache = new Map();
-let epubBufferCacheBytes = 0;
+let epubBlobCacheBytes = 0;
+
+// Blob URL for the currently open book; revoked in discardReaderState (R-16)
+let currentBlobUrl = null;
 
 function readerAssetCacheKey(bookId, version = accountVersion) {
   return `${version}:${bookId}`;
 }
 
-function getCachedEpubBuffer(key) {
-  const buffer = epubBufferCache.get(key);
-  if (!buffer) return null;
-  epubBufferCache.delete(key);
-  epubBufferCache.set(key, buffer);
-  return buffer;
+function getCachedEpubBlob(key) {
+  const blob = epubBlobCache.get(key);
+  if (!blob) return null;
+  // LRU: re-insert to move to tail
+  epubBlobCache.delete(key);
+  epubBlobCache.set(key, blob);
+  return blob;
 }
 
-function rememberEpubBuffer(key, buffer) {
-  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength > EPUB_BUFFER_CACHE_MAX_ITEM_BYTES) return;
-  const previous = epubBufferCache.get(key);
-  if (previous) epubBufferCacheBytes -= previous.byteLength;
-  epubBufferCache.delete(key);
-  epubBufferCache.set(key, buffer);
-  epubBufferCacheBytes += buffer.byteLength;
-  while (epubBufferCacheBytes > EPUB_BUFFER_CACHE_MAX_BYTES && epubBufferCache.size > 1) {
-    const oldestKey = epubBufferCache.keys().next().value;
-    const oldest = epubBufferCache.get(oldestKey);
-    epubBufferCache.delete(oldestKey);
-    epubBufferCacheBytes -= oldest.byteLength;
+function rememberEpubBlob(key, blob) {
+  if (!(blob instanceof Blob) || blob.size > EPUB_BUFFER_CACHE_MAX_ITEM_BYTES) return;
+  const previous = epubBlobCache.get(key);
+  if (previous) epubBlobCacheBytes -= previous.size;
+  epubBlobCache.delete(key);
+  epubBlobCache.set(key, blob);
+  epubBlobCacheBytes += blob.size;
+  while (epubBlobCacheBytes > EPUB_BUFFER_CACHE_MAX_BYTES && epubBlobCache.size > 1) {
+    const oldestKey = epubBlobCache.keys().next().value;
+    const oldest = epubBlobCache.get(oldestKey);
+    epubBlobCache.delete(oldestKey);
+    epubBlobCacheBytes -= oldest.size;
   }
 }
 
 function clearReaderAssetCaches() {
-  epubBufferCache.clear();
-  epubBufferRequests.clear();
+  epubBlobCache.clear();
+  epubBlobRequests.clear();
   epubLocationCache.clear();
-  epubBufferCacheBytes = 0;
+  epubBlobCacheBytes = 0;
 }
 
 const api = {
@@ -120,25 +126,26 @@ const api = {
   async getBookFile(id, opts = {}) {
     const requestAccountVersion = opts.expectedAccountVersion == null ? accountVersion : opts.expectedAccountVersion;
     const key = readerAssetCacheKey(id, requestAccountVersion);
-    const cached = getCachedEpubBuffer(key);
+    // R-16: Return Blob from cache — EPUB.js will receive a blob:// URL, no .slice() copy needed
+    const cached = getCachedEpubBlob(key);
     if (cached) return cached;
     if (opts.signal && opts.signal.aborted) {
       const error = new Error('The user aborted a request.');
       error.name = 'AbortError';
       throw error;
     }
-    if (epubBufferRequests.has(key)) return epubBufferRequests.get(key);
+    if (epubBlobRequests.has(key)) return epubBlobRequests.get(key);
 
     const pending = this.fetch(`/api/books/${id}/file`, {
       ...opts,
       headers: {},  // no Content-Type for binary
-    }).then(res => res.arrayBuffer()).then(buffer => {
-      if (requestAccountVersion === accountVersion && currentUser) rememberEpubBuffer(key, buffer);
-      return buffer;
+    }).then(res => res.blob()).then(blob => {
+      if (requestAccountVersion === accountVersion && currentUser) rememberEpubBlob(key, blob);
+      return blob;
     }).finally(() => {
-      if (epubBufferRequests.get(key) === pending) epubBufferRequests.delete(key);
+      if (epubBlobRequests.get(key) === pending) epubBlobRequests.delete(key);
     });
-    epubBufferRequests.set(key, pending);
+    epubBlobRequests.set(key, pending);
     return pending;
   },
 
@@ -659,11 +666,14 @@ function cancelBookWarmup() {
 
 function scheduleBookWarmup(entry) {
   if (!entry || !currentUser || entry.fileSize > EPUB_BUFFER_CACHE_MAX_ITEM_BYTES) return;
+  // R-17/R-18: Touch/mobile devices have no hover intent signal — prefetching a
+  // large EPUB wastes bandwidth with no user benefit. Warmup is desktop-only.
+  if (window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches) return;
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   if (connection && (connection.saveData || /(^|-)2g$/.test(connection.effectiveType || ''))) return;
   const expectedAccountVersion = accountVersion;
   const key = readerAssetCacheKey(entry.id, expectedAccountVersion);
-  if (epubBufferCache.has(key) || epubBufferRequests.has(key) || bookWarmupKey === key) return;
+  if (epubBlobCache.has(key) || epubBlobRequests.has(key) || bookWarmupKey === key) return;
 
   cancelBookWarmup();
   bookWarmupKey = key;
@@ -766,7 +776,10 @@ function renderShelf(){
     ? library.filter(b => `${b.name || ''} ${b.author || ''}`.toLocaleLowerCase().includes(searchQuery))
     : library;
   if (filterVal === 'unread') filtered = filtered.filter(b => b.progress === 0);
-  else if (filterVal === 'finished') filtered = filtered.filter(b => b.progress >= 95);
+  // R-22: threshold raised from 95 to 98 — avoids premature finished marking on
+  // the second-to-last chapter (R-21 formula now makes last entry reach 100% only
+  // at its actual end, so 98% is a safe auto-finish trigger)
+  else if (filterVal === 'finished') filtered = filtered.filter(b => b.progress >= 98);
   else if (filterVal.startsWith('col_')) {
     const colId = filterVal.substring(4);
     const col = allCollections.find(c => c.id === colId);
@@ -1180,6 +1193,23 @@ function scheduleReaderResize(){
   chromeResizeTimer = setTimeout(resizeReaderViewport, 320);
 }
 
+// R-13: Keep --chrome-topbar-height in sync so viewer-wrap padding tracks the
+// actual rendered topbar height (including env(safe-area-inset-top) on iPhone).
+let topbarResizeObserver = null;
+function observeTopbarHeight() {
+  const topbar = document.getElementById('topbar');
+  const app = document.getElementById('app');
+  if (!topbar || !app || !window.ResizeObserver) return;
+  if (topbarResizeObserver) topbarResizeObserver.disconnect();
+  topbarResizeObserver = new ResizeObserver(() => {
+    // offsetHeight includes padding; gives accurate measure of rendered bar height
+    app.style.setProperty('--chrome-topbar-height', topbar.offsetHeight + 'px');
+  });
+  topbarResizeObserver.observe(topbar);
+  // Seed initial value immediately
+  app.style.setProperty('--chrome-topbar-height', topbar.offsetHeight + 'px');
+}
+
 function syncReaderChromeAccessibility(){
   const app = document.getElementById('app');
   const hidden = app.classList.contains('chrome-hidden');
@@ -1237,7 +1267,10 @@ function enterImmersiveReading(){
   closeDrawers();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
-  scheduleReaderResize();
+  // R-13: Chrome bars are now fixed overlays — toggling them never changes
+  // #viewer-wrap dimensions. A direct resize call suffices; no deferred
+  // double-rAF needed. The viewport stays constant through the animation.
+  resizeReaderViewport();
   return true;
 }
 
@@ -1249,7 +1282,7 @@ function exitImmersiveReading(){
   closeDrawers();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
-  scheduleReaderResize();
+  resizeReaderViewport(); // R-13: same reasoning as above
   return true;
 }
 
@@ -1438,9 +1471,13 @@ async function openBook(id){
   // Fetch the EPUB file from the server
   let targetBook;
   try {
-    const arrayBuffer = await api.getBookFile(id, requestOptions);
+    const blob = await api.getBookFile(id, requestOptions);
     if (!isReaderRequestCurrent(request, null, null)) return;
-    targetBook = ePub(arrayBuffer.slice(0));
+    // R-16: Use a Blob URL — avoids .slice() copy, data lives outside the GC heap.
+    // Revoke the previous URL first so the browser can release any prior backing store.
+    if (currentBlobUrl) { try { URL.revokeObjectURL(currentBlobUrl); } catch (_) {} }
+    currentBlobUrl = URL.createObjectURL(blob);
+    targetBook = ePub(currentBlobUrl);
   } catch(err) {
     if (isReaderRequestCurrent(request, null, null) && !isAbortError(err)) {
       console.error('Failed to load book file:', err);
@@ -1825,7 +1862,7 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
     }
 
     // Auto-update status
-    if (pct != null && pct >= 95 && entry.status !== 'finished') {
+    if (pct != null && pct >= 98 && entry.status !== 'finished') { // R-22: 95→98
       entry.status = 'finished';
     } else if (pct != null && pct > 0 && entry.status === 'unread') {
       entry.status = 'reading';
@@ -2927,6 +2964,7 @@ window.addEventListener('beforeunload', () => {
 
 /* ---------------- Init ---------------- */
 async function boot(){
+  observeTopbarHeight(); // R-13: keep --chrome-topbar-height CSS var in sync
   const bootAccountVersion = accountVersion;
   if (!isActiveAccount(bootAccountVersion)) return;
   const emptyP = document.getElementById('empty-shelf-copy');
@@ -3014,6 +3052,12 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
     scrollFadeObserver.disconnect();
     scrollFadeObserver = null;
   }
+  // R-16: Revoke the Blob URL so the browser can reclaim the underlying EPUB data
+  if (currentBlobUrl) {
+    try { URL.revokeObjectURL(currentBlobUrl); } catch (_) {}
+    currentBlobUrl = null;
+  }
+
   const oldBook = book;
   book = null;
   rendition = null;

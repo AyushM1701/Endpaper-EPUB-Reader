@@ -214,26 +214,40 @@ erDiagram
 - **Dynamic Theming System**:
   - Four distinct reading themes: **Light** (`#F6F1E7`), **Sepia** (`#EBDCC0`), **Dark** (`#22262C`), and **Night** (`#000000`).
   - Themes inject scoped CSS overrides into the EPUB iframe body, paragraphs, and headings while dynamically aligning the app shell background (`--reader-page-bg`) and mobile browser theme color meta tags.
+- **EPUB File Loading — Blob URL Pattern (R-16)**:
+  - `api.getBookFile()` fetches the EPUB and stores it as a `Blob` (not `ArrayBuffer`) in a 24 MB LRU cache (`epubBlobCache`).
+  - A `blob://` URL is created via `URL.createObjectURL(blob)` and passed directly to `ePub()`. This avoids the `.slice(0)` copy that previously doubled peak memory usage for large books.
+  - The active `currentBlobUrl` is revoked in `discardReaderState()` so the browser can immediately reclaim the underlying EPUB data.
+  - Book warmup is **disabled on touch/mobile devices** (R-17/R-18) — `scheduleBookWarmup()` checks `(hover: none) and (pointer: coarse)` and skips prefetch when true. There is no hover-intent signal on touch screens, so prefetch only wastes bandwidth.
+- **Overlay Chrome Architecture (R-13)**:
+  - `#topbar` and `#progress-bar` are removed from document flow during reader mode (`body.reader-active`) and become `position:fixed` overlays via CSS. Chrome show/hide now uses CSS `transform: translateY(±100%)` (slide animation) rather than `height:0` collapse.
+  - This eliminates the viewport reflow that previously triggered EPUB.js's internal ResizeObserver on every chrome toggle — the root cause of the chapter-skip bug in scrolled mode.
+  - A `ResizeObserver` on `#topbar` keeps the `--chrome-topbar-height` CSS custom property accurate across all device profiles (including iPhone with `env(safe-area-inset-top)`), and `#viewer-wrap` uses this variable for `padding-top` so EPUB content stays below the overlay bar.
+  - `enterImmersiveReading()` / `exitImmersiveReading()` call `resizeReaderViewport()` directly (no deferred double-rAF) since chrome toggling no longer changes `#viewer-wrap` dimensions.
 - **Robust Spine Progress Calculation**:
   - Employs a 4-tier location resolution strategy (`getSpineSection`):
     1. Standard EPUB.js `spine.get(cfi)`.
     2. Direct mathematical parsing of EPUB CFI spine components `/6/(\d+)` ($(\frac{N}{2}) - 1$).
-    3. Multi-strategy href normalization matching base paths, clean paths, or basename filenames (`chapter04.xhtml`).
-    4. TOC navigation fallback matching.
+    3. Multi-strategy href normalization matching base paths, clean paths, or basename filenames (`chapter04.xhtml`) — basename match is unique-only (R-23).
+    4. TOC navigation fallback matching using `tocIdx / (length-1)` formula (R-21).
+  - **Finished threshold** is 98% (R-22): a book is auto-marked finished and appears in the "Finished" shelf filter when progress reaches ≥ 98%. The threshold was raised from 95% to avoid premature marking on the second-to-last chapter.
   - Live progress slider updates synchronously during user drags and releases without getting overwritten by background events.
 - **Text-to-Speech (TTS) & Highlighting**:
   - Multi-tier text extraction from `rendition.getContents()` document bodies with active toggle state styling.
+  - TTS chapter advance uses `rendition.currentLocation()` to identify the active section after navigation, rather than always taking `getContents()[0]` which may be a preloaded prior section (R-10/R-11).
   - Captures selected text DOM ranges inside the EPUB iframe, serializes them to CFIs, and renders persistent highlight swatches with notes, with one-click Markdown highlight export.
+- **Navigation Serialization (R-09)**:
+  - All `rendition.next()` / `rendition.prev()` calls route through `turnPage(direction)` which holds a module-level mutex (`pageTurnLock`). Swipe, tap, keyboard, TTS chapter advance, and nav-zone button clicks all share the same lock, preventing overlapping navigations.
 
 ---
 
 ## 6. Service Worker, Offline Caching & Synchronization Pipeline
 
 - **Service Worker (`public/sw.js`)**:
-  - Shell cache versioned with build timestamps (e.g. `endpaper-shell-v10.1.0-20260829`).
-  - Core app shell assets (`/`, `/index.html`, `/app.js`, `/app.css`, `/manifest.json`) use **Network-First with Cache Fallback**. When online, browsers instantly fetch the latest code; when offline, they fall back to the local cache.
+  - Shell cache versioned with build timestamps (e.g. `endpaper-shell-v10.1.0-20260922`).
+  - Core app shell assets (`/`, `/index.html`, `/app.js`, `/app.css`, `/epub.min.js`, `/manifest.json`) use **Network-First with Cache Fallback**. `epub.min.js` is self-hosted (built from upstream EPUB.js commit `eee359d`, 2026-09-22, includes mobile continuous-scroll jitter fix `171f7ec`) for PWA offline support and CDN independence.
   - `controllerchange` event listener in `public/index.html` triggers an automatic single-fire reload when a new service worker takes control, ensuring open tabs immediately execute new code.
-  - Dedicated runtime cache (`endpaper-runtime-v10.1.0-20260829`) caches active EPUB files and covers with `SET_CURRENT_BOOK` message synchronization.
+  - Dedicated runtime cache (`endpaper-runtime-v10.1.0-20260922`) caches active EPUB files and covers with `SET_CURRENT_BOOK` message synchronization.
 - **Offline Mutation Queue (`public/app.js`)**:
   - If a network failure occurs during reading (e.g. saving reading position, setting a bookmark), the mutation payload is appended to `localStorage.getItem('endpaper_offline_queue')`.
   - When the browser fires the `online` event, `flushOfflineQueue()` replays pending requests to the server in FIFO order.
