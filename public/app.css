@@ -1410,11 +1410,23 @@ html.dark-shell .admin-btn-sm:hover {
   color: var(--gold);
 }
 
-/* Touch readers use swipe gestures and topbar buttons. */
+/* Touch readers: show compact arrows in paginated mode (R-05/R-06).
+   Scrolled mode keeps them hidden via the #reader-view.scrolled .nav-zone rule. */
 @media (hover: none) and (pointer: coarse){
-  .nav-zone{ display: none; }
   .drawer{ width: min(320px, 86vw); }
   #progress-chapter{ display:none; }
+  /* Paginated: visible mid-height arrow buttons */
+  #reader-view:not(.scrolled) .nav-zone{
+    display: flex;
+    opacity: 0.72;
+    top: 50%;
+    bottom: auto;
+    width: 48px;
+    height: 64px;
+    transform: translateY(-50%);
+    border-radius: 8px;
+    background: rgba(0,0,0,0.04);
+  }
 }
 
 @media (pointer: coarse) {

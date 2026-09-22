@@ -903,8 +903,7 @@ function setLayout(mode){
   const targetBook = book;
   const request = activeReaderRequest;
   if (!entry || !request) { updateSettingsUI(); saveSettings(); return; }
-  const currentLocation = rendition && rendition.currentLocation ? rendition.currentLocation() : null;
-  const resumeCfi = (currentLocation && currentLocation.start && currentLocation.start.cfi) || entry.lastLocationCfi;
+  const resumeCfi = getSafeCfi() || entry.lastLocationCfi;
   if (resumeCfi) entry.lastLocationCfi = resumeCfi;
 
   hideHighlightPopup();
@@ -950,9 +949,10 @@ function applyReaderContentStyles(contents) {
       color: ${theme.text} !important;
       box-sizing: border-box !important;
       -webkit-user-select: auto;
-      ${isScrolled 
-        ? 'touch-action: auto !important; overscroll-behavior: auto !important; -webkit-overflow-scrolling: touch;' 
-        : 'touch-action: pan-y !important; overscroll-behavior: none !important;'}
+      overflow-anchor: none !important;
+      touch-action: pan-y !important;
+      overscroll-behavior: none !important;
+      -webkit-overflow-scrolling: touch;
     }
     body {
       margin: 0 !important;
@@ -994,8 +994,8 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
   if (settings.layout === 'paginated') {
     const swipeThreshold = 30; // Responsive threshold for mobile swipe
     if (Math.abs(dx) >= swipeThreshold && Math.abs(dx) > Math.abs(dy) * 1.1 && dt < 800) {
-      if (dx < 0) rendition.next();
-      else rendition.prev();
+      if (dx < 0) turnPage('next');
+      else turnPage('prev');
       return true;
     }
   }
@@ -1004,10 +1004,10 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
   if (!isCancel && !moved && Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 450) {
     if (settings.layout === 'paginated') {
       if (ex < width * 0.25) {
-        rendition.prev();
+        turnPage('prev');
         return true;
       } else if (ex > width * 0.75) {
-        rendition.next();
+        turnPage('next');
         return true;
       }
     }
@@ -1102,6 +1102,41 @@ function registerSwipeGestures(){
 let chromeHintShown = false;
 let chromeResizeTimer = null;
 let chromeResizeFrame = null;
+let lastReaderViewportSize = { width: 0, height: 0 };
+
+// Page-turn serialization mutex — all rendition.next()/prev() calls route through
+// turnPage() to prevent overlapping navigations from swipe, tap, keyboard, and TTS (R-09)
+let pageTurnLock = false;
+let pageTurnLockTimer = null;
+
+function turnPage(direction) {
+  if (!rendition || pageTurnLock) return;
+  pageTurnLock = true;
+  clearTimeout(pageTurnLockTimer);
+  let promise;
+  try { promise = direction === 'next' ? rendition.next() : rendition.prev(); } catch (_) {}
+  const unlock = () => { pageTurnLock = false; };
+  if (promise && typeof promise.then === 'function') {
+    pageTurnLockTimer = setTimeout(unlock, 600);
+    promise.then(unlock, unlock);
+  } else {
+    pageTurnLockTimer = setTimeout(unlock, 600);
+  }
+}
+
+/**
+ * Safely read the current CFI without crashing when EPUB.js returns a Promise
+ * from currentLocation() (R-12).
+ */
+function getSafeCfi(targetRendition) {
+  try {
+    const r = targetRendition || rendition;
+    if (!r || !r.currentLocation) return null;
+    const loc = r.currentLocation();
+    if (!loc || typeof loc.then === 'function') return null;
+    return (loc.start && loc.start.cfi) || null;
+  } catch (_) { return null; }
+}
 
 function isTouchReader(){
   return Boolean(
@@ -1121,18 +1156,14 @@ function isImmersiveReading(){
 
 function resizeReaderViewport(){
   const viewport = document.getElementById('viewer-wrap');
-  if (!rendition || !viewport || viewport.clientWidth < 1 || viewport.clientHeight < 1) return;
-  
-  let cfi = null;
-  try {
-    const loc = rendition.currentLocation();
-    if (loc && loc.start && loc.start.cfi) cfi = loc.start.cfi;
-  } catch (e) {}
-
-  try { 
-    rendition.resize(viewport.clientWidth, viewport.clientHeight);
-    if (cfi) rendition.display(cfi);
-  } catch (e) {}
+  if (!rendition || !viewport) return;
+  const width = Math.round(viewport.clientWidth);
+  const height = Math.round(viewport.clientHeight);
+  if (width < 1 || height < 1) return;
+  // Skip redundant resizes — prevents spurious relayouts during chrome animation (R-01)
+  if (lastReaderViewportSize.width === width && lastReaderViewportSize.height === height) return;
+  lastReaderViewportSize = { width, height };
+  try { rendition.resize(width, height); } catch (e) {}
 }
 
 function scheduleReaderResize(){
@@ -1347,44 +1378,8 @@ function getLocationsKey(bookId) {
   return `endpaper_locations_${bookId}`;
 }
 
-async function ensureLocations(targetBook, bookId, request, targetRendition, entry) {
-  const cacheKey = getLocationsKey(bookId);
-  let cached = null;
-  try {
-    cached = localStorage.getItem(cacheKey);
-  } catch (_) {}
-
-  if (cached) {
-    try {
-      targetBook.locations.load(cached);
-      if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
-        locationsReady = true;
-        renderBookmarkTicks();
-        syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
-      }
-      return;
-    } catch (_) {}
-  }
-
-  const generate = () => {
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-    targetBook.locations.generate(1000).then(() => {
-      if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-      try {
-        localStorage.setItem(cacheKey, targetBook.locations.save());
-      } catch (_) {}
-      locationsReady = true;
-      renderBookmarkTicks();
-      syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
-    }).catch(err => {
-      if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(err)) {
-        console.error('Could not map book locations:', err);
-      }
-    });
-  };
-
-  setTimeout(generate, 50);
-}
+// NOTE (R-20): ensureLocations() was removed — it was dead code never called anywhere.
+// The live location cache/generate pipeline lives in openBook() below.
 
 /* ---------------- Opening a book ---------------- */
 async function openBook(id){
@@ -1711,15 +1706,23 @@ function getSpineSection(targetBook, location, cfi) {
     const filename = cleanHref.split('/').pop();
 
     if (totalItems > 0) {
+      // Path-based match (safe against basename collisions)
       const matched = spineItems.find(item => {
         if (!item || !item.href) return false;
         const itemClean = item.href.split('#')[0].split('?')[0];
         return itemClean === cleanHref ||
                itemClean.endsWith('/' + cleanHref) ||
-               cleanHref.endsWith('/' + itemClean) ||
-               itemClean.split('/').pop() === filename;
+               cleanHref.endsWith('/' + itemClean);
       });
       if (matched && typeof matched.index === 'number') return matched;
+
+      // Basename fallback: only safe when the filename is unique across the spine (R-23)
+      const basenameMatches = spineItems.filter(item =>
+        item && item.href && item.href.split('#')[0].split('?')[0].split('/').pop() === filename
+      );
+      if (basenameMatches.length === 1 && typeof basenameMatches[0].index === 'number') {
+        return basenameMatches[0];
+      }
     }
   }
 
@@ -1808,7 +1811,9 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
         return cleanT === href || cleanT.endsWith('/' + href) || href.endsWith('/' + cleanT) || cleanT.split('/').pop() === filename;
       });
       if (tocIdx >= 0) {
-        calculatedPct = Math.round(((tocIdx + 1) / toc.length) * 100);
+        // Use tocIdx / (length-1) so that the last entry only reaches 100% when
+        // you are actually at its end, preventing premature "finished" marking (R-21)
+        calculatedPct = Math.round((tocIdx / Math.max(1, toc.length - 1)) * 100);
       }
     }
 
@@ -2393,9 +2398,9 @@ function handleReaderShortcut(e){
   // Preserve native text selection/caret movement in the EPUB document.
   if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.shiftKey) return;
   if (!rendition) return;
-  if (e.key === 'ArrowLeft') { e.preventDefault(); rendition.prev(); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); rendition.next(); }
-  else if (e.key === ' '){ e.preventDefault(); if (!pageScroll(e.shiftKey ? -1 : 1)) (e.shiftKey ? rendition.prev() : rendition.next()); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); turnPage('prev'); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); turnPage('next'); }
+  else if (e.key === ' '){ e.preventDefault(); if (!pageScroll(e.shiftKey ? -1 : 1)) turnPage(e.shiftKey ? 'prev' : 'next'); }
   else if (e.key === 'b' || e.key === 'B') { e.preventDefault(); toggleBookmark(); }
   else if (e.key === 't' || e.key === 'T') { e.preventDefault(); toggleDrawer('toc'); }
   else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleDrawer('settings'); }
@@ -2898,23 +2903,15 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
 });
 
 /* Keep the rendition's page size in sync with Safari's toolbar show/hide,
-   keyboard, and rotation */
+   keyboard, and rotation.
+   R-02/R-14: resize no longer calls display(cfi), so keyboard show/hide on
+   iPhone is safe. R-03: orientationchange gets a longer debounce to let layout
+   settle before measuring the viewport. */
 let viewportResizeDebounce = null;
-function handleViewportResize(){
+function handleViewportResize(e){
   clearTimeout(viewportResizeDebounce);
-  viewportResizeDebounce = setTimeout(() => {
-    if (rendition) {
-      let cfi = null;
-      try {
-        const loc = rendition.currentLocation();
-        if (loc && loc.start && loc.start.cfi) cfi = loc.start.cfi;
-      } catch (e) {}
-      try { 
-        rendition.resize();
-        if (cfi) rendition.display(cfi);
-      } catch(e){} 
-    }
-  }, 150);
+  const delay = (e && e.type === 'orientationchange') ? 400 : 150;
+  viewportResizeDebounce = setTimeout(resizeReaderViewport, delay);
 }
 if (window.visualViewport) window.visualViewport.addEventListener('resize', handleViewportResize);
 window.addEventListener('resize', handleViewportResize);
@@ -3005,6 +3002,9 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   currentSessionId = null;
   currentBookId = null;
   locationsReady = false;
+  lastReaderViewportSize = { width: 0, height: 0 };
+  pageTurnLock = false;
+  clearTimeout(pageTurnLockTimer);
   pendingHighlightCfi = null;
   pendingHighlightContext = null;
   highlightReturnFocus = null;
@@ -3868,14 +3868,10 @@ function highlightTtsElement(element, doc) {
 
         // If the element is to the right of the visible screen (next spread)
         if (screenLeft >= viewerRect.right - 20) {
-          if (rendition && rendition.next) {
-            rendition.next();
-          }
+          turnPage('next');
         } else if (screenRight <= viewerRect.left + 20) {
           // If the element is to the left of the visible screen (previous spread)
-          if (rendition && rendition.prev) {
-            rendition.prev();
-          }
+          turnPage('prev');
         }
       }
     }
@@ -3941,25 +3937,51 @@ function speakCurrentTtsItem() {
       } else {
         // Reached end of current chapter queue. Advance to the next chapter!
         if (rendition && rendition.next) {
-          rendition.next().then(() => {
+          // Route through page-turn mutex so TTS cannot race with user input (R-09)
+          if (pageTurnLock) { stopTts(); showToast('Finished reading aloud'); return; }
+          pageTurnLock = true;
+          clearTimeout(pageTurnLockTimer);
+          let ttsAdvancePromise;
+          try { ttsAdvancePromise = rendition.next(); } catch (_) {}
+          const unlockTts = () => { pageTurnLock = false; };
+          pageTurnLockTimer = setTimeout(unlockTts, 600);
+          (ttsAdvancePromise || Promise.resolve()).then(() => {
+            unlockTts();
+            clearTimeout(pageTurnLockTimer);
             setTimeout(() => {
-              const contents = (rendition.getContents && rendition.getContents()) || [];
-              let targetDoc = contents.length > 0 ? contents[0].document : null;
+              // Match active section via currentLocation() rather than blindly
+              // taking getContents()[0] which may be a preloaded prior section (R-11)
+              let targetDoc = null;
+              try {
+                const loc = rendition.currentLocation && rendition.currentLocation();
+                const activeHref = loc && loc.start && loc.start.href;
+                const contents = (rendition.getContents && rendition.getContents()) || [];
+                if (activeHref && contents.length > 0) {
+                  const activeBase = activeHref.split('#')[0].split('?')[0].split('/').pop();
+                  for (const c of contents) {
+                    const cHref = c.href || (c.section && c.section.href) || '';
+                    if (cHref.split('#')[0].split('?')[0].split('/').pop() === activeBase) {
+                      targetDoc = c.document;
+                      break;
+                    }
+                  }
+                }
+                if (!targetDoc && contents.length > 0) targetDoc = contents[0].document;
+              } catch (_) {}
               if (!targetDoc) {
                 const iframe = document.querySelector('#viewer iframe');
                 if (iframe) targetDoc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
               }
               if (targetDoc) {
                 const nextQueue = collectReadableItemsFromNode(null, targetDoc);
-                if (nextQueue.length > 0) {
-                  startTtsWithQueue(nextQueue, 0);
-                  return;
-                }
+                if (nextQueue.length > 0) { startTtsWithQueue(nextQueue, 0); return; }
               }
               stopTts();
               showToast('Finished reading aloud');
             }, 350);
           }).catch(() => {
+            unlockTts();
+            clearTimeout(pageTurnLockTimer);
             stopTts();
             showToast('Finished reading aloud');
           });

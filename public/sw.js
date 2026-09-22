@@ -1,4 +1,4 @@
-const BUILD_VERSION = 'v10.11.0-20260829';
+const BUILD_VERSION = 'v10.11.0-20260922';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const STATIC_ASSETS = [
@@ -6,6 +6,7 @@ const STATIC_ASSETS = [
   '/index.html',
   '/app.css',
   '/app.js',
+  '/epub.min.js',
   '/manifest.json'
 ];
 

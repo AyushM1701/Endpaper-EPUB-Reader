@@ -1,4 +1,4 @@
-# Endpaper — Complete Architecture & Full Codebase Documentation
+# Endpaper â€” Complete Architecture & Full Codebase Documentation
 
 > **Project Name:** Endpaper  
 > **Workspace Directory:** `C:\Users\AYUSH\Documents\Endpaper`  
@@ -337,47 +337,49 @@ volumes:
 
 ```text
 Endpaper/
-├── .dockerignore
-├── .gitignore
-├── ARCHITECTURE_AND_SOURCE.md
-├── Caddyfile
-├── DEPLOY.md
-├── docker-compose.yml
-├── README.md
-├── data/
-│   ├── backups/
-│   ├── books/
-│   ├── covers/
-│   └── endpaper.db
-├── public/
-│   ├── app.css
-│   ├── app.js
-│   ├── index.html
-│   ├── manifest.json
-│   └── sw.js
-└── server/
-    ├── Dockerfile
-    ├── package.json
-    └── src/
-        ├── db.js
-        ├── index.js
-        ├── lib/
-        │   ├── epubMeta.js
-        │   ├── epubWorker.js
-        │   ├── passphrase.js
-        │   └── validation.js
-        ├── middleware/
-        │   └── auth.js
-        └── routes/
-            ├── auth.js
-            ├── bookmarks.js
-            ├── books.js
-            ├── collections.js
-            ├── highlights.js
-            ├── sessions.js
-            ├── settings.js
-            └── users.js
+â”œâ”€â”€ .dockerignore
+â”œâ”€â”€ .gitignore
+â”œâ”€â”€ ARCHITECTURE_AND_SOURCE.md
+â”œâ”€â”€ Caddyfile
+â”œâ”€â”€ DEPLOY.md
+â”œâ”€â”€ docker-compose.yml
+â”œâ”€â”€ README.md
+â”œâ”€â”€ data/
+â”‚   â”œâ”€â”€ backups/
+â”‚   â”œâ”€â”€ books/
+â”‚   â”œâ”€â”€ covers/
+â”‚   â””â”€â”€ endpaper.db
+â”œâ”€â”€ public/
+â”‚   â”œâ”€â”€ app.css
+â”‚   â”œâ”€â”€ app.js
+â”‚   â”œâ”€â”€ index.html
+â”‚   â”œâ”€â”€ manifest.json
+â”‚   â””â”€â”€ sw.js
+â””â”€â”€ server/
+    â”œâ”€â”€ Dockerfile
+    â”œâ”€â”€ package.json
+    â””â”€â”€ src/
+        â”œâ”€â”€ db.js
+        â”œâ”€â”€ index.js
+        â”œâ”€â”€ lib/
+        â”‚   â”œâ”€â”€ epubMeta.js
+        â”‚   â”œâ”€â”€ epubWorker.js
+        â”‚   â”œâ”€â”€ passphrase.js
+        â”‚   â””â”€â”€ validation.js
+        â”œâ”€â”€ middleware/
+        â”‚   â””â”€â”€ auth.js
+        â””â”€â”€ routes/
+            â”œâ”€â”€ auth.js
+            â”œâ”€â”€ bookmarks.js
+            â”œâ”€â”€ books.js
+            â”œâ”€â”€ collections.js
+            â”œâ”€â”€ highlights.js
+            â”œâ”€â”€ sessions.js
+            â”œâ”€â”€ settings.js
+            â””â”€â”€ users.js
 ```
+
+---
 
 ---
 # Part 2: Complete Project Source Code
@@ -497,7 +499,7 @@ volumes:
 
 *Relative Path: `Caddyfile` | Size: 0.2 KB | Total Lines: 6*
 
-````text
+````caddyfile
 # Replace books.yourdomain.com with your actual domain before deploying.
 # Caddy will automatically obtain and renew a Let's Encrypt certificate.
 books.yourdomain.com {
@@ -511,7 +513,7 @@ books.yourdomain.com {
 
 *Relative Path: `.gitignore` | Size: 0.1 KB | Total Lines: 13*
 
-````text
+````gitignore
 node_modules/
 .env
 data/
@@ -532,7 +534,7 @@ Thumbs.db
 
 *Relative Path: `.dockerignore` | Size: 0.1 KB | Total Lines: 11*
 
-````text
+````dockerignore
 node_modules
 data
 tmp
@@ -939,10 +941,10 @@ Create the first admin account with the command in step 5, then sign in using bo
 
 ## File: `public/sw.js`
 
-*Relative Path: `public/sw.js` | Size: 4.1 KB | Total Lines: 125*
+*Relative Path: `public/sw.js` | Size: 4.1 KB | Total Lines: 126*
 
 ````javascript
-const BUILD_VERSION = 'v10.11.0-20260829';
+const BUILD_VERSION = 'v10.11.0-20260922';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const STATIC_ASSETS = [
@@ -950,6 +952,7 @@ const STATIC_ASSETS = [
   '/index.html',
   '/app.css',
   '/app.js',
+  '/epub.min.js',
   '/manifest.json'
 ];
 
@@ -1073,7 +1076,7 @@ self.addEventListener('fetch', (e) => {
 
 ## File: `public/index.html`
 
-*Relative Path: `public/index.html` | Size: 35.4 KB | Total Lines: 541*
+*Relative Path: `public/index.html` | Size: 35.5 KB | Total Lines: 541*
 
 ````html
 <!DOCTYPE html>
@@ -1092,7 +1095,7 @@ self.addEventListener('fetch', (e) => {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Work+Sans:wght@400;500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+<script src="/epub.min.js"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
 <link rel="stylesheet" href="app.css">
 
   <script>
@@ -1265,10 +1268,10 @@ self.addEventListener('fetch', (e) => {
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
-      <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" onclick="rendition && rendition.prev()">
+      <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" onclick="turnPage('prev')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
-      <button type="button" class="nav-zone right" title="Next page" aria-label="Next page" aria-controls="viewer" onclick="rendition && rendition.next()">
+      <button type="button" class="nav-zone right" title="Next page" aria-label="Next page" aria-controls="viewer" onclick="turnPage('next')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       </button>
       <div id="loading-overlay" class="hidden">
@@ -1622,7 +1625,7 @@ self.addEventListener('fetch', (e) => {
 
 ## File: `public/app.css`
 
-*Relative Path: `public/app.css` | Size: 49.0 KB | Total Lines: 1612*
+*Relative Path: `public/app.css` | Size: 49.3 KB | Total Lines: 1624*
 
 ````css
 :root{
@@ -3037,11 +3040,23 @@ html.dark-shell .admin-btn-sm:hover {
   color: var(--gold);
 }
 
-/* Touch readers use swipe gestures and topbar buttons. */
+/* Touch readers: show compact arrows in paginated mode (R-05/R-06).
+   Scrolled mode keeps them hidden via the #reader-view.scrolled .nav-zone rule. */
 @media (hover: none) and (pointer: coarse){
-  .nav-zone{ display: none; }
   .drawer{ width: min(320px, 86vw); }
   #progress-chapter{ display:none; }
+  /* Paginated: visible mid-height arrow buttons */
+  #reader-view:not(.scrolled) .nav-zone{
+    display: flex;
+    opacity: 0.72;
+    top: 50%;
+    bottom: auto;
+    width: 48px;
+    height: 64px;
+    transform: translateY(-50%);
+    border-radius: 8px;
+    background: rgba(0,0,0,0.04);
+  }
 }
 
 @media (pointer: coarse) {
@@ -3242,7 +3257,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ## File: `public/app.js`
 
-*Relative Path: `public/app.js` | Size: 162.5 KB | Total Lines: 4308*
+*Relative Path: `public/app.js` | Size: 164.5 KB | Total Lines: 4330*
 
 ````javascript
 /* ================================================================
@@ -4150,8 +4165,7 @@ function setLayout(mode){
   const targetBook = book;
   const request = activeReaderRequest;
   if (!entry || !request) { updateSettingsUI(); saveSettings(); return; }
-  const currentLocation = rendition && rendition.currentLocation ? rendition.currentLocation() : null;
-  const resumeCfi = (currentLocation && currentLocation.start && currentLocation.start.cfi) || entry.lastLocationCfi;
+  const resumeCfi = getSafeCfi() || entry.lastLocationCfi;
   if (resumeCfi) entry.lastLocationCfi = resumeCfi;
 
   hideHighlightPopup();
@@ -4197,9 +4211,10 @@ function applyReaderContentStyles(contents) {
       color: ${theme.text} !important;
       box-sizing: border-box !important;
       -webkit-user-select: auto;
-      ${isScrolled 
-        ? 'touch-action: auto !important; overscroll-behavior: auto !important; -webkit-overflow-scrolling: touch;' 
-        : 'touch-action: pan-y !important; overscroll-behavior: none !important;'}
+      overflow-anchor: none !important;
+      touch-action: pan-y !important;
+      overscroll-behavior: none !important;
+      -webkit-overflow-scrolling: touch;
     }
     body {
       margin: 0 !important;
@@ -4241,8 +4256,8 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
   if (settings.layout === 'paginated') {
     const swipeThreshold = 30; // Responsive threshold for mobile swipe
     if (Math.abs(dx) >= swipeThreshold && Math.abs(dx) > Math.abs(dy) * 1.1 && dt < 800) {
-      if (dx < 0) rendition.next();
-      else rendition.prev();
+      if (dx < 0) turnPage('next');
+      else turnPage('prev');
       return true;
     }
   }
@@ -4251,10 +4266,10 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
   if (!isCancel && !moved && Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 450) {
     if (settings.layout === 'paginated') {
       if (ex < width * 0.25) {
-        rendition.prev();
+        turnPage('prev');
         return true;
       } else if (ex > width * 0.75) {
-        rendition.next();
+        turnPage('next');
         return true;
       }
     }
@@ -4349,6 +4364,41 @@ function registerSwipeGestures(){
 let chromeHintShown = false;
 let chromeResizeTimer = null;
 let chromeResizeFrame = null;
+let lastReaderViewportSize = { width: 0, height: 0 };
+
+// Page-turn serialization mutex — all rendition.next()/prev() calls route through
+// turnPage() to prevent overlapping navigations from swipe, tap, keyboard, and TTS (R-09)
+let pageTurnLock = false;
+let pageTurnLockTimer = null;
+
+function turnPage(direction) {
+  if (!rendition || pageTurnLock) return;
+  pageTurnLock = true;
+  clearTimeout(pageTurnLockTimer);
+  let promise;
+  try { promise = direction === 'next' ? rendition.next() : rendition.prev(); } catch (_) {}
+  const unlock = () => { pageTurnLock = false; };
+  if (promise && typeof promise.then === 'function') {
+    pageTurnLockTimer = setTimeout(unlock, 600);
+    promise.then(unlock, unlock);
+  } else {
+    pageTurnLockTimer = setTimeout(unlock, 600);
+  }
+}
+
+/**
+ * Safely read the current CFI without crashing when EPUB.js returns a Promise
+ * from currentLocation() (R-12).
+ */
+function getSafeCfi(targetRendition) {
+  try {
+    const r = targetRendition || rendition;
+    if (!r || !r.currentLocation) return null;
+    const loc = r.currentLocation();
+    if (!loc || typeof loc.then === 'function') return null;
+    return (loc.start && loc.start.cfi) || null;
+  } catch (_) { return null; }
+}
 
 function isTouchReader(){
   return Boolean(
@@ -4368,18 +4418,14 @@ function isImmersiveReading(){
 
 function resizeReaderViewport(){
   const viewport = document.getElementById('viewer-wrap');
-  if (!rendition || !viewport || viewport.clientWidth < 1 || viewport.clientHeight < 1) return;
-  
-  let cfi = null;
-  try {
-    const loc = rendition.currentLocation();
-    if (loc && loc.start && loc.start.cfi) cfi = loc.start.cfi;
-  } catch (e) {}
-
-  try { 
-    rendition.resize(viewport.clientWidth, viewport.clientHeight);
-    if (cfi) rendition.display(cfi);
-  } catch (e) {}
+  if (!rendition || !viewport) return;
+  const width = Math.round(viewport.clientWidth);
+  const height = Math.round(viewport.clientHeight);
+  if (width < 1 || height < 1) return;
+  // Skip redundant resizes — prevents spurious relayouts during chrome animation (R-01)
+  if (lastReaderViewportSize.width === width && lastReaderViewportSize.height === height) return;
+  lastReaderViewportSize = { width, height };
+  try { rendition.resize(width, height); } catch (e) {}
 }
 
 function scheduleReaderResize(){
@@ -4594,44 +4640,8 @@ function getLocationsKey(bookId) {
   return `endpaper_locations_${bookId}`;
 }
 
-async function ensureLocations(targetBook, bookId, request, targetRendition, entry) {
-  const cacheKey = getLocationsKey(bookId);
-  let cached = null;
-  try {
-    cached = localStorage.getItem(cacheKey);
-  } catch (_) {}
-
-  if (cached) {
-    try {
-      targetBook.locations.load(cached);
-      if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
-        locationsReady = true;
-        renderBookmarkTicks();
-        syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
-      }
-      return;
-    } catch (_) {}
-  }
-
-  const generate = () => {
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-    targetBook.locations.generate(1000).then(() => {
-      if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-      try {
-        localStorage.setItem(cacheKey, targetBook.locations.save());
-      } catch (_) {}
-      locationsReady = true;
-      renderBookmarkTicks();
-      syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
-    }).catch(err => {
-      if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(err)) {
-        console.error('Could not map book locations:', err);
-      }
-    });
-  };
-
-  setTimeout(generate, 50);
-}
+// NOTE (R-20): ensureLocations() was removed — it was dead code never called anywhere.
+// The live location cache/generate pipeline lives in openBook() below.
 
 /* ---------------- Opening a book ---------------- */
 async function openBook(id){
@@ -4958,15 +4968,23 @@ function getSpineSection(targetBook, location, cfi) {
     const filename = cleanHref.split('/').pop();
 
     if (totalItems > 0) {
+      // Path-based match (safe against basename collisions)
       const matched = spineItems.find(item => {
         if (!item || !item.href) return false;
         const itemClean = item.href.split('#')[0].split('?')[0];
         return itemClean === cleanHref ||
                itemClean.endsWith('/' + cleanHref) ||
-               cleanHref.endsWith('/' + itemClean) ||
-               itemClean.split('/').pop() === filename;
+               cleanHref.endsWith('/' + itemClean);
       });
       if (matched && typeof matched.index === 'number') return matched;
+
+      // Basename fallback: only safe when the filename is unique across the spine (R-23)
+      const basenameMatches = spineItems.filter(item =>
+        item && item.href && item.href.split('#')[0].split('?')[0].split('/').pop() === filename
+      );
+      if (basenameMatches.length === 1 && typeof basenameMatches[0].index === 'number') {
+        return basenameMatches[0];
+      }
     }
   }
 
@@ -5055,7 +5073,9 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
         return cleanT === href || cleanT.endsWith('/' + href) || href.endsWith('/' + cleanT) || cleanT.split('/').pop() === filename;
       });
       if (tocIdx >= 0) {
-        calculatedPct = Math.round(((tocIdx + 1) / toc.length) * 100);
+        // Use tocIdx / (length-1) so that the last entry only reaches 100% when
+        // you are actually at its end, preventing premature "finished" marking (R-21)
+        calculatedPct = Math.round((tocIdx / Math.max(1, toc.length - 1)) * 100);
       }
     }
 
@@ -5640,9 +5660,9 @@ function handleReaderShortcut(e){
   // Preserve native text selection/caret movement in the EPUB document.
   if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.shiftKey) return;
   if (!rendition) return;
-  if (e.key === 'ArrowLeft') { e.preventDefault(); rendition.prev(); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); rendition.next(); }
-  else if (e.key === ' '){ e.preventDefault(); if (!pageScroll(e.shiftKey ? -1 : 1)) (e.shiftKey ? rendition.prev() : rendition.next()); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); turnPage('prev'); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); turnPage('next'); }
+  else if (e.key === ' '){ e.preventDefault(); if (!pageScroll(e.shiftKey ? -1 : 1)) turnPage(e.shiftKey ? 'prev' : 'next'); }
   else if (e.key === 'b' || e.key === 'B') { e.preventDefault(); toggleBookmark(); }
   else if (e.key === 't' || e.key === 'T') { e.preventDefault(); toggleDrawer('toc'); }
   else if (e.key === 's' || e.key === 'S') { e.preventDefault(); toggleDrawer('settings'); }
@@ -6145,23 +6165,15 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
 });
 
 /* Keep the rendition's page size in sync with Safari's toolbar show/hide,
-   keyboard, and rotation */
+   keyboard, and rotation.
+   R-02/R-14: resize no longer calls display(cfi), so keyboard show/hide on
+   iPhone is safe. R-03: orientationchange gets a longer debounce to let layout
+   settle before measuring the viewport. */
 let viewportResizeDebounce = null;
-function handleViewportResize(){
+function handleViewportResize(e){
   clearTimeout(viewportResizeDebounce);
-  viewportResizeDebounce = setTimeout(() => {
-    if (rendition) {
-      let cfi = null;
-      try {
-        const loc = rendition.currentLocation();
-        if (loc && loc.start && loc.start.cfi) cfi = loc.start.cfi;
-      } catch (e) {}
-      try { 
-        rendition.resize();
-        if (cfi) rendition.display(cfi);
-      } catch(e){} 
-    }
-  }, 150);
+  const delay = (e && e.type === 'orientationchange') ? 400 : 150;
+  viewportResizeDebounce = setTimeout(resizeReaderViewport, delay);
 }
 if (window.visualViewport) window.visualViewport.addEventListener('resize', handleViewportResize);
 window.addEventListener('resize', handleViewportResize);
@@ -6252,6 +6264,9 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   currentSessionId = null;
   currentBookId = null;
   locationsReady = false;
+  lastReaderViewportSize = { width: 0, height: 0 };
+  pageTurnLock = false;
+  clearTimeout(pageTurnLockTimer);
   pendingHighlightCfi = null;
   pendingHighlightContext = null;
   highlightReturnFocus = null;
@@ -7115,14 +7130,10 @@ function highlightTtsElement(element, doc) {
 
         // If the element is to the right of the visible screen (next spread)
         if (screenLeft >= viewerRect.right - 20) {
-          if (rendition && rendition.next) {
-            rendition.next();
-          }
+          turnPage('next');
         } else if (screenRight <= viewerRect.left + 20) {
           // If the element is to the left of the visible screen (previous spread)
-          if (rendition && rendition.prev) {
-            rendition.prev();
-          }
+          turnPage('prev');
         }
       }
     }
@@ -7188,25 +7199,51 @@ function speakCurrentTtsItem() {
       } else {
         // Reached end of current chapter queue. Advance to the next chapter!
         if (rendition && rendition.next) {
-          rendition.next().then(() => {
+          // Route through page-turn mutex so TTS cannot race with user input (R-09)
+          if (pageTurnLock) { stopTts(); showToast('Finished reading aloud'); return; }
+          pageTurnLock = true;
+          clearTimeout(pageTurnLockTimer);
+          let ttsAdvancePromise;
+          try { ttsAdvancePromise = rendition.next(); } catch (_) {}
+          const unlockTts = () => { pageTurnLock = false; };
+          pageTurnLockTimer = setTimeout(unlockTts, 600);
+          (ttsAdvancePromise || Promise.resolve()).then(() => {
+            unlockTts();
+            clearTimeout(pageTurnLockTimer);
             setTimeout(() => {
-              const contents = (rendition.getContents && rendition.getContents()) || [];
-              let targetDoc = contents.length > 0 ? contents[0].document : null;
+              // Match active section via currentLocation() rather than blindly
+              // taking getContents()[0] which may be a preloaded prior section (R-11)
+              let targetDoc = null;
+              try {
+                const loc = rendition.currentLocation && rendition.currentLocation();
+                const activeHref = loc && loc.start && loc.start.href;
+                const contents = (rendition.getContents && rendition.getContents()) || [];
+                if (activeHref && contents.length > 0) {
+                  const activeBase = activeHref.split('#')[0].split('?')[0].split('/').pop();
+                  for (const c of contents) {
+                    const cHref = c.href || (c.section && c.section.href) || '';
+                    if (cHref.split('#')[0].split('?')[0].split('/').pop() === activeBase) {
+                      targetDoc = c.document;
+                      break;
+                    }
+                  }
+                }
+                if (!targetDoc && contents.length > 0) targetDoc = contents[0].document;
+              } catch (_) {}
               if (!targetDoc) {
                 const iframe = document.querySelector('#viewer iframe');
                 if (iframe) targetDoc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
               }
               if (targetDoc) {
                 const nextQueue = collectReadableItemsFromNode(null, targetDoc);
-                if (nextQueue.length > 0) {
-                  startTtsWithQueue(nextQueue, 0);
-                  return;
-                }
+                if (nextQueue.length > 0) { startTtsWithQueue(nextQueue, 0); return; }
               }
               stopTts();
               showToast('Finished reading aloud');
             }, 350);
           }).catch(() => {
+            unlockTts();
+            clearTimeout(pageTurnLockTimer);
             stopTts();
             showToast('Finished reading aloud');
           });
@@ -10297,7 +10334,7 @@ module.exports = router;
 
 ## File: `server/src/routes/sessions.js`
 
-*Relative Path: `server/src/routes/sessions.js` | Size: 5.0 KB | Total Lines: 153*
+*Relative Path: `server/src/routes/sessions.js` | Size: 5 KB | Total Lines: 153*
 
 ````javascript
 'use strict';
@@ -10458,7 +10495,7 @@ module.exports = router;
 
 ## File: `server/src/routes/settings.js`
 
-*Relative Path: `server/src/routes/settings.js` | Size: 2.0 KB | Total Lines: 70*
+*Relative Path: `server/src/routes/settings.js` | Size: 2 KB | Total Lines: 70*
 
 ````javascript
 'use strict';
@@ -10678,3 +10715,5 @@ router.delete('/api/users/:id', validateUuidParam('id'), requireAdmin, (req, res
 module.exports = router;
 module.exports.requireAdmin = requireAdmin;
 ````
+
+---
