@@ -1116,6 +1116,8 @@ let chromeHintShown = false;
 let chromeResizeTimer = null;
 let chromeResizeFrame = null;
 let lastReaderViewportSize = { width: 0, height: 0 };
+// Auto-hide timer for the Kindle-like 3-second chrome dismiss (R-13)
+let readerChromeTimer = null;
 
 // Page-turn serialization mutex — all rendition.next()/prev() calls route through
 // turnPage() to prevent overlapping navigations from swipe, tap, keyboard, and TTS (R-09)
@@ -1193,22 +1195,6 @@ function scheduleReaderResize(){
   chromeResizeTimer = setTimeout(resizeReaderViewport, 320);
 }
 
-// R-13: Keep --chrome-topbar-height in sync so viewer-wrap padding tracks the
-// actual rendered topbar height (including env(safe-area-inset-top) on iPhone).
-let topbarResizeObserver = null;
-function observeTopbarHeight() {
-  const topbar = document.getElementById('topbar');
-  const app = document.getElementById('app');
-  if (!topbar || !app || !window.ResizeObserver) return;
-  if (topbarResizeObserver) topbarResizeObserver.disconnect();
-  topbarResizeObserver = new ResizeObserver(() => {
-    // offsetHeight includes padding; gives accurate measure of rendered bar height
-    app.style.setProperty('--chrome-topbar-height', topbar.offsetHeight + 'px');
-  });
-  topbarResizeObserver.observe(topbar);
-  // Seed initial value immediately
-  app.style.setProperty('--chrome-topbar-height', topbar.offsetHeight + 'px');
-}
 
 function syncReaderChromeAccessibility(){
   const app = document.getElementById('app');
@@ -1263,14 +1249,13 @@ function exitReaderFullscreen(){
 function enterImmersiveReading(){
   const app = document.getElementById('app');
   if (!app || !document.body.classList.contains('reader-active')) return false;
+  clearTimeout(readerChromeTimer);
+  readerChromeTimer = null;
   app.classList.add('chrome-hidden');
   closeDrawers();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
-  // R-13: Chrome bars are now fixed overlays — toggling them never changes
-  // #viewer-wrap dimensions. A direct resize call suffices; no deferred
-  // double-rAF needed. The viewport stays constant through the animation.
-  resizeReaderViewport();
+  // R-13: Viewer dimensions are constant (overlays float on top) — no resize needed
   return true;
 }
 
@@ -1279,19 +1264,36 @@ function exitImmersiveReading(){
   if (!app) return false;
   app.classList.remove('chrome-hidden');
   exitReaderFullscreen();
-  closeDrawers();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
-  resizeReaderViewport(); // R-13: same reasoning as above
+  // R-13: Viewer dimensions unchanged — no resize needed
   return true;
 }
 
-function toggleMobileReadingFullscreen(){
-  toggleFullscreen();
+// Show chrome and start a 3-second auto-hide timer (Kindle-like UX, R-13).
+// Tapping center while chrome is visible calls enterImmersiveReading() directly.
+function showReaderChromeTemporarily(delay = 3000) {
+  const app = document.getElementById('app');
+  if (!app || !document.body.classList.contains('reader-active')) return;
+  app.classList.remove('chrome-hidden');
+  syncReaderChromeAccessibility();
+  updateFullscreenControlUI();
+  clearTimeout(readerChromeTimer);
+  readerChromeTimer = setTimeout(() => {
+    readerChromeTimer = null;
+    if (
+      document.body.classList.contains('reader-active') &&
+      !document.querySelector('.drawer[aria-hidden="false"]')
+    ) {
+      enterImmersiveReading();
+    }
+  }, delay);
 }
 
 function toggleReaderChrome(){
-  if (isImmersiveReading()) exitImmersiveReading();
+  // Tapping center: if currently immersive — show chrome briefly then auto-hide;
+  // if chrome is visible — hide it immediately and cancel any pending timer.
+  if (isImmersiveReading()) showReaderChromeTemporarily();
   else enterImmersiveReading();
 }
 
@@ -1544,6 +1546,8 @@ async function openBook(id){
   targetRendition.display(entry.lastLocationCfi || undefined).then(() => {
     if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     overlay.classList.add('hidden');
+    // R-13: Show chrome briefly then auto-hide (Kindle-like UX)
+    showReaderChromeTemporarily();
     tuneScrollContainer(targetRendition);
     updateBookmarkIcon();
     applySavedHighlights(entry, targetRendition);
@@ -2964,7 +2968,6 @@ window.addEventListener('beforeunload', () => {
 
 /* ---------------- Init ---------------- */
 async function boot(){
-  observeTopbarHeight(); // R-13: keep --chrome-topbar-height CSS var in sync
   const bootAccountVersion = accountVersion;
   if (!isActiveAccount(bootAccountVersion)) return;
   const emptyP = document.getElementById('empty-shelf-copy');
@@ -3052,6 +3055,9 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
     scrollFadeObserver.disconnect();
     scrollFadeObserver = null;
   }
+  clearTimeout(readerChromeTimer); // R-13
+  readerChromeTimer = null;
+
   // R-16: Revoke the Blob URL so the browser can reclaim the underlying EPUB data
   if (currentBlobUrl) {
     try { URL.revokeObjectURL(currentBlobUrl); } catch (_) {}

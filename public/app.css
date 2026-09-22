@@ -101,26 +101,26 @@ body.reader-active #viewer{ background:var(--reader-page-bg); }
   padding:0; opacity:0; border-width:0; pointer-events:none;
 }
 
-/* R-13: In reader mode, lift topbar and progress-bar out of document flow so
-   chrome show/hide never causes a viewport reflow that triggers EPUB.js resize.
-   They become fixed overlays that slide in/out with transform — zero layout impact. */
+/* R-13: In reader mode the chrome bars become translucent glass overlays so
+   the EPUB viewport is exactly the same size whether controls are visible or
+   not. No height-collapse, no viewer resize, no chapter-skip. */
 body.reader-active #topbar {
   position: fixed;
   top: 0; left: 0; right: 0;
-  z-index: 30;
-  /* switch from height-collapse to transform-slide */
-  transition: transform .25s ease, opacity .2s ease;
-  /* reset the height-collapse properties used in shelf mode */
+  z-index: 40;
+  transition: transform .22s ease, opacity .18s ease;
+  /* reset shelf-mode flex sizing */
   flex: initial; height: initial; min-height: initial; max-height: initial;
+  /* translucent glass — adapts automatically to light/sepia/dark/night themes */
+  border-bottom: none;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
 }
 body.reader-active #app.chrome-hidden #topbar {
-  transform: translateY(-100%);
+  transform: translateY(-110%);
   opacity: 0;
   pointer-events: none;
-  /* cancel the old height:0 collapse rules */
-  flex: initial; height: initial; min-height: initial; max-height: initial;
-  padding: calc(14px + env(safe-area-inset-top)) 22px 14px;
-  border-width: 1px;
 }
 #brand{
   background: none;
@@ -340,18 +340,8 @@ body.reader-active #app.chrome-hidden #topbar {
   background: var(--reader-page-bg, var(--paper));
   padding-bottom: env(safe-area-inset-bottom);
 }
-/* R-13: Compensate for fixed-position chrome overlays so EPUB content is not
-   obscured. The topbar (~56px base + safe-area) and progress-bar (~54px) sit on
-   top of the viewer; padding carves out the same amount of visual space. */
-body.reader-active #viewer-wrap {
-  padding-top: calc(var(--chrome-topbar-height, 56px) + env(safe-area-inset-top));
-  padding-bottom: calc(54px + env(safe-area-inset-bottom));
-}
-/* When chrome is hidden the overlays are off-screen — reclaim all padding */
-body.reader-active #app.chrome-hidden #viewer-wrap {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-}
+/* viewer-wrap fills all available space; its dimensions never change when
+   chrome is toggled — the overlays sit on top without stealing any height */
 #viewer{
   width:100%; height:100%;
 }
@@ -397,23 +387,25 @@ body.reader-active #app.chrome-hidden #viewer-wrap {
   padding-top:0; padding-bottom:0; opacity:0; border-width:0; pointer-events:none;
 }
 
-/* R-13: progress-bar as fixed overlay during reader mode */
+/* R-13: progress-bar as translucent glass overlay during reader mode */
 body.reader-active #progress-bar {
   position: fixed;
   bottom: 0; left: 0; right: 0;
-  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  padding: 10px 22px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
   border-bottom: none;
-  z-index: 30;
-  transition: transform .25s ease, opacity .2s ease;
-  flex: initial; height: initial; min-height: initial; max-height: initial;
+  z-index: 40;
+  transition: transform .22s ease, opacity .18s ease;
+  flex: initial; height: initial; min-height: initial; max-height: initial; overflow: visible;
+  /* translucent glass */
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
 }
 body.reader-active #app.chrome-hidden #progress-bar {
-  transform: translateY(100%);
+  transform: translateY(110%);
   opacity: 0;
   pointer-events: none;
-  flex: initial; height: initial; min-height: initial; max-height: initial;
-  padding-top: 10px; border-width: 1px;
 }
 /* A small tap hint that briefly appears the first time chrome is hidden */
 #chrome-hint{
@@ -1170,10 +1162,40 @@ input.shelf-select:focus{ width:220px; }
   }
 }
 
+/* R-13 mobile: lock the reader canvas to exactly the screen dimensions so
+   no ancestor layout can resize the EPUB viewport. The chrome overlays float
+   on top; viewer dimensions are constant whether controls are visible or not. */
+@media (max-width: 768px) {
+  body.reader-active #app {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  body.reader-active #reader-view {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  body.reader-active #viewer-wrap {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;         /* overlays float on top — no padding needed */
+  }
+  body.reader-active #viewer {
+    width: 100%;
+    height: 100%;
+  }
+}
+
 html.dark-shell{ color-scheme:dark; }
 html.dark-shell #reader-view,
 html.dark-shell #viewer-wrap{ background: var(--reader-page-bg, var(--paper)); }
-html.dark-shell #progress-bar{ background:var(--paper); }
+html.dark-shell #progress-bar{ /* in reader mode the translucent backdrop handles theming; only override in shelf mode */ }
 html.dark-shell .drawer,
 html.dark-shell .nav-zone{ box-shadow:0 5px 18px rgba(0,0,0,.34); }
 
