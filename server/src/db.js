@@ -28,7 +28,7 @@ db.pragma('busy_timeout = 5000');
 // process. PRAGMA user_version is the ordered migration marker; older builds
 // inferred state solely from columns, which made partial upgrades difficult to
 // reason about and could mutate data before a safety copy existed.
-const TARGET_SCHEMA_VERSION = 3;
+const TARGET_SCHEMA_VERSION = 4;
 const startingSchemaVersion = Number(db.pragma('user_version', { simple: true })) || 0;
 const existingTableCount = db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().n;
 if (existingTableCount > 0 && startingSchemaVersion < TARGET_SCHEMA_VERSION && fs.existsSync(DB_PATH)) {
@@ -94,6 +94,7 @@ db.exec(`
     filename TEXT NOT NULL,
     file_format TEXT DEFAULT 'epub',
     file_size INTEGER,
+    word_count INTEGER,
     file_hash TEXT,
     cover_path TEXT,
     cover_color TEXT,
@@ -141,7 +142,9 @@ db.exec(`
     started_at TEXT NOT NULL,
     ended_at TEXT,
     duration_seconds INTEGER,
-    client_id TEXT
+    client_id TEXT,
+    start_progress_percent REAL,
+    end_progress_percent REAL
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -192,8 +195,11 @@ function addColumnIfMissing(table, definition) {
 addColumnIfMissing('books', 'description TEXT');
 addColumnIfMissing('books', 'isbn TEXT');
 addColumnIfMissing('books', 'tags TEXT');
+addColumnIfMissing('books', 'word_count INTEGER');
 addColumnIfMissing('highlights', 'tags TEXT');
 addColumnIfMissing('reading_sessions', 'client_id TEXT');
+addColumnIfMissing('reading_sessions', 'start_progress_percent REAL');
+addColumnIfMissing('reading_sessions', 'end_progress_percent REAL');
 
 // Authentication sessions are server-side records as well as browser cookies.
 // Older databases did not record an expiry, so add and backfill the column

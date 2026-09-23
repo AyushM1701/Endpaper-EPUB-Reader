@@ -10,9 +10,10 @@ const router = express.Router();
 function closeSession(session, endedAt) {
   if (session.ended_at) return session;
   const duration = Math.max(0, Math.floor((new Date(endedAt).getTime() - new Date(session.started_at).getTime()) / 1000));
-  db.prepare(`UPDATE reading_sessions SET ended_at = ?, duration_seconds = ? WHERE id = ?`)
-    .run(endedAt, duration, session.id);
-  return { ...session, ended_at: endedAt, duration_seconds: duration };
+  const progress = db.prepare('SELECT progress_percent FROM user_books WHERE user_id = ? AND book_id = ?').get(session.user_id, session.book_id)?.progress_percent;
+  db.prepare(`UPDATE reading_sessions SET ended_at = ?, duration_seconds = ?, end_progress_percent = ? WHERE id = ?`)
+    .run(endedAt, duration, progress ?? null, session.id);
+  return { ...session, ended_at: endedAt, duration_seconds: duration, end_progress_percent: progress ?? null };
 }
 
 /**
@@ -39,8 +40,9 @@ router.post('/api/sessions/start', (req, res) => {
   db.transaction(() => {
     const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL AND user_id = ? AND COALESCE(client_id, ?) = ?').all(req.user_id, clientId, clientId);
     for (const session of openSessions) closeSession(session, started_at);
-    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at, client_id) VALUES (?, ?, ?, ?, ?)')
-      .run(id, req.user_id, book_id, started_at, clientId);
+    const progress = db.prepare('SELECT progress_percent FROM user_books WHERE user_id = ? AND book_id = ?').get(req.user_id, book_id)?.progress_percent;
+    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at, client_id, start_progress_percent) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, req.user_id, book_id, started_at, clientId, progress ?? 0);
   })();
 
   res.status(201).json({ id, book_id, started_at, client_id: clientId });
@@ -197,20 +199,24 @@ router.get('/api/stats', (req, res) => {
     .slice(-12)
     .map(([month, seconds]) => ({ month, seconds }));
   const paceRows = db.prepare(`
-    SELECT b.file_size, ub.progress_percent, COALESCE(SUM(rs.duration_seconds), 0) AS seconds
-    FROM user_books ub
-    JOIN books b ON b.id = ub.book_id
-    LEFT JOIN reading_sessions rs ON rs.book_id = ub.book_id AND rs.user_id = ub.user_id
-    WHERE ub.user_id = ? AND ub.progress_percent > 0
-    GROUP BY ub.book_id, b.file_size, ub.progress_percent
-    HAVING seconds >= 300
+    SELECT b.word_count, rs.start_progress_percent, rs.end_progress_percent, rs.duration_seconds
+    FROM reading_sessions rs JOIN books b ON b.id = rs.book_id
+    WHERE rs.user_id = ? AND rs.ended_at IS NOT NULL AND b.word_count > 0
+      AND rs.start_progress_percent IS NOT NULL AND rs.end_progress_percent IS NOT NULL
+      AND rs.duration_seconds >= 60
   `).all(req.user_id);
-  const paceSeconds = paceRows.reduce((sum, row) => sum + Number(row.seconds || 0), 0);
-  const estimatedBytesRead = paceRows.reduce((sum, row) => {
-    return sum + Number(row.file_size || 0) * Math.min(100, Math.max(0, Number(row.progress_percent || 0))) / 100;
-  }, 0);
-  const readingBytesPerMinute = paceSeconds > 0
-    ? Math.round(estimatedBytesRead / (paceSeconds / 60))
+  const paceSamples = paceRows.map(row => {
+    const delta = Math.max(0, Math.min(100, Number(row.end_progress_percent)) - Math.max(0, Number(row.start_progress_percent)));
+    const words = Number(row.word_count) * delta / 100;
+    const seconds = Number(row.duration_seconds);
+    const wpm = words / (seconds / 60);
+    // Discard stationary sessions and jumps whose implied pace is implausible.
+    return words >= 100 && wpm >= 60 && wpm <= 600 ? { words, seconds } : null;
+  }).filter(Boolean);
+  const paceSeconds = paceSamples.reduce((sum, row) => sum + row.seconds, 0);
+  const estimatedWordsRead = paceSamples.reduce((sum, row) => sum + row.words, 0);
+  const readingWordsPerMinute = paceSeconds >= 1800 && estimatedWordsRead >= 1000
+    ? Math.max(120, Math.min(450, Math.round(estimatedWordsRead / (paceSeconds / 60))))
     : null;
 
   res.json({
@@ -221,7 +227,7 @@ router.get('/api/stats', (req, res) => {
     longest_streak_days: longestStreak,
     previous_7_days: previousWeek,
     average_session_seconds: Math.round(averageSession || 0),
-    reading_bytes_per_minute: readingBytesPerMinute,
+    reading_words_per_minute: readingWordsPerMinute,
     daily,
     monthly,
     most_read: mostRead,

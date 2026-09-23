@@ -134,7 +134,7 @@ router.get('/api/books', (req, res) => {
   const dataSql = `
     SELECT b.id, b.title, b.author, b.series, b.series_index, b.description, b.isbn, b.tags, b.cover_path, b.cover_color,
            IFNULL(ub.status, 'unread') as status, ub.rating, IFNULL(ub.progress_percent, 0) as progress_percent, ub.last_location_cfi,
-           b.added_at, ub.last_opened_at, b.file_size
+           b.added_at, ub.last_opened_at, b.file_size, b.word_count
      FROM books b
     LEFT JOIN user_books ub ON b.id = ub.book_id AND ub.user_id = ?
     ${whereSql}
@@ -150,7 +150,7 @@ router.get('/api/books', (req, res) => {
     continueBooks = db.prepare(`
       SELECT b.id, b.title, b.author, b.series, b.series_index, b.description, b.isbn, b.tags, b.cover_path, b.cover_color,
              IFNULL(ub.status, 'unread') as status, ub.rating, IFNULL(ub.progress_percent, 0) as progress_percent, ub.last_location_cfi,
-             b.added_at, ub.last_opened_at, b.file_size
+             b.added_at, ub.last_opened_at, b.file_size, b.word_count
       FROM books b
       JOIN user_books ub ON b.id = ub.book_id AND ub.user_id = ?
       WHERE ub.last_opened_at IS NOT NULL AND ub.progress_percent > 0 AND ub.progress_percent < 98
@@ -245,6 +245,7 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
       filename,
       file_format: 'epub',
       file_size: fileSize,
+      word_count: Number.isFinite(meta.wordCount) ? meta.wordCount : null,
       file_hash: fileHash,
       cover_path: meta.coverPath || null,
       cover_color: coverColor,
@@ -257,9 +258,9 @@ router.post('/api/books', upload.single('file'), async (req, res) => {
     db.transaction(() => {
       db.prepare(`
         INSERT INTO books (id, title, author, series, series_index, description, isbn, tags, filename, file_format,
-                           file_size, file_hash, cover_path, cover_color)
+                           file_size, word_count, file_hash, cover_path, cover_color)
         VALUES (@id, @title, @author, @series, @series_index, @description, @isbn, @tags, @filename, @file_format,
-                @file_size, @file_hash, @cover_path, @cover_color)
+                @file_size, @word_count, @file_hash, @cover_path, @cover_color)
       `).run(book);
       db.prepare(`INSERT INTO user_books (user_id, book_id, status, progress_percent) VALUES (?, ?, 'unread', 0)`).run(req.user_id, id);
     })();

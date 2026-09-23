@@ -17,11 +17,15 @@ Use an admin account for yourself and add friends and family as readers from **A
 - **Private reading state** - Per-user progress, status, ratings, bookmarks, highlights, reading time, and settings.
 - **Full EPUB reader** - Paginated and scrolled layouts, customizable fonts, themes, spacing, gestures, text-to-speech controls, and in-book search.
 - **Library discovery** - Smart shelves, multi-book continue reading, metadata search, sorting, filters, bulk actions, and a global highlights notebook.
-- **Offline-first PWA** - Explicit per-book downloads, range-aware offline reading, queued reading-state sync, and safe deferred updates.
+- **Offline-capable PWA** - Explicit per-book downloads, range-aware offline reading, queued reading-state sync, and safe deferred updates. After an online sign-in on a device, a fresh offline launch can restore that account's encrypted library snapshot with the same passphrase and open downloaded books.
 - **Reading insights** - Goals, streaks, comparisons, monthly trends, favorite books, and personalized time estimates.
 - **Admin tools** - Create reader/admin accounts and maintain the shared catalogue.
 - **Backup and restore** - Admin-only backup exports and imports for the shared library and supported personal reading data.
 - **Responsive UI** - Works across phones, tablets, and desktop browsers.
+
+The Atkinson Hyperlegible and Work Sans reader fonts are bundled for offline use. Their redistribution terms are in `public/fonts/ATKINSON-OFL.txt` and `public/fonts/WORK-SANS-LICENSE.txt`.
+
+To prepare for a cold offline launch, sign in with your passphrase while online and download the books you want to read. When offline, open Endpaper and sign in with the same username and passphrase. The device stores an encrypted library snapshot; books that have not been downloaded still require the server. An account's snapshot reflects its last online sign-in and subsequent changes made on that device.
 
 ## Reliability and security
 
@@ -67,6 +71,18 @@ node src/lib/passphrase.js --set "<passphrase>" [username]
 The username defaults to `admin`. For a new username, this command creates an admin account; for an existing username, it resets that account's passphrase without changing its role and signs that account out on all devices.
 
 Once signed in as an admin, use **Admin Settings** to create reader accounts for the people sharing the library. `GET /healthz` is an unauthenticated health check for reverse proxies and uptime monitors.
+
+### Existing books and reading estimates
+
+New uploads receive a bounded spine-text word count. To fill counts for books uploaded before this feature, stop the server, back up `data/`, then run `npm run reindex-books` from `server/`. Books whose text exceeds the extraction limits keep an unknown count instead of a misleading partial estimate.
+
+Personalized reading pace uses progress gained during completed reading sessions. Sessions with no measurable progress or an implausible pace are excluded, and an estimate appears only after enough reading data has accumulated.
+
+### Tests
+
+From `server/`, run `npm test` for backend and source checks. For browser regressions, run `npx playwright install webkit` once, then `npm run test:e2e`. The WebKit suite starts an isolated server and covers the mobile shell in portrait and landscape, EPUB rendering, rapid touch swipes, failed seek recovery, image-only pages, offline pinning and deletion cleanup, Reader uploads, hostile metadata, mobile sheet focus, status normalization, and the desktop shelf. The cold offline restart regression runs in Chromium with `npx playwright test --browser chromium -g "cold offline restart"` because Playwright's WebKit offline reload currently fails inside its browser harness.
+
+When changing the app shell, bump the shared build version in `public/sw.js` and the asset query strings in `public/index.html` so a waiting worker keeps one coherent version of the shell.
 
 ## Backups
 

@@ -11,9 +11,9 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="app.css">
+<script src="/jszip.min.js?v=v15.0.0-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.0-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.0-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -39,7 +39,7 @@
           const announce = () => {
             if (!reg.waiting) return;
             window.__pendingServiceWorker = reg.waiting;
-            document.getElementById('update-banner')?.removeAttribute('hidden');
+            if (!document.body.classList.contains('reader-active')) document.getElementById('update-banner')?.removeAttribute('hidden');
           };
           announce();
           reg.addEventListener('updatefound', () => reg.installing?.addEventListener('statechange', () => {
@@ -140,6 +140,15 @@
 
   <!-- Library -->
   <div id="shelf-view">
+    <section id="mobile-shell" aria-label="Endpaper mobile library">
+      <main id="mobile-content" class="mobile-page"></main>
+      <nav id="mobile-tabbar" aria-label="Main navigation">
+        <button type="button" data-mobile-tab="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8v9h-6v-6H9v6H3z"/></svg><span>Home</span></button>
+        <button type="button" data-mobile-tab="library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h7a3 3 0 0 1 3 3v13a3 3 0 0 0-3-3H3zM21 4h-5a3 3 0 0 0-3 3v13a3 3 0 0 1 3-3h5z"/></svg><span>Library</span></button>
+        <button type="button" data-mobile-tab="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><span>Search</span></button>
+        <button type="button" data-mobile-tab="more"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>More</span></button>
+      </nav>
+    </section>
     <div id="shelf-empty">
       <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
         <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16.5A1.5 1.5 0 0 1 18.5 20H6.5A2.5 2.5 0 0 0 4 22.5"/>
@@ -221,6 +230,21 @@
 
   <!-- Reader -->
   <div id="reader-view">
+    <div id="mobile-reader-controls" aria-label="Reading controls">
+      <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
+      <span id="mobile-reader-title"></span>
+      <button type="button" id="mobile-reader-tools-button" aria-label="Reading tools" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <div id="mobile-reader-tools-menu" hidden>
+        <button type="button" data-reader-tool="toc">Contents</button>
+        <button type="button" data-reader-tool="search">Search book</button>
+        <button type="button" data-reader-tool="settings">Appearance</button>
+        <button type="button" data-reader-tool="bookmarks">Bookmarks &amp; highlights</button>
+        <button type="button" data-reader-tool="bookmark">Bookmark page</button>
+        <button type="button" data-reader-tool="tts">Read aloud</button>
+        <button type="button" data-reader-tool="fullscreen">Fullscreen</button>
+        <button type="button" data-reader-tool="share">Share book</button>
+      </div>
+    </div>
     <div id="progress-bar">
       <span id="progress-chapter"></span>
       <div id="progress-track">
@@ -245,10 +269,19 @@
       <button type="button" class="nav-zone right" title="Next page" aria-label="Next page" aria-controls="viewer" onclick="turnPage('next')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       </button>
-      <div id="loading-overlay" class="hidden">
+      <div id="loading-overlay" aria-live="polite" aria-busy="true">
         <div class="spinner"></div>
         <p id="loading-text">Opening book…</p>
       </div>
+      <section id="reader-error-state" hidden role="alert" aria-live="assertive">
+        <h2>Could not render this book</h2>
+        <p id="reader-error-message">Please try again.</p>
+        <div class="reader-error-actions">
+          <button type="button" onclick="retryReaderLoad(false)">Retry</button>
+          <button type="button" onclick="retryReaderLoad(true)">Open from beginning</button>
+          <button type="button" onclick="showShelf()">Back to library</button>
+        </div>
+      </section>
       <div id="chrome-hint">Tap the page to show controls again</div>
       <button type="button" id="fullscreen-exit-control" aria-label="Exit fullscreen reading" title="Exit fullscreen reading" onclick="exitImmersiveReading()">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4"/></svg>
@@ -359,17 +392,17 @@
 
       <div class="setting-group">
         <label class="setting-label" for="line-height-slider">Line spacing — <span id="line-height-val">1.5</span></label>
-        <input type="range" class="mini" id="line-height-slider" min="120" max="220" step="10" value="150" aria-valuetext="1.5 line spacing">
+        <input type="range" class="setting-slider mini" id="line-height-slider" min="120" max="220" step="10" value="150" aria-valuetext="1.5 line spacing">
       </div>
 
       <div class="setting-group">
         <label class="setting-label" for="margin-slider">Page width — <span id="margin-val">Medium</span></label>
-        <input type="range" class="mini" id="margin-slider" min="0" max="2" step="1" value="1" aria-valuetext="Medium page width">
+        <input type="range" class="setting-slider mini" id="margin-slider" min="0" max="2" step="1" value="1" aria-valuetext="Medium page width">
       </div>
 
       <div class="setting-group">
         <label class="setting-label" for="letter-spacing-slider">Letter spacing — <span id="letter-spacing-val">Normal</span></label>
-        <input type="range" class="mini" id="letter-spacing-slider" min="0" max="3" step="1" value="0" aria-valuetext="Normal letter spacing">
+        <input type="range" class="setting-slider mini" id="letter-spacing-slider" min="0" max="3" step="1" value="0" aria-valuetext="Normal letter spacing">
       </div>
       <div class="setting-group gesture-settings">
         <span class="setting-label">Gestures &amp; tap zones</span>
@@ -639,7 +672,8 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<script src="/app.js?v=v15.0.0-20260923"></script>
+<script src="/mobile.js?v=v15.0.0-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

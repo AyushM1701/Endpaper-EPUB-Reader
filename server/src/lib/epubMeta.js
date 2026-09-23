@@ -19,6 +19,8 @@ const MAX_ARCHIVE_ENTRIES = 10_000;
 const MAX_ARCHIVE_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;
 const MAX_COMPRESSION_RATIO = 200;
 const MAX_COVER_PIXELS = 40 * 1024 * 1024;
+const MAX_WORD_COUNT_BYTES = 20 * 1024 * 1024;
+const MAX_WORD_COUNT_DOCUMENT_BYTES = 2 * 1024 * 1024;
 
 function openZip(epubPath) {
   return new Promise((resolve, reject) => {
@@ -104,7 +106,7 @@ async function validateEpub(epubPath) {
 
 async function extractMeta(epubPath, coverId, coversDir) {
   const { zipfile, entries } = await openZip(epubPath);
-  const result = { title: '', author: '', series: null, seriesIndex: null, description: null, isbn: null, tags: null, coverPath: null };
+  const result = { title: '', author: '', series: null, seriesIndex: null, description: null, isbn: null, tags: null, coverPath: null, wordCount: null };
 
   try {
     const containerEntry = entries.get('meta-inf/container.xml');
@@ -132,6 +134,28 @@ async function extractMeta(epubPath, coverId, coversDir) {
     const items = Array.isArray(manifest.item) ? manifest.item : (manifest.item ? [manifest.item] : []);
 
     const opfDir = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
+
+    // Count only XHTML/HTML spine documents. This deliberately has hard byte
+    // limits so malformed archives cannot turn metadata extraction into an
+    // unbounded memory operation.
+    const spine = pkg.spine || {};
+    const spineItems = Array.isArray(spine.itemref) ? spine.itemref : (spine.itemref ? [spine.itemref] : []);
+    let countedBytes = 0;
+    let words = 0;
+    let wordCountIncomplete = false;
+    for (const spineItem of spineItems) {
+      const manifestItem = items.find(item => item['@_id'] === spineItem['@_idref']);
+      const mediaType = String(manifestItem && manifestItem['@_media-type'] || '').toLowerCase();
+      if (!manifestItem || !/(xhtml|html|xml)/.test(mediaType)) continue;
+      const entry = entries.get((opfDir + decodeURI(manifestItem['@_href'] || '')).toLowerCase());
+      if (!entry || entry.uncompressedSize > MAX_WORD_COUNT_DOCUMENT_BYTES || countedBytes + entry.uncompressedSize > MAX_WORD_COUNT_BYTES) { wordCountIncomplete = true; continue; }
+      const source = (await readEntry(zipfile, entry, MAX_WORD_COUNT_DOCUMENT_BYTES)).toString('utf8');
+      countedBytes += Buffer.byteLength(source);
+      const plain = source.replace(/<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<[^>]+>/gi, ' ').replace(/&(?:nbsp|amp|quot|#39|lt|gt);/gi, ' ');
+      const matches = plain.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu);
+      words += matches ? matches.length : 0;
+    }
+    result.wordCount = wordCountIncomplete ? null : (words || null);
 
     const dcTitle = metadata['dc:title'];
     if (dcTitle) {

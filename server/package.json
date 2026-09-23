@@ -10,7 +10,9 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "set-passphrase": "node src/lib/passphrase.js --set",
-    "test": "node --test"
+    "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
+    "reindex-books": "node src/lib/reindexWordCounts.js"
   },
   "dependencies": {
     "archiver": "^8.0.0",
@@ -25,5 +27,8 @@
     "pino-http": "^11.0.0",
     "sharp": "^0.35.4",
     "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

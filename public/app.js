@@ -20,9 +20,6 @@ const epubBlobRequests = new Map();  // key → Promise<Blob>
 const epubLocationCache = new Map();
 let epubBlobCacheBytes = 0;
 
-// Blob URL for the currently open book; revoked in discardReaderState (R-16)
-let currentBlobUrl = null;
-
 function readerAssetCacheKey(bookId, version = accountVersion) {
   return `${version}:${bookId}`;
 }
@@ -139,8 +136,11 @@ const api = {
   async getBookFile(id, opts = {}) {
     const requestAccountVersion = opts.expectedAccountVersion == null ? accountVersion : opts.expectedAccountVersion;
     const key = readerAssetCacheKey(id, requestAccountVersion);
-    // R-16: Return Blob from cache — EPUB.js will receive a blob:// URL, no .slice() copy needed
-    const cached = getCachedEpubBlob(key);
+    // On touch devices, the active archive is also expanded into an ArrayBuffer
+    // for EPUB.js. Avoid retaining a second full in-memory copy; the service
+    // worker remains the offline/reopen cache.
+    const keepInMemory = !window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    const cached = keepInMemory ? getCachedEpubBlob(key) : null;
     if (cached) return cached;
     if (opts.signal && opts.signal.aborted) {
       const error = new Error('The user aborted a request.');
@@ -153,7 +153,7 @@ const api = {
       ...opts,
       headers: {},  // no Content-Type for binary
     }).then(res => res.blob()).then(blob => {
-      if (requestAccountVersion === accountVersion && currentUser) rememberEpubBlob(key, blob);
+      if (keepInMemory && requestAccountVersion === accountVersion && currentUser) rememberEpubBlob(key, blob);
       return blob;
     }).finally(() => {
       if (epubBlobRequests.get(key) === pending) epubBlobRequests.delete(key);
@@ -331,7 +331,8 @@ let activeReaderRequest = null;
 let isDraggingProgressSlider = false;
 let seekLockUntil = 0;
 let lastReaderInteractionAt = 0;
-let personalReadingBytesPerMinute = 4200;
+const DEFAULT_READING_WORDS_PER_MINUTE = 238;
+let personalReadingWordsPerMinute = DEFAULT_READING_WORDS_PER_MINUTE;
 const CLIENT_ID = sessionStorage.getItem('endpaper_client_id') || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 sessionStorage.setItem('endpaper_client_id', CLIENT_ID);
 
@@ -424,9 +425,14 @@ function setCurrentUser(session) {
     : null;
   if (userIdentity(currentUser) !== userIdentity(nextUser)) {
     accountVersion += 1;
+    clearTimeout(offlineSnapshotTimer);
+    offlineSnapshotKey = null;
+    offlineSnapshotSalt = null;
+    offlineSession = false;
     // Never leave one family member's active rendition or private metadata
     // visible while the next account is being opened.
     discardReaderState({ clearLibrary: true, resetPreferences: true });
+    window.resetMobileState?.();
   }
   currentUser = nextUser;
   updateRoleAwareControls();
@@ -482,7 +488,7 @@ const THEMES = {
 // their authored fills while Dark and Night pages remain readable.
 const EPUB_TEXT_SELECTORS = 'body, body p, body div, body span, body li, body dd, body dt, body blockquote, body figcaption, body caption, body td, body th, body h1, body h2, body h3, body h4, body h5, body h6, body em, body strong, body b, body i, body small, body cite, body q, body code, body pre, body [style*="color"]';
 
-const MARGIN_LABELS = ['Narrow', 'Medium', 'Wide'];
+const MARGIN_LABELS = ['Wide', 'Medium', 'Narrow'];
 const MARGIN_PADDING = ['4%', '10%', '18%'];
 const SPACING_LABELS = ['Normal', 'Relaxed', 'Loose', 'Airy'];
 const SPACING_VALUES = ['normal', '0.5px', '1px', '1.6px'];
@@ -501,6 +507,84 @@ function normalizeSettings() {
 }
 
 /* ---------------- Auth gate ---------------- */
+const OFFLINE_SNAPSHOT_PREFIX = 'endpaper-offline-snapshot:';
+let offlineSnapshotKey = null;
+let offlineSnapshotSalt = null;
+let offlineSession = false;
+let offlineSnapshotTimer = null;
+
+function offlineSnapshotStorageKey(username) {
+  return OFFLINE_SNAPSHOT_PREFIX + encodeURIComponent(username.toLocaleLowerCase());
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  return Uint8Array.from(atob(value), character => character.charCodeAt(0));
+}
+
+async function deriveOfflineKey(passphrase, salt) {
+  const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 150_000, hash: 'SHA-256' }, material,
+    { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
+async function persistOfflineSnapshot() {
+  if (!offlineSnapshotKey || !offlineSnapshotSalt || !currentUser?.username) return;
+  const snapshot = {
+    version: 1, username: currentUser.username, isAdmin: currentUser.isAdmin,
+    library, collections: allCollections, settings,
+  };
+  const plaintext = new TextEncoder().encode(JSON.stringify(snapshot));
+  if (plaintext.length > 3_000_000) return;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, offlineSnapshotKey, plaintext));
+  localStorage.setItem(offlineSnapshotStorageKey(currentUser.username), JSON.stringify({
+    salt: bytesToBase64(offlineSnapshotSalt), iv: bytesToBase64(iv), data: bytesToBase64(ciphertext),
+  }));
+}
+
+function scheduleOfflineSnapshot() {
+  if (!offlineSnapshotKey) return;
+  clearTimeout(offlineSnapshotTimer);
+  offlineSnapshotTimer = setTimeout(() => persistOfflineSnapshot().catch(error => console.warn('Could not save offline library:', error)), 800);
+}
+
+async function initializeOfflineSnapshot(passphrase) {
+  if (!crypto?.subtle || !currentUser?.username) return;
+  offlineSnapshotSalt = crypto.getRandomValues(new Uint8Array(16));
+  offlineSnapshotKey = await deriveOfflineKey(passphrase, offlineSnapshotSalt);
+  await persistOfflineSnapshot();
+}
+
+async function unlockOfflineSnapshot(username, passphrase) {
+  if (!crypto?.subtle) return false;
+  const raw = localStorage.getItem(offlineSnapshotStorageKey(username));
+  if (!raw) return false;
+  try {
+    const record = JSON.parse(raw);
+    const salt = base64ToBytes(record.salt);
+    const key = await deriveOfflineKey(passphrase, salt);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBytes(record.iv) }, key, base64ToBytes(record.data));
+    const snapshot = JSON.parse(new TextDecoder().decode(plaintext));
+    if (snapshot.version !== 1 || snapshot.username.toLocaleLowerCase() !== username.toLocaleLowerCase() || !Array.isArray(snapshot.library)) return false;
+    setCurrentUser({ ok: true, username: snapshot.username, is_admin: snapshot.isAdmin });
+    offlineSnapshotKey = key; offlineSnapshotSalt = salt; offlineSession = true;
+    library = snapshot.library;
+    allCollections = Array.isArray(snapshot.collections) ? snapshot.collections : [];
+    Object.assign(settings, DEFAULT_READER_SETTINGS, snapshot.settings || {});
+    normalizeSettings();
+    renderFontOptions(); updateSettingsUI(); renderShelf();
+    hideLoginGate();
+    showToast('Offline library unlocked. Pinned books are available to read.');
+    return true;
+  } catch (_) { return false; }
+}
+
 function showLoginGate() {
   document.getElementById('login-gate').classList.remove('hidden');
 }
@@ -540,14 +624,18 @@ async function handleLogin(e) {
         errEl.textContent = 'Your session could not be started. Please try again.';
       } else {
         hideLoginGate();
-        boot();
+        const loaded = await boot();
+        if (loaded) await initializeOfflineSnapshot(passphrase).catch(error => console.warn('Could not prepare offline library:', error));
       }
     } else {
       const data = await res.json().catch(() => ({}));
-      errEl.textContent = data.error || 'Incorrect passphrase.';
+      if (res.status === 503 && data.error === 'Offline' && await unlockOfflineSnapshot(username, passphrase)) {
+        userIn.value = ''; passIn.value = '';
+      } else errEl.textContent = data.error || 'Incorrect passphrase.';
     }
   } catch (err) {
-    errEl.textContent = 'Connection error. Please try again.';
+    if (await unlockOfflineSnapshot(username, passphrase)) { userIn.value = ''; passIn.value = ''; }
+    else errEl.textContent = 'Connection error. Please try again.';
   }
 
   btn.disabled = false;
@@ -572,6 +660,7 @@ async function logout() {
     currentSessionId = null;
   }
   setCurrentUser(null);
+  personalReadingWordsPerMinute = DEFAULT_READING_WORDS_PER_MINUTE;
   if (navigator.serviceWorker && navigator.serviceWorker.controller) {
     navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_RUNTIME_CACHE' });
   }
@@ -592,7 +681,7 @@ function renderFontOptions(){
     el.style.fontFamily = f.css;
     el.setAttribute('role', 'radio');
     el.setAttribute('aria-checked', String(selected));
-    el.innerHTML = `<span>${f.name}</span><span class="check">✓</span>`;
+    el.innerHTML = `<span>${f.name}</span><span class="check" aria-hidden="true">✓</span>`;
     el.onclick = () => { settings.font = f.name; renderFontOptions(); applyTheme(); };
     wrap.appendChild(el);
   });
@@ -662,6 +751,7 @@ async function handleFiles(fileList){
         status: bookData.status || 'unread',
         lastLocationCfi: bookData.last_location_cfi,
         fileSize: Number(bookData.file_size) || file.size || 0,
+        wordCount: Number(bookData.word_count) || 0,
         addedAt: bookData.added_at ? new Date(bookData.added_at).getTime() : Date.now(),
         lastOpenedAt: bookData.last_opened_at ? new Date(bookData.last_opened_at).getTime() : null,
         bookmarks: [],
@@ -688,10 +778,14 @@ async function handleFiles(fileList){
     }
   }
   progressEl.classList.remove('show');
+  if (uploaded) await persistOfflineSnapshot().catch(error => console.warn('Could not save offline library:', error));
   if (uploaded === 1) showToast('Book added to your library.');
   else if (uploaded > 1) showToast(`${uploaded} books added to your library.`);
   document.getElementById('file-input').value = '';
-  if (epubFiles.length === 1 && uploaded === 1 && lastAddedBookId) openBook(lastAddedBookId);
+  if (epubFiles.length === 1 && uploaded === 1 && lastAddedBookId) {
+    if (window.isMobileShell?.()) window.mobileNavigate('book', lastAddedBookId);
+    else openBook(lastAddedBookId);
+  }
 }
 
 /* ---------------- Shelf rendering ---------------- */
@@ -751,6 +845,7 @@ function renderRatingHtml(bookId, currentRating) {
 
 async function setBookRating(bookId, rating) {
   const entry = library.find(b => b.id === bookId);
+  const previousRating = entry?.rating;
   if (entry) entry.rating = rating;
   renderShelf();
   if (activeOrganizeBookId === bookId) {
@@ -763,128 +858,10 @@ async function setBookRating(bookId, rating) {
     await api.updateBook(bookId, { rating });
     showToast(rating ? `Rated ${rating} star${rating > 1 ? 's' : ''}.` : 'Rating cleared.');
   } catch (err) {
+    if (entry) { entry.rating = previousRating; renderShelf(); }
     console.error('Rating update failed:', err);
     showToast(`Could not update rating: ${err.message}`);
   }
-}
-
-function renderContinueCard(){
-  const card = document.getElementById('continue-card');
-  const candidates = library.filter(b => b.lastOpenedAt);
-  if (candidates.length === 0){ card.style.display = 'none'; return; }
-  const b = candidates.sort((x, y) => y.lastOpenedAt - x.lastOpenedAt)[0];
-  const coverStyle = b.coverPath
-    ? `background-image:url('/api/books/${b.id}/cover'); background-size:cover; background-position:center;`
-    : `background:${b.coverColor};`;
-  const seriesInfo = b.series ? `<div class="continue-series">${escapeHtml(formatSeriesText(b.series, b.seriesIndex))}</div>` : '';
-  const ratingWidget = `<div style="margin-top:6px;">${renderRatingHtml(b.id, b.rating)}</div>`;
-  card.innerHTML = `
-    <div class="spine spine-book" style="${coverStyle}">${b.coverPath ? '' : `<span class="spine-title">${escapeHtml(b.name)}</span>`}</div>
-    <div id="continue-info">
-      <div class="kicker">Continue reading</div>
-      <h3>${escapeHtml(b.name)}</h3>
-      ${seriesInfo}
-      <div class="author">${escapeHtml(b.author || 'Unknown author')}</div>
-      <div class="progress-text">${b.progress}% through the book</div>
-      <div class="book-progress-bar" style="margin-top:8px;"><div class="book-progress-fill" style="width:${b.progress}%"></div></div>
-      ${ratingWidget}
-    </div>
-  `;
-  card.style.display = 'flex';
-  card.onclick = () => openBook(b.id);
-  scheduleBookWarmup(b);
-}
-
-function renderShelf(){
-  const shelf = document.getElementById('shelf');
-  const empty = document.getElementById('shelf-empty');
-  const header = document.getElementById('shelf-header');
-  shelf.innerHTML = '';
-  renderContinueCard();
-  if (library.length === 0){
-    empty.style.display = 'block';
-    header.style.display = 'none';
-    document.getElementById('continue-card').style.display = 'none';
-    return;
-  }
-  empty.style.display = 'none';
-  header.style.display = 'flex';
-  document.getElementById('shelf-count').textContent = library.length + (library.length === 1 ? ' book' : ' books');
-
-  // Search, filtering, and sorting
-  const searchQuery = document.getElementById('shelf-search').value.trim().toLocaleLowerCase();
-  const filterVal = document.getElementById('shelf-filter').value;
-  let filtered = searchQuery
-    ? library.filter(b => `${b.name || ''} ${b.author || ''}`.toLocaleLowerCase().includes(searchQuery))
-    : library;
-  if (filterVal === 'unread') filtered = filtered.filter(b => b.progress === 0);
-  // R-22: threshold raised from 95 to 98 — avoids premature finished marking on
-  // the second-to-last chapter (R-21 formula now makes last entry reach 100% only
-  // at its actual end, so 98% is a safe auto-finish trigger)
-  else if (filterVal === 'finished') filtered = filtered.filter(b => b.progress >= 98);
-  else if (filterVal.startsWith('col_')) {
-    const colId = filterVal.substring(4);
-    const col = allCollections.find(c => c.id === colId);
-    if (col) filtered = filtered.filter(b => col.book_ids.includes(b.id));
-  }
-
-  // Sorting
-  const sortVal = document.getElementById('shelf-sort').value;
-  filtered = [...filtered].sort((a, b) => {
-    if (sortVal === 'recent') return (b.addedAt || 0) - (a.addedAt || 0);
-    if (sortVal === 'opened') return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0);
-    if (sortVal === 'title') return a.name.localeCompare(b.name);
-    if (sortVal === 'author') return (a.author || '').localeCompare(b.author || '');
-    if (sortVal === 'series') {
-      const aSeries = a.series || '';
-      const bSeries = b.series || '';
-      if (!aSeries && bSeries) return 1;
-      if (aSeries && !bSeries) return -1;
-      const sComp = aSeries.localeCompare(bSeries);
-      if (sComp !== 0) return sComp;
-      const idxComp = (a.seriesIndex || 0) - (b.seriesIndex || 0);
-      if (idxComp !== 0) return idxComp;
-      return a.name.localeCompare(b.name);
-    }
-    if (sortVal === 'progress') return b.progress - a.progress;
-    return 0;
-  });
-
-  filtered.forEach(b => {
-    const card = document.createElement('div');
-    card.className = 'book-card';
-    const coverStyle = b.coverPath
-      ? `background-image:url('/api/books/${b.id}/cover'); background-size:cover; background-position:center;`
-      : `background:${b.coverColor};`;
-    const adminActions = isCurrentUserAdmin() ? `
-      <div class="spine-actions">
-        <button type="button" class="spine-action-btn" title="Organize shared collections" onclick="event.stopPropagation(); openBookCollectionsModal('${b.id}')">Organize</button>
-        <button type="button" class="spine-action-btn" title="Remove from shared library" onclick="event.stopPropagation(); removeBook('${b.id}')">Remove</button>
-      </div>
-    ` : '';
-    const progressBadge = b.progress > 0
-      ? `<span class="spine-badge">${b.progress}%</span>`
-      : '';
-    const seriesBadge = b.series ? `<div class="series-tag">${escapeHtml(formatSeriesText(b.series, b.seriesIndex))}</div>` : '';
-    const ratingHtml = `<div class="shelf-rating-widget">${renderRatingHtml(b.id, b.rating)}</div>`;
-    card.innerHTML = `
-      <div class="spine" style="${coverStyle}">
-        ${b.coverPath ? '' : `<span class="spine-title">${escapeHtml(b.name)}</span>`}
-        ${b.coverPath ? '' : `<span class="spine-author">${escapeHtml(b.author || '')}</span>`}
-        ${progressBadge}
-        ${adminActions}
-      </div>
-      <div class="book-meta-under">
-        ${seriesBadge}
-        <div class="title" title="${escapeHtml(b.name)}">${escapeHtml(b.name)}</div>
-        <div class="author">${escapeHtml(b.author || 'Unknown')}</div>
-        ${ratingHtml}
-        <div class="book-progress-bar"><div class="book-progress-fill" style="width:${b.progress}%"></div></div>
-      </div>
-    `;
-    card.onclick = () => openBook(b.id);
-    shelf.appendChild(card);
-  });
 }
 
 async function removeBook(id){
@@ -900,7 +877,9 @@ async function removeBook(id){
   if (!confirmed) return;
   try {
     await api.deleteBook(id);
+    await purgeOfflineBook(id).catch(error => console.warn('Offline cleanup failed:', error));
     library = library.filter(b => b.id !== id);
+    await persistOfflineSnapshot().catch(error => console.warn('Could not update offline library:', error));
     renderShelf();
     showToast('Book removed.');
   } catch(e) {
@@ -921,6 +900,7 @@ async function showShelf(){
   const saveAccountVersion = accountVersion;
   // Tear down first, so a late EPUB/network callback cannot revive this reader.
   discardReaderState();
+  if (window.__pendingServiceWorker) document.getElementById('update-banner').hidden = false;
   renderShelf();
   updateRoleAwareControls();
 
@@ -966,25 +946,42 @@ function setLayout(mode){
   if (resumeCfi) entry.lastLocationCfi = resumeCfi;
 
   hideHighlightPopup();
+  pageTurnGeneration++;
+  pageTurnLock = false;
+  readerNavigationReady = false;
+  readerNavigationTail = Promise.resolve();
   rendition.destroy();
+  rendition = null;
   document.getElementById('viewer').innerHTML = '';
   document.getElementById('reader-view').classList.toggle('scrolled', mode === 'scrolled');
 
-  rendition = book.renderTo('viewer', renditionOptions());
+  try {
+    rendition = book.renderTo('viewer', renditionOptions());
+  } catch (error) {
+    console.error('Could not create reading layout:', error);
+    recoverFromReaderFailure(request, 'The new reading layout could not be created. Retry, or open from the beginning.', targetBook, null);
+    return;
+  }
   const targetRendition = rendition;
   registerThemes();
   registerSwipeGestures();
   applyTheme();
   bindRenditionInteractions(entry, targetRendition, request);
   bindRelocated(entry, targetRendition, targetBook, request);
-  targetRendition.display(resumeCfi || undefined).then(() => {
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-    tuneScrollContainer(targetRendition);
-    applySavedHighlights(entry, targetRendition);
-    updateBookmarkIcon();
-  }).catch(err => {
-    if (isReaderRequestCurrent(request, targetBook, targetRendition)) console.error('Could not switch reading layout:', err);
-  });
+  (async () => {
+    try {
+      await displayReaderSafely(entry, targetBook, targetRendition, request, resumeCfi);
+      if (isReaderRequestCurrent(request, targetBook, targetRendition)) readerNavigationReady = true;
+      tuneScrollContainer(targetRendition);
+      applySavedHighlights(entry, targetRendition);
+      updateBookmarkIcon();
+    } catch (error) {
+      if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
+        console.error('Could not switch reading layout:', error);
+        await recoverFromReaderFailure(request, 'The new reading layout could not be rendered. Retry, or open from the beginning.', targetBook, targetRendition);
+      }
+    }
+  })();
   updateSettingsUI();
 }
 
@@ -1000,6 +997,12 @@ function applyReaderContentStyles(contents) {
   const theme = THEMES[settings.theme] || THEMES.light;
   const isScrolled = settings.layout === 'scrolled';
   style.textContent = `
+    @font-face { font-family: 'Atkinson Hyperlegible'; src: url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2'); font-style: normal; font-weight: 400; }
+    @font-face { font-family: 'Atkinson Hyperlegible'; src: url('/fonts/AtkinsonHyperlegible-Bold.woff2') format('woff2'); font-style: normal; font-weight: 700; }
+    @font-face { font-family: 'Atkinson Hyperlegible'; src: url('/fonts/AtkinsonHyperlegible-Italic.woff2') format('woff2'); font-style: italic; font-weight: 400; }
+    @font-face { font-family: 'Atkinson Hyperlegible'; src: url('/fonts/AtkinsonHyperlegible-BoldItalic.woff2') format('woff2'); font-style: italic; font-weight: 700; }
+    @font-face { font-family: 'Work Sans'; src: url('/fonts/WorkSans-Regular.woff2') format('woff2'); font-style: normal; font-weight: 400; }
+    @font-face { font-family: 'Work Sans'; src: url('/fonts/WorkSans-Bold.woff2') format('woff2'); font-style: normal; font-weight: 700; }
     @media (max-width: 699px) {
       p, li, blockquote { text-align: start !important; hyphens: auto; -webkit-hyphens: auto; }
     }
@@ -1171,21 +1174,59 @@ let readerChromeTimer = null;
 // Page-turn serialization mutex — all rendition.next()/prev() calls route through
 // turnPage() to prevent overlapping navigations from swipe, tap, keyboard, and TTS (R-09)
 let pageTurnLock = false;
-let pageTurnLockTimer = null;
+let pageTurnGeneration = 0;
+let readerNavigationTail = Promise.resolve();
+let readerNavigationReady = false;
+
+function navigateReader(target, relative = false) {
+  if (!rendition || !readerNavigationReady || (relative && pageTurnLock)) return Promise.resolve(false);
+  if (relative) pageTurnLock = true;
+  const generation = pageTurnGeneration;
+  const targetRendition = rendition;
+  const targetBook = book;
+  const request = activeReaderRequest;
+  const run = async () => {
+    if (generation !== pageTurnGeneration || !isReaderRequestCurrent(request, targetBook, targetRendition)) {
+      if (relative && generation === pageTurnGeneration) pageTurnLock = false;
+      return false;
+    }
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('Page navigation took too long.');
+        error.code = 'READER_TIMEOUT';
+        reject(error);
+      }, 15000);
+    });
+    try {
+      const navigation = Promise.resolve().then(() => relative
+        ? (target === 'next' ? targetRendition.next() : targetRendition.prev())
+        : targetRendition.display(target));
+      // A timed-out rendition is destroyed; it must never receive a second call.
+      await Promise.race([navigation, timeout]);
+      return isReaderRequestCurrent(request, targetBook, targetRendition);
+    } catch (error) {
+      if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
+        if (error?.code === 'READER_TIMEOUT') {
+          await recoverFromReaderFailure(request, 'The page could not be opened. Retry, or open from the beginning.', targetBook, targetRendition);
+        } else {
+          console.error('Could not navigate reader:', error);
+          showToast('Could not open that location. Please try again.');
+        }
+      }
+      return false;
+    } finally {
+      clearTimeout(timer);
+      if (relative && generation === pageTurnGeneration) pageTurnLock = false;
+    }
+  };
+  const result = readerNavigationTail.then(run, run);
+  readerNavigationTail = result.then(() => {}, () => {});
+  return result;
+}
 
 function turnPage(direction) {
-  if (!rendition || pageTurnLock) return;
-  pageTurnLock = true;
-  clearTimeout(pageTurnLockTimer);
-  let promise;
-  try { promise = direction === 'next' ? rendition.next() : rendition.prev(); } catch (_) {}
-  const unlock = () => { pageTurnLock = false; };
-  if (promise && typeof promise.then === 'function') {
-    pageTurnLockTimer = setTimeout(unlock, 600);
-    promise.then(unlock, unlock);
-  } else {
-    pageTurnLockTimer = setTimeout(unlock, 600);
-  }
+  return navigateReader(direction, true);
 }
 
 /**
@@ -1255,7 +1296,7 @@ function scheduleReaderResize(){
 function syncReaderChromeAccessibility(){
   const app = document.getElementById('app');
   const hidden = app.classList.contains('chrome-hidden');
-  ['topbar', 'progress-bar'].forEach(id => {
+  ['topbar', 'progress-bar', 'mobile-reader-controls'].forEach(id => {
     const element = document.getElementById(id);
     if (!element) return;
     element.setAttribute('aria-hidden', String(hidden));
@@ -1265,13 +1306,15 @@ function syncReaderChromeAccessibility(){
 
 function updateFullscreenControlUI(){
   const desktopBtn = document.getElementById('fullscreen-btn');
+  const exitControl = document.getElementById('fullscreen-exit-control');
   const app = document.getElementById('app');
   if (!app) return;
-  const immersive = isImmersiveReading() || Boolean(readerFullscreenElement());
+  const fullscreen = Boolean(readerFullscreenElement());
+  if (exitControl) exitControl.hidden = !fullscreen;
   if (desktopBtn) {
-    desktopBtn.setAttribute('aria-pressed', String(immersive));
-    desktopBtn.setAttribute('aria-label', immersive ? 'Exit fullscreen' : 'Fullscreen');
-    desktopBtn.title = immersive ? 'Exit fullscreen' : 'Fullscreen';
+    desktopBtn.setAttribute('aria-pressed', String(fullscreen));
+    desktopBtn.setAttribute('aria-label', fullscreen ? 'Exit fullscreen' : 'Fullscreen');
+    desktopBtn.title = fullscreen ? 'Exit fullscreen' : 'Fullscreen';
   }
 }
 
@@ -1308,6 +1351,7 @@ function enterImmersiveReading(){
   clearTimeout(readerChromeTimer);
   readerChromeTimer = null;
   app.classList.add('chrome-hidden');
+  window.closeMobileReaderTools?.();
   closeDrawers();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
@@ -1328,6 +1372,18 @@ function exitImmersiveReading(){
 
 // Show chrome and start a 3-second auto-hide timer (Kindle-like UX, R-13).
 // Tapping center while chrome is visible calls enterImmersiveReading() directly.
+function isReaderInteractionOpen() {
+  return Boolean(
+    document.querySelector('.drawer[aria-hidden="false"]') ||
+    !document.getElementById('reader-more-menu')?.hidden ||
+    !document.getElementById('mobile-reader-tools-menu')?.hidden ||
+    document.getElementById('highlight-popup')?.classList.contains('show') ||
+    !document.getElementById('dict-tooltip')?.classList.contains('hidden') ||
+    !document.getElementById('tts-player-bar')?.classList.contains('hidden') ||
+    pendingHighlightContext
+  );
+}
+
 function showReaderChromeTemporarily(delay = 3000) {
   const app = document.getElementById('app');
   if (!app || !document.body.classList.contains('reader-active')) return;
@@ -1339,7 +1395,7 @@ function showReaderChromeTemporarily(delay = 3000) {
     readerChromeTimer = null;
     if (
       document.body.classList.contains('reader-active') &&
-      !document.querySelector('.drawer[aria-hidden="false"]')
+      !isReaderInteractionOpen()
     ) {
       enterImmersiveReading();
     }
@@ -1436,8 +1492,93 @@ function isAbortError(error) {
 async function recoverFromReaderFailure(request, message, targetBook = null, targetRendition = null){
   const current = isReaderRequestCurrent(request, targetBook, targetRendition);
   if (!current) return;
+  // A timed-out rendition may still resolve later. Destroy it and invalidate
+  // the global references before presenting recovery actions.
+  try { targetRendition?.destroy(); } catch (_) {}
+  try { targetBook?.destroy(); } catch (_) {}
+  if (rendition === targetRendition) rendition = null;
+  if (book === targetBook) book = null;
+  const overlay = document.getElementById('loading-overlay');
+  overlay.classList.remove('show');
+  overlay.setAttribute('aria-busy', 'false');
+  document.getElementById('reader-error-message').textContent = message;
+  document.getElementById('reader-error-state').hidden = false;
+}
+
+async function retryReaderLoad(fromBeginning = false) {
+  const id = currentBookId;
+  const entry = library.find(item => item.id === id);
+  if (!id || !entry) return showShelf();
+  if (fromBeginning) entry.lastLocationCfi = null;
   await showShelf();
-  if (isActiveAccount(request.accountVersion)) showToast(message);
+  return openBook(id);
+}
+window.retryReaderLoad = retryReaderLoad;
+
+function displayWithWatchdog(targetRendition, cfi, ms = 10000) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error('The reader took too long to render.');
+      error.code = 'READER_TIMEOUT';
+      reject(error);
+    }, ms);
+  });
+  // A timeout is terminal for this rendition. The caller destroys it rather
+  // than starting a second display while the first is still pending.
+  return Promise.race([Promise.resolve().then(() => targetRendition.display(cfi || undefined)), timeout])
+    .finally(() => clearTimeout(timer));
+}
+
+async function displayReaderSafely(entry, targetBook, targetRendition, request, preferredCfi) {
+  let usedFallback = false;
+  if (preferredCfi && preferredCfi.startsWith('epubcfi(')) {
+    let spineItem = null;
+    try { spineItem = targetBook.spine.get(preferredCfi); } catch (_) {}
+    if (!spineItem) {
+      preferredCfi = null;
+      entry.lastLocationCfi = null;
+      usedFallback = true;
+    }
+  }
+  try {
+    await displayWithWatchdog(targetRendition, preferredCfi);
+  } catch (error) {
+    if (error?.code === 'READER_TIMEOUT' || !preferredCfi) throw error;
+    // An ordinary invalid-CFI rejection has settled, so another display on
+    // this rendition is safe. A timeout never enters this branch.
+    entry.lastLocationCfi = null;
+    usedFallback = true;
+    await displayWithWatchdog(targetRendition, null);
+  }
+  if (!isReaderRequestCurrent(request, targetBook, targetRendition)) {
+    const error = new Error('Reader request superseded.');
+    error.name = 'AbortError';
+    throw error;
+  }
+  if (!readerHasVisibleContent()) throw new Error('No readable content was rendered.');
+  if (usedFallback) showToast('Your saved position could not be restored. Opened from the beginning.');
+}
+
+function readerHasVisibleContent() {
+  return [...document.querySelectorAll('#viewer iframe')].some(frame => {
+    try {
+      const doc = frame.contentDocument;
+      const root = doc?.documentElement;
+      if (root?.localName?.toLowerCase() === 'svg') {
+        const bounds = root.getBoundingClientRect();
+        return bounds.width > 0 && bounds.height > 0;
+      }
+      const body = doc?.body;
+      if (!body) return false;
+      if (body.innerText.trim()) return true;
+      if ([...body.querySelectorAll('img, svg, canvas, object, embed, video, iframe')]
+        .some(element => { const bounds = element.getBoundingClientRect(); return bounds.width > 0 && bounds.height > 0; })) return true;
+      const background = frame.contentWindow.getComputedStyle(body).backgroundImage;
+      return background !== 'none' && body.getBoundingClientRect().width > 0;
+    }
+    catch (_) { return false; }
+  });
 }
 
 function bindRenditionInteractions(entry, targetRendition, request) {
@@ -1481,6 +1622,8 @@ async function openBook(id){
   }
 
   const request = createReaderRequest(id);
+  readerNavigationReady = false;
+  readerNavigationTail = Promise.resolve();
   const requestOptions = readerRequestOptions(request);
   currentBookId = id;
   const initialPct = (entry.progress != null && Number.isFinite(entry.progress))
@@ -1496,6 +1639,7 @@ async function openBook(id){
   entry.lastOpenedAt = Date.now();
   document.getElementById('app').classList.remove('chrome-hidden');
   document.body.classList.add('reader-active');
+  document.getElementById('update-banner').hidden = true;
   syncReaderPalette();
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
@@ -1516,10 +1660,17 @@ async function openBook(id){
     navigator.serviceWorker.controller.postMessage({ type: 'SET_CURRENT_BOOK', bookId: id });
   }
   window.currentBookData = entry;
+  const mobileReaderTitle = document.getElementById('mobile-reader-title');
+  if (mobileReaderTitle) mobileReaderTitle.textContent = entry.name;
 
   const overlay = document.getElementById('loading-overlay');
-  overlay.classList.remove('hidden');
+  overlay.classList.add('show');
+  overlay.setAttribute('aria-busy', 'true');
+  document.getElementById('reader-error-state').hidden = true;
   document.getElementById('loading-text').textContent = 'Opening book…';
+  const slowLoadTimer = setTimeout(() => {
+    if (isReaderRequestCurrent(request, book, rendition)) document.getElementById('loading-text').textContent = 'Still opening…';
+  }, 4000);
   document.getElementById('viewer').innerHTML = '';
   document.getElementById('search-input').value = '';
   document.getElementById('search-status').textContent = '';
@@ -1530,12 +1681,13 @@ async function openBook(id){
   try {
     const blob = await api.getBookFile(id, requestOptions);
     if (!isReaderRequestCurrent(request, null, null)) return;
-    // R-16: Use a Blob URL — avoids .slice() copy, data lives outside the GC heap.
-    // Revoke the previous URL first so the browser can release any prior backing store.
-    if (currentBlobUrl) { try { URL.revokeObjectURL(currentBlobUrl); } catch (_) {} }
-    currentBlobUrl = URL.createObjectURL(blob);
-    targetBook = ePub(currentBlobUrl);
+    // Explicit archive input avoids EPUB.js interpreting an extension-less blob
+    // URL as an unpacked EPUB directory.
+    const buffer = await blob.arrayBuffer();
+    targetBook = ePub();
+    await targetBook.open(buffer, 'binary');
   } catch(err) {
+    clearTimeout(slowLoadTimer);
     if (isReaderRequestCurrent(request, null, null) && !isAbortError(err)) {
       console.error('Failed to load book file:', err);
       await recoverFromReaderFailure(request, 'This book could not be opened. Please try again.', null, null);
@@ -1565,69 +1717,38 @@ async function openBook(id){
   bindRenditionInteractions(entry, targetRendition, request);
   bindRelocated(entry, targetRendition, targetBook, request);
 
-  // Load bookmarks and highlights from server
-  entry.annotationLoadFailed = false;
   try {
-    const [bookmarks, highlights] = await Promise.all([
-      api.getBookmarks(id, requestOptions),
-      api.getHighlights(id, requestOptions),
-    ]);
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-    entry.annotationLoadFailed = false;
-    entry.bookmarks = bookmarks.map(bm => ({
-      id: bm.id,
-      cfi: bm.cfi,
-      chapter: bm.chapter || bm.label || 'Untitled section',
-      pct: bm.progress_percent || 0,
-      addedAt: bm.created_at ? new Date(bm.created_at).getTime() : Date.now(),
-    }));
-    entry.highlights = highlights.map(hl => ({
-      id: hl.id,
-      cfi: hl.cfi_range,
-      color: hl.color || 'gold',
-      excerpt: hl.excerpt || '',
-      chapter: hl.chapter || 'Untitled section',
-      addedAt: hl.created_at ? new Date(hl.created_at).getTime() : Date.now(),
-    }));
-    window.currentHighlights = entry.highlights;
-  } catch(e) {
-    if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(e)) {
-      console.error('Failed to load bookmarks/highlights:', e);
-      entry.annotationLoadFailed = true;
-    }
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-  }
-
-  targetRendition.display(entry.lastLocationCfi || undefined).then(() => {
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-    overlay.classList.add('hidden');
+    await displayReaderSafely(entry, targetBook, targetRendition, request, entry.lastLocationCfi);
+    if (isReaderRequestCurrent(request, targetBook, targetRendition)) readerNavigationReady = true;
+    clearTimeout(slowLoadTimer);
+    overlay.classList.remove('show');
+    overlay.setAttribute('aria-busy', 'false');
     // R-13: Show chrome briefly then auto-hide (Kindle-like UX)
     showReaderChromeTemporarily();
     tuneScrollContainer(targetRendition);
     updateBookmarkIcon();
-    applySavedHighlights(entry, targetRendition);
-  }).catch(err => {
+  } catch(err) {
+    clearTimeout(slowLoadTimer);
     if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(err)) {
       console.error('Failed to render book:', err);
-      recoverFromReaderFailure(request, 'This EPUB could not be displayed. Please try again.', targetBook, targetRendition);
+      await recoverFromReaderFailure(request, 'This EPUB could not be displayed. Retry, or open it from the beginning.', targetBook, targetRendition);
     }
-  });
+    return;
+  }
 
-  renderBookmarks();
-  renderBookmarkTicks();
-  renderHighlights();
+  // Annotation loading is non-critical: text must be readable first.
+  Promise.all([api.getBookmarks(id, requestOptions), api.getHighlights(id, requestOptions)]).then(([bookmarks, highlights]) => {
+    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+    entry.annotationLoadFailed = false;
+    entry.bookmarks = bookmarks.map(bm => ({ id: bm.id, cfi: bm.cfi, chapter: bm.chapter || bm.label || 'Untitled section', pct: bm.progress_percent || 0, addedAt: bm.created_at ? new Date(bm.created_at).getTime() : Date.now() }));
+    entry.highlights = highlights.map(hl => ({ id: hl.id, cfi: hl.cfi_range, color: hl.color || 'gold', excerpt: hl.excerpt || '', chapter: hl.chapter || 'Untitled section', addedAt: hl.created_at ? new Date(hl.created_at).getTime() : Date.now() }));
+    window.currentHighlights = entry.highlights;
+    renderBookmarks(); renderBookmarkTicks(); renderHighlights(); applySavedHighlights(entry, targetRendition);
+  }).catch(error => { if (!isAbortError(error)) { entry.annotationLoadFailed = true; console.error('Failed to load annotations:', error); } });
+
 
   targetBook.loaded.navigation.then(nav => {
     if (isReaderRequestCurrent(request, targetBook, targetRendition)) renderToc(nav.toc);
-  }).catch(() => {});
-
-  // Only admins may change shared book metadata.
-  if (isCurrentUserAdmin()) targetBook.loaded.metadata.then(meta => {
-    if (isReaderRequestCurrent(request, targetBook, targetRendition) && meta && meta.title && meta.title.trim() && meta.title.trim() !== entry.name){
-      entry.name = meta.title.trim();
-      api.updateBook(id, { title: entry.name }, requestOptions).catch(() => {});
-      renderShelf();
-    }
   }).catch(() => {});
 
   if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
@@ -1658,13 +1779,18 @@ async function openBook(id){
         if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
         locationsReady = true;
         try {
-          epubLocationCache.set(readerAssetCacheKey(id), targetBook.locations.save());
+          const savedLocations = targetBook.locations.save();
+          if (typeof savedLocations === 'string' && savedLocations.length <= 2_000_000) {
+            epubLocationCache.set(readerAssetCacheKey(id), savedLocations);
+            while (epubLocationCache.size > 3) epubLocationCache.delete(epubLocationCache.keys().next().value);
+          }
         } catch (_) {}
         syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
       } catch(e) {
         if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(e)) console.debug('Location generation skipped:', e);
       }
     });
+    generateWhenQuiet();
   });
 
   // Start reading session for analytics
@@ -1717,42 +1843,50 @@ async function openBook(id){
       sliderEl.style.setProperty('--progress', dragPct + '%');
       const pctEl = document.getElementById('progress-pct');
       if (pctEl) pctEl.textContent = dragPct + '%';
-      entry.progress = dragPct;
-      scheduleSaveMeta(entry, request);
-
       const targetFraction = dragPct / 100;
       if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
 
       const unlockSeek = () => {
-        setTimeout(() => {
-          isDraggingProgressSlider = false;
-          seekLockUntil = 0;
-        }, 200);
+        isDraggingProgressSlider = false;
+        seekLockUntil = 0;
       };
 
-      let displayPromise = null;
+      let target = null;
       if (locationsReady && targetBook.locations && targetBook.locations.total > 0) {
         try {
           const cfi = targetBook.locations.cfiFromPercentage(targetFraction);
           if (cfi) {
-            displayPromise = targetRendition.display(cfi);
+            target = cfi;
           }
         } catch (_) {}
       }
 
-      if (!displayPromise && targetBook.spine) {
+      if (!target && targetBook.spine) {
         const spineItems = targetBook.spine.spineItems || (Array.isArray(targetBook.spine.items) ? targetBook.spine.items : []);
         const totalSpine = Math.max(1, spineItems.length || targetBook.spine.length || 1);
         const targetIndex = Math.min(totalSpine - 1, Math.max(0, Math.floor(targetFraction * totalSpine)));
         const item = targetBook.spine.get(targetIndex) || spineItems[targetIndex];
         if (item && (item.cfiBase || item.href)) {
-          displayPromise = targetRendition.display(item.cfiBase || item.href);
+          target = item.cfiBase || item.href;
         }
       }
 
-      if (displayPromise && typeof displayPromise.then === 'function') {
-        displayPromise.then(unlockSeek).catch(unlockSeek);
-      } else {
+      if (target) navigateReader(target).then(async success => {
+        unlockSeek();
+        if (success) {
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          await syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
+        }
+        else if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
+          sliderEl.value = Math.round(Number(entry.progress) || 0);
+          sliderEl.style.setProperty('--progress', `${sliderEl.value}%`);
+          if (pctEl) pctEl.textContent = `${sliderEl.value}%`;
+        }
+      }).catch(unlockSeek);
+      else {
+        sliderEl.value = Math.round(Number(entry.progress) || 0);
+        sliderEl.style.setProperty('--progress', `${sliderEl.value}%`);
+        if (pctEl) pctEl.textContent = `${sliderEl.value}%`;
         unlockSeek();
       }
     };
@@ -1933,6 +2067,7 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
 
     const chapter = targetBook.navigation && targetBook.navigation.get(location.start.href);
     const chapterLabel = chapter ? chapter.label.trim() : '';
+    highlightCurrentToc(location.start.href);
 
     // Schedule lightweight, non-blocking DOM updates in requestAnimationFrame
     if (!readerLocationRafId) {
@@ -2098,7 +2233,7 @@ function renderBookmarks(){
     item.querySelector('.bookmark-chapter').onclick =
       item.querySelector('.bookmark-pct').onclick = () => {
         if (getCurrentEntry() !== entry || !rendition) return;
-        rendition.display(bm.cfi);
+        navigateReader(bm.cfi);
         toggleDrawer('bookmarks', true);
       };
     item.querySelector('.bookmark-remove').onclick = (e) => {
@@ -2130,7 +2265,7 @@ function renderBookmarkTicks(){
     dot.className = 'bookmark-tick';
     dot.style.left = bm.pct + '%';
     dot.title = bm.chapter + ' — ' + bm.pct + '%';
-    dot.onclick = () => rendition && rendition.display(bm.cfi);
+    dot.onclick = () => navigateReader(bm.cfi);
     wrap.appendChild(dot);
   });
 }
@@ -2389,7 +2524,7 @@ function renderHighlights(){
     item.innerHTML = `
       <div class="highlight-excerpt"><span class="highlight-swatch" style="background:${h.color}"></span>"${escapeHtml(h.excerpt)}"</div>
     `;
-    item.onclick = () => { rendition.display(h.cfi); toggleDrawer('bookmarks', true); };
+    item.onclick = () => { navigateReader(h.cfi); toggleDrawer('bookmarks', true); };
     list.appendChild(item);
   });
 }
@@ -2414,9 +2549,9 @@ async function getBookTextIndex(targetBook, bookId, isCurrentSearch) {
         const documentNode = await section.load(targetBook.load.bind(targetBook));
         if (!isCurrentSearch()) return null;
         const textContent = documentNode?.documentElement?.textContent || documentNode?.body?.textContent || '';
-        indexed.push({ section, text: textContent.normalize('NFKC').toLocaleLowerCase() });
+        indexed.push({ href: section.href, text: textContent.normalize('NFKC').toLocaleLowerCase() });
       } catch (_) {
-        indexed.push({ section, text: '' });
+        indexed.push({ href: section.href, text: '' });
       } finally {
         if (typeof section.unload === 'function') section.unload();
       }
@@ -2427,7 +2562,10 @@ async function getBookTextIndex(targetBook, bookId, isCurrentSearch) {
   try {
     const indexed = await pending;
     if (!indexed) bookTextIndex.delete(bookId);
-    while (bookTextIndex.size > 3) bookTextIndex.delete(bookTextIndex.keys().next().value);
+    else if (indexed.reduce((bytes, item) => bytes + item.text.length * 2, 0) > 4_000_000) bookTextIndex.delete(bookId);
+    // Indexed sections retain EPUB.js section objects and full chapter text.
+    // Keep only the current book's index on memory-constrained phones.
+    while (bookTextIndex.size > 1) bookTextIndex.delete(bookTextIndex.keys().next().value);
     return indexed;
   } catch (error) {
     bookTextIndex.delete(bookId);
@@ -2470,7 +2608,9 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
       if (!indexedSections || !isCurrentSearch()) return;
       const normalizedQuery = query.normalize('NFKC').toLocaleLowerCase();
       const candidates = indexedSections.filter(item => item.text.includes(normalizedQuery));
-      for (const { section } of candidates){
+      for (const { href } of candidates){
+        const section = targetBook.spine.get(href);
+        if (!section) continue;
         try {
           await section.load(targetBook.load.bind(targetBook));
           if (!isCurrentSearch()) return;
@@ -2481,7 +2621,7 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
         if (results.length > 60) break;
       }
       bookSearchIndex.set(cacheKey, results.slice(0, 61));
-      while (bookSearchIndex.size > 100) bookSearchIndex.delete(bookSearchIndex.keys().next().value);
+      while (bookSearchIndex.size > 30) bookSearchIndex.delete(bookSearchIndex.keys().next().value);
     }
     if (!isCurrentSearch()) return;
     document.getElementById('search-status').textContent =
@@ -2497,7 +2637,7 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
       `;
       item.onclick = () => {
         if (!isCurrentSearch()) return;
-        rendition.display(r.cfi);
+        navigateReader(r.cfi);
         toggleDrawer('search', true);
       };
       resultsEl.appendChild(item);
@@ -2513,12 +2653,9 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
 function toggleFullscreen(){
   const app = document.getElementById('app');
   if (!app) return;
-  if (isImmersiveReading() || readerFullscreenElement()) {
-    exitImmersiveReading();
-  } else {
-    enterImmersiveReading();
-    requestReaderFullscreen();
-  }
+  if (readerFullscreenElement()) exitReaderFullscreen();
+  else requestReaderFullscreen();
+  updateFullscreenControlUI();
 }
 
 function isEditableShortcutTarget(target){
@@ -2637,12 +2774,23 @@ function renderToc(toc){
       a.style.paddingLeft = (4 + depth * 14) + 'px';
       a.textContent = item.label.trim();
       a.href = 'javascript:void(0)';
-      a.onclick = () => { rendition.display(item.href); toggleDrawer('toc', true); };
+      a.dataset.href = item.href;
+      a.onclick = () => { navigateReader(item.href); toggleDrawer('toc', true); };
       list.appendChild(a);
       if (item.subitems && item.subitems.length) walk(item.subitems, depth + 1);
     });
   }
   walk(toc, 0);
+  getCurrentLocationSafe().then(location => { if (location?.start?.href) highlightCurrentToc(location.start.href); });
+}
+
+function highlightCurrentToc(href) {
+  document.querySelectorAll('#toc-list .toc-item').forEach(item => {
+    const current = item.dataset.href === href;
+    item.classList.toggle('current', current);
+    if (current) item.setAttribute('aria-current', 'location');
+    else item.removeAttribute('aria-current');
+  });
 }
 
 /* ---------------- Theming (reading pane) ---------------- */
@@ -2783,6 +2931,7 @@ function toggleDrawer(which, forceClose){
       } else {
         const focusable = el.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
         if (focusable.length > 0) focusable[0].focus();
+        if (which === 'toc') el.querySelector('.toc-item.current')?.scrollIntoView({ block: 'center' });
       }
     });
   } else {
@@ -2810,6 +2959,13 @@ function updateDrawerBackdrop(){
     const open = drawer.classList.contains('open');
     drawer.setAttribute('aria-hidden', String(!open));
     drawer.toggleAttribute('inert', !open);
+    if (window.isMobileShell?.()) {
+      drawer.setAttribute('role', 'dialog');
+      drawer.setAttribute('aria-modal', String(open));
+    } else {
+      drawer.removeAttribute('role');
+      drawer.removeAttribute('aria-modal');
+    }
     document.querySelectorAll(`[data-drawer-toggle="${id}"]`).forEach(toggle => {
       toggle.setAttribute('aria-expanded', String(open));
     });
@@ -2845,6 +3001,17 @@ const OFFLINE_QUEUE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 function offlineQueueKey() {
   return currentUser && currentUser.username ? OFFLINE_QUEUE_PREFIX + encodeURIComponent(currentUser.username.toLocaleLowerCase()) : null;
 }
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Tab' || !window.isMobileShell?.()) return;
+  const drawer = DRAWER_IDS.map(id => document.getElementById(id + '-drawer')).find(el => el?.classList.contains('open'));
+  if (!drawer) return;
+  const focusable = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter(el => !el.disabled && !el.hidden && el.getClientRects().length);
+  if (!focusable.length) { event.preventDefault(); drawer.focus(); return; }
+  const first = focusable[0], last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+});
 
 function setSyncState(state, detail = '') {
   const element = document.getElementById('sync-status');
@@ -2886,7 +3053,6 @@ async function resilientApiPost(url, body, isProgressSave = false, method = 'POS
       method,
       body: JSON.stringify(body),
     });
-    generateWhenQuiet();
     setSyncState('saved');
     return await res.json().catch(() => ({ ok: true }));
   } catch (networkErr) {
@@ -2968,6 +3134,7 @@ let settingsSaveTimer = null;
 let settingsSaveAbortController = null;
 async function saveSettings(){
   clearTimeout(settingsSaveTimer);
+  scheduleOfflineSnapshot();
   const expectedAccountVersion = accountVersion;
   const settingsSnapshot = { ...settings };
   settingsSaveTimer = setTimeout(async () => {
@@ -3008,6 +3175,7 @@ async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
     status: b.status || 'unread',
     lastLocationCfi: b.last_location_cfi,
     fileSize: Number(b.file_size) || 0,
+    wordCount: Number(b.word_count) || 0,
     addedAt: b.added_at ? new Date(b.added_at).getTime() : 0,
     lastOpenedAt: b.last_opened_at ? new Date(b.last_opened_at).getTime() : null,
     bookmarks: [],
@@ -3144,23 +3312,24 @@ async function boot(){
   syncGestureSettingsUI();
   renderShelf();
   updateSettingsUI();
-  api.getStats({ expectedAccountVersion: bootAccountVersion }).then(stats => {
-    if (!isActiveAccount(bootAccountVersion)) return;
-    const measured = Number(stats.reading_bytes_per_minute);
-    if (Number.isFinite(measured) && measured > 0) {
-      personalReadingBytesPerMinute = Math.min(50_000, Math.max(1_500, measured));
-      renderShelf();
-    }
-  }).catch(() => {});
   // Load collections after shelf is ready
   await loadCollections();
   if (!isActiveAccount(bootAccountVersion)) return;
   updateRoleAwareControls();
   flushOfflineQueue();
+  api.getStats({ expectedAccountVersion: bootAccountVersion }).then(stats => {
+    if (!isActiveAccount(bootAccountVersion)) return;
+    const pace = Number(stats.reading_words_per_minute);
+    personalReadingWordsPerMinute = pace >= 120 && pace <= 450 ? pace : DEFAULT_READING_WORDS_PER_MINUTE;
+    renderShelf();
+  }).catch(() => {});
+  return true;
 }
 
 function abortReaderRequests() {
   readerRequestVersion += 1;
+  readerNavigationReady = false;
+  readerNavigationTail = Promise.resolve();
   if (readerAbortController) {
     readerAbortController.abort();
     readerAbortController = null;
@@ -3191,7 +3360,7 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   locationsReady = false;
   lastReaderViewportSize = { width: 0, height: 0 };
   pageTurnLock = false;
-  clearTimeout(pageTurnLockTimer);
+  pageTurnGeneration++;
   pendingHighlightCfi = null;
   pendingHighlightContext = null;
   highlightReturnFocus = null;
@@ -3204,19 +3373,14 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   clearTimeout(readerChromeTimer); // R-13
   readerChromeTimer = null;
 
-  // R-16: Revoke the Blob URL so the browser can reclaim the underlying EPUB data
-  if (currentBlobUrl) {
-    try { URL.revokeObjectURL(currentBlobUrl); } catch (_) {}
-    currentBlobUrl = null;
-  }
-
   const oldBook = book;
   book = null;
   rendition = null;
   try { if (oldBook) oldBook.destroy(); } catch (e) { /* already disposed */ }
 
   document.getElementById('viewer').replaceChildren();
-  document.getElementById('loading-overlay').classList.add('hidden');
+  document.getElementById('loading-overlay').classList.remove('show');
+  document.getElementById('reader-error-state').hidden = true;
   hideHighlightPopup();
   closeShortcutsModal({ returnFocus: false });
   closeStatsModal();
@@ -4154,17 +4318,10 @@ function speakCurrentTtsItem() {
       } else {
         // Reached end of current chapter queue. Advance to the next chapter!
         if (rendition && rendition.next) {
-          // Route through page-turn mutex so TTS cannot race with user input (R-09)
-          if (pageTurnLock) { stopTts(); showToast('Finished reading aloud'); return; }
-          pageTurnLock = true;
-          clearTimeout(pageTurnLockTimer);
-          let ttsAdvancePromise;
-          try { ttsAdvancePromise = rendition.next(); } catch (_) {}
-          const unlockTts = () => { pageTurnLock = false; };
-          pageTurnLockTimer = setTimeout(unlockTts, 600);
-          (ttsAdvancePromise || Promise.resolve()).then(() => {
-            unlockTts();
-            clearTimeout(pageTurnLockTimer);
+          // All navigation, including TTS chapter advance, shares turnPage's
+          // awaited serialization guard.
+          turnPage('next').then(turned => {
+            if (!turned) { stopTts(); showToast('Finished reading aloud'); return; }
             setTimeout(async () => {
               // Match active section via currentLocation() rather than blindly
               // taking getContents()[0] which may be a preloaded prior section (R-11)
@@ -4200,8 +4357,6 @@ function speakCurrentTtsItem() {
               showToast('Finished reading aloud');
             }, 350);
           }).catch(() => {
-            unlockTts();
-            clearTimeout(pageTurnLockTimer);
             stopTts();
             showToast('Finished reading aloud');
           });
@@ -4545,7 +4700,8 @@ document.addEventListener('click', (e) => {
 if (document.getElementById('export-highlights-btn')) {
   document.getElementById('export-highlights-btn').addEventListener('click', () => {
     if (!window.currentHighlights || window.currentHighlights.length === 0) return;
-    let md = '# Highlights for ' + window.currentBookData.title + '\n\n';
+    const bookTitle = window.currentBookData?.name || 'Untitled book';
+    let md = '# Highlights for ' + bookTitle + '\n\n';
     window.currentHighlights.forEach(h => {
       md += '> ' + h.excerpt + '\n\n';
       if (h.note) md += '**Note:** ' + h.note + '\n\n';
@@ -4554,7 +4710,7 @@ if (document.getElementById('export-highlights-btn')) {
     const blob = new Blob([md], { type: 'text/markdown' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = window.currentBookData.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_highlights.md';
+    a.download = bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '_highlights.md';
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -4600,11 +4756,13 @@ function scheduleShelfRender() {
 }
 
 function estimatedBookMinutes(entry, remainingOnly = false) {
-  const total = Math.max(10, Math.round((entry.fileSize || 1_000_000) / personalReadingBytesPerMinute));
+  if (!Number.isFinite(entry.wordCount) || entry.wordCount <= 0) return 0;
+  const total = Math.max(1, Math.round(entry.wordCount / personalReadingWordsPerMinute));
   return remainingOnly ? Math.max(0, Math.round(total * (1 - (entry.progress || 0) / 100))) : total;
 }
 
 function formatMinutes(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '';
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
@@ -4628,7 +4786,8 @@ function renderContinueCard(){
     const item = document.createElement('article');
     item.className = 'continue-item';
     item.tabIndex = 0;
-    item.innerHTML = `<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}</div><div><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div><div class="progress-text">${Math.round(entry.progress)}% · about ${formatMinutes(estimatedBookMinutes(entry, true))} left</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
+    const remaining = formatMinutes(estimatedBookMinutes(entry, true));
+    item.innerHTML = `<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}</div><div><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div><div class="progress-text">${Math.round(entry.progress)}%${remaining ? ` · about ${remaining} left` : ''}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
     item.onclick = () => openBook(entry.id);
     item.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBook(entry.id); } };
     fragment.appendChild(item);
@@ -4683,8 +4842,53 @@ function createShelfCard(entry) {
   card.className = `book-card${bulkMode ? ' bulk-mode' : ''}${bulkSelection.has(entry.id) ? ' selected' : ''}`;
   card.tabIndex = 0;
   card.setAttribute('aria-label', `${entry.name} by ${entry.author || 'Unknown author'}`);
-  const seriesBadge = entry.series ? `<div class="series-tag">${escapeHtml(formatSeriesText(entry.series, entry.seriesIndex))}</div>` : '';
-  card.innerHTML = `${bulkMode ? `<input class="book-select" type="checkbox" aria-label="Select ${escapeHtml(entry.name)}" ${bulkSelection.has(entry.id) ? 'checked' : ''}>` : ''}<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}${entry.progress > 0 ? `<span class="spine-badge">${Math.round(entry.progress)}%</span>` : ''}<button type="button" class="book-menu-btn" aria-label="Details and actions for ${escapeHtml(entry.name)}">⋯</button></div><div class="book-meta-under">${seriesBadge}<div class="title" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</div><div class="author">${escapeHtml(entry.author || 'Unknown')}</div><div class="shelf-rating-widget">${renderRatingHtml(entry.id, entry.rating)}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
+  if (bulkMode) {
+    const select = document.createElement('input');
+    select.className = 'book-select'; select.type = 'checkbox';
+    select.setAttribute('aria-label', `Select ${entry.name}`);
+    select.checked = bulkSelection.has(entry.id);
+    card.appendChild(select);
+  }
+  const spine = document.createElement('div'); spine.className = 'spine';
+  spine.style.backgroundColor = /^#[0-9a-f]{3,8}$/i.test(entry.coverColor || '') ? entry.coverColor : '#554a3b';
+  if (entry.coverPath) {
+    const cover = document.createElement('img'); cover.className = 'cover-img';
+    cover.src = `/api/books/${encodeURIComponent(entry.id)}/cover`;
+    cover.alt = ''; cover.loading = 'lazy'; cover.decoding = 'async'; spine.appendChild(cover);
+  } else {
+    const title = document.createElement('span'); title.className = 'spine-title'; title.textContent = entry.name;
+    const author = document.createElement('span'); author.className = 'spine-author'; author.textContent = entry.author || '';
+    spine.append(title, author);
+  }
+  const progress = Math.max(0, Math.min(100, Number(entry.progress) || 0));
+  if (progress > 0) {
+    const badge = document.createElement('span'); badge.className = 'spine-badge';
+    badge.textContent = `${Math.round(progress)}%`; spine.appendChild(badge);
+  }
+  const menu = document.createElement('button'); menu.type = 'button'; menu.className = 'book-menu-btn';
+  menu.setAttribute('aria-label', `Details and actions for ${entry.name}`); menu.textContent = '⋯'; spine.appendChild(menu);
+  const meta = document.createElement('div'); meta.className = 'book-meta-under';
+  if (entry.series) {
+    const series = document.createElement('div'); series.className = 'series-tag';
+    series.textContent = formatSeriesText(entry.series, entry.seriesIndex); meta.appendChild(series);
+  }
+  const title = document.createElement('div'); title.className = 'title'; title.title = entry.name; title.textContent = entry.name;
+  const author = document.createElement('div'); author.className = 'author'; author.textContent = entry.author || 'Unknown';
+  const rating = document.createElement('div'); rating.className = 'shelf-rating-widget';
+  const stars = document.createElement('div'); stars.className = 'rating-stars'; stars.setAttribute('role', 'group'); stars.setAttribute('aria-label', 'Book rating');
+  const currentRating = Number(entry.rating) || 0;
+  for (let number = 1; number <= 5; number++) {
+    const star = document.createElement('button'); star.type = 'button';
+    star.className = `star-btn${number <= currentRating ? ' filled' : ''}`;
+    star.title = `Rate ${number} star${number === 1 ? '' : 's'}`;
+    star.textContent = number <= currentRating ? '★' : '☆';
+    star.onclick = event => { event.stopPropagation(); setBookRating(entry.id, number === currentRating ? null : number); };
+    stars.appendChild(star);
+  }
+  rating.appendChild(stars);
+  const track = document.createElement('div'); track.className = 'book-progress-bar';
+  const fill = document.createElement('div'); fill.className = 'book-progress-fill'; fill.style.width = `${progress}%`; track.appendChild(fill);
+  meta.append(title, author, rating, track); card.append(spine, meta);
   const activate = event => {
     if (event.target.closest('.book-menu-btn,.star-btn')) return;
     if (bulkMode) {
@@ -4694,7 +4898,7 @@ function createShelfCard(entry) {
   };
   card.onclick = activate;
   card.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(event); } };
-  card.querySelector('.book-menu-btn').onclick = event => { event.stopPropagation(); openBookDetails(entry.id); };
+  menu.onclick = event => { event.stopPropagation(); openBookDetails(entry.id); };
   return card;
 }
 
@@ -4706,15 +4910,17 @@ function renderShelf(){
   shelf.replaceChildren();
   renderContinueCard();
   if (!library.length) {
-    empty.style.display = 'block'; header.style.display = 'none'; document.getElementById('continue-card').style.display = 'none'; document.getElementById('smart-sections').style.display = 'none'; return;
+    empty.style.display = 'block'; header.style.display = 'none'; document.getElementById('continue-card').style.display = 'none'; document.getElementById('smart-sections').style.display = 'none'; window.renderMobileShell?.(); scheduleOfflineSnapshot(); return;
   }
   empty.style.display = 'none'; header.style.display = 'flex';
   const searchQuery = document.getElementById('shelf-search').value.trim().toLocaleLowerCase();
   const filterValue = document.getElementById('shelf-filter').value;
   const searchable = entry => `${entry.name || ''} ${entry.author || ''} ${entry.series || ''} ${entry.description || ''} ${entry.tags || ''} ${entry.isbn || ''}`.toLocaleLowerCase();
   let filtered = searchQuery ? library.filter(entry => searchable(entry).includes(searchQuery)) : [...library];
-  if (filterValue === 'unread') filtered = filtered.filter(entry => entry.progress === 0);
-  else if (filterValue === 'finished') filtered = filtered.filter(entry => entry.progress >= 98);
+  if (filterValue === 'unread') filtered = filtered.filter(entry => entry.status === 'unread');
+  else if (filterValue === 'reading') filtered = filtered.filter(entry => entry.status === 'reading');
+  else if (filterValue === 'finished') filtered = filtered.filter(entry => entry.status === 'finished');
+  else if (filterValue === 'downloaded') filtered = filtered.filter(entry => typeof mobilePinnedIds !== 'undefined' && mobilePinnedIds.has(entry.id));
   else if (filterValue.startsWith('col_')) {
     const collection = allCollections.find(item => item.id === filterValue.slice(4));
     if (collection) filtered = filtered.filter(entry => collection.book_ids.includes(entry.id));
@@ -4734,6 +4940,8 @@ function renderShelf(){
   filtered.forEach(entry => fragment.appendChild(createShelfCard(entry)));
   shelf.appendChild(fragment);
   saveShelfPreferences();
+  window.renderMobileShell?.();
+  scheduleOfflineSnapshot();
 }
 
 function toggleReaderMoreMenu(event) {
@@ -4763,20 +4971,60 @@ async function downloadBookOffline(id) {
     api.fetch(`/api/books/${id}/file`, { headers: {} }),
     api.fetch(`/api/books/${id}/cover`, { headers: {} }).catch(() => null),
   ]);
-  // Fully consume the responses so the service worker can finish its cache put.
-  await fileResponse.blob();
-  if (coverResponse?.ok) await coverResponse.blob();
+  const fileBlob = await fileResponse.blob();
+  const coverBlob = coverResponse?.ok ? await coverResponse.blob() : null;
+  // Send the bytes already downloaded by this page. The worker confirms that
+  // the file was written to its persistent cache before the UI reports success.
+  const result = await serviceWorkerMessage('PIN_BOOK', { bookId: id, fileBlob, coverBlob });
+  if (!result?.ok) throw new Error('The offline copy could not be confirmed.');
+  await persistOfflineSnapshot().catch(error => console.warn('Could not save offline library:', error));
   setSyncState('saved', 'Available offline');
 }
 
 async function removeOfflineBook(id) {
+  const result = await serviceWorkerMessage('UNPIN_BOOK', { bookId: id });
+  if (!result?.ok) throw new Error('The offline download could not be removed.');
   const cacheNames = await caches.keys();
   await Promise.all(cacheNames.map(async name => {
+    if (name === 'endpaper-pinned-books') return;
     const cache = await caches.open(name);
     const requests = await cache.keys();
     await Promise.all(requests.filter(request => new URL(request.url).pathname.includes(`/api/books/${id}/`)).map(request => cache.delete(request)));
   }));
   showToast('Offline download removed.');
+}
+
+async function purgeOfflineBook(id) {
+  // Server deletion has already succeeded. Remove all local copies even if the
+  // worker has not taken control of this tab yet.
+  const cacheNames = await caches.keys();
+  await Promise.all(cacheNames.map(async name => {
+    const cache = await caches.open(name);
+    const requests = await cache.keys();
+    await Promise.all(requests.filter(request => new URL(request.url).pathname.startsWith(`/api/books/${encodeURIComponent(id)}/`)).map(request => cache.delete(request)));
+  }));
+  if (typeof mobilePinnedIds !== 'undefined') mobilePinnedIds.delete(id);
+}
+
+async function serviceWorkerMessage(type, payload = {}) {
+  let controller = navigator.serviceWorker?.controller;
+  if (!controller && navigator.serviceWorker) {
+    let timer;
+    try {
+      const registration = await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('The offline service is not ready.')), 10000); }),
+      ]);
+      controller = registration?.active;
+    } finally { clearTimeout(timer); }
+  }
+  if (!controller) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => reject(new Error('The offline service did not respond.')), 10000);
+    channel.port1.onmessage = event => { clearTimeout(timer); resolve(event.data); };
+    controller.postMessage({ type, ...payload }, [channel.port2]);
+  });
 }
 
 async function bulkDownloadOffline() {
@@ -4829,18 +5077,63 @@ async function bulkDeleteBooks() {
   if (!requireAdmin('remove books')) return;
   const confirmed = await showConfirmDialog({ title: 'Remove selected books', message: `Remove ${bulkSelection.size} selected books and their reading data?`, confirmText: 'Remove books', danger: true });
   if (!confirmed) return;
-  for (const id of [...bulkSelection]) await api.deleteBook(id);
-  library = library.filter(entry => !bulkSelection.has(entry.id)); showToast('Selected books removed.'); toggleBulkMode(false);
+  const deleted = new Set();
+  for (const id of [...bulkSelection]) {
+    try {
+      await api.deleteBook(id);
+      deleted.add(id);
+      await purgeOfflineBook(id).catch(error => console.warn('Offline cleanup failed:', error));
+    } catch (error) {
+      showToast(`Could not remove a book: ${error.message}`);
+      break;
+    }
+  }
+  library = library.filter(entry => !deleted.has(entry.id));
+  await persistOfflineSnapshot().catch(error => console.warn('Could not update offline library:', error));
+  for (const id of deleted) bulkSelection.delete(id);
+  if (bulkSelection.size === 0) toggleBulkMode(false);
+  else renderShelf();
+  if (deleted.size) showToast(`${deleted.size} book${deleted.size === 1 ? '' : 's'} removed.`);
 }
 
 async function openBookDetails(id) {
   const entry = library.find(item => item.id === id);
   if (!entry) return;
+  if (window.isMobileShell?.()) { window.mobileNavigate('book', id); return; }
   const modal = document.getElementById('book-details-modal');
   document.getElementById('book-details-title').textContent = entry.name;
-  document.getElementById('book-details-content').innerHTML = `<div class="book-details-layout"><div class="book-details-cover" style="background:${entry.coverColor}">${coverMarkup(entry, 'book-details-cover')}</div><div><div class="book-detail-meta">${escapeHtml(entry.author || 'Unknown author')}<br>${entry.series ? escapeHtml(formatSeriesText(entry.series, entry.seriesIndex)) + '<br>' : ''}${(entry.fileSize / 1024 / 1024).toFixed(1)} MB · about ${formatMinutes(estimatedBookMinutes(entry))}<br>${entry.progress ? `${Math.round(entry.progress)}% read · ${formatMinutes(estimatedBookMinutes(entry, true))} remaining` : 'Unread'}${entry.isbn ? `<br>ISBN ${escapeHtml(entry.isbn)}` : ''}${entry.tags ? `<br>${escapeHtml(entry.tags)}` : ''}</div><p class="book-description">${escapeHtml(entry.description || 'No description available.')}</p></div></div>`;
+  const totalTime = formatMinutes(estimatedBookMinutes(entry));
+  const remaining = formatMinutes(estimatedBookMinutes(entry, true));
+  document.getElementById('book-details-content').innerHTML = `<div class="book-details-layout"><div class="book-details-cover" style="background:${entry.coverColor}">${coverMarkup(entry, 'book-details-cover')}</div><div><div class="book-detail-meta">${escapeHtml(entry.author || 'Unknown author')}<br>${entry.series ? escapeHtml(formatSeriesText(entry.series, entry.seriesIndex)) + '<br>' : ''}${(entry.fileSize / 1024 / 1024).toFixed(1)} MB${totalTime ? ` · about ${totalTime}` : ''}<br>${entry.progress ? `${Math.round(entry.progress)}% read${remaining ? ` · ${remaining} remaining` : ''}` : 'Unread'}${entry.isbn ? `<br>ISBN ${escapeHtml(entry.isbn)}` : ''}${entry.tags ? `<br>${escapeHtml(entry.tags)}` : ''}</div><p class="book-description">${escapeHtml(entry.description || 'No description available.')}</p></div></div>`;
   const actions = document.getElementById('book-details-actions');
-  actions.innerHTML = `<button type="button" onclick="closeBookDetails(); openBook('${id}')">${entry.progress ? 'Continue reading' : 'Read'}</button><button type="button" onclick="downloadBookOffline('${id}').then(()=>showToast('Book is available offline.'))">Download for offline</button><button type="button" onclick="removeOfflineBook('${id}')">Remove download</button>${isCurrentUserAdmin() ? `<button type="button" onclick="openBookCollectionsModal('${id}')">Collections</button><button type="button" onclick="editBookMetadata('${id}')">Edit details</button><button type="button" onclick="closeBookDetails(); removeBook('${id}')">Remove book</button>` : ''}`;
+  actions.replaceChildren();
+  const addAction = (label, handler) => {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+    button.addEventListener('click', handler); actions.appendChild(button); return button;
+  };
+  addAction(entry.progress ? 'Continue reading' : 'Read', () => { closeBookDetails(); openBook(id); });
+  const offline = addAction('Checking download…', async () => {
+    offline.disabled = true;
+    try {
+      if (offline.dataset.pinned === 'true') await removeOfflineBook(id);
+      else { await downloadBookOffline(id); showToast('Book is available offline.'); }
+      offline.dataset.pinned = String(offline.dataset.pinned !== 'true');
+      offline.textContent = offline.dataset.pinned === 'true' ? 'Remove download' : 'Download for offline';
+    } catch (error) { showToast(error.message || 'Offline action failed.'); }
+    finally { offline.disabled = false; }
+  });
+  offline.disabled = true;
+  serviceWorkerMessage('GET_PINNED_BOOKS').then(result => {
+    if (!actions.isConnected || !result?.ok) return;
+    const pinned = result.bookIds?.includes(id) || false;
+    offline.dataset.pinned = String(pinned);
+    offline.textContent = pinned ? 'Remove download' : 'Download for offline'; offline.disabled = false;
+  }).catch(() => { offline.textContent = 'Download state unavailable'; });
+  if (isCurrentUserAdmin()) {
+    addAction('Collections', () => openBookCollectionsModal(id));
+    addAction('Edit details', () => editBookMetadata(id));
+    addAction('Remove book', () => { closeBookDetails(); removeBook(id); });
+  }
   modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false'); modal.querySelector('button')?.focus();
 }
 
@@ -4852,8 +5145,13 @@ async function editBookMetadata(id) {
   const author = prompt('Author', entry.author || ''); if (author == null) return;
   const description = prompt('Description', entry.description || ''); if (description == null) return;
   const tags = prompt('Tags', entry.tags || ''); if (tags == null) return;
-  const updated = await api.updateBook(id, { title, author, description, tags });
-  Object.assign(entry, { name: updated.title, author: updated.author, description: updated.description || '', tags: updated.tags || '' });
+  const series = prompt('Series', entry.series || ''); if (series == null) return;
+  const seriesIndexText = prompt('Series number (optional)', entry.seriesIndex == null ? '' : String(entry.seriesIndex)); if (seriesIndexText == null) return;
+  const seriesIndex = seriesIndexText.trim() === '' ? null : Number(seriesIndexText);
+  if (seriesIndex != null && !Number.isFinite(seriesIndex)) { showToast('Series number must be numeric.'); return; }
+  const isbn = prompt('ISBN', entry.isbn || ''); if (isbn == null) return;
+  const updated = await api.updateBook(id, { title, author, description, tags, series, series_index: seriesIndex, isbn });
+  Object.assign(entry, { name: updated.title, author: updated.author, description: updated.description || '', tags: updated.tags || '', series: updated.series || '', seriesIndex: updated.series_index, isbn: updated.isbn || '' });
   closeBookDetails(); renderShelf(); showToast('Book details updated.');
 }
 
@@ -4867,7 +5165,15 @@ function closeNotebookModal() { const modal = document.getElementById('notebook-
 function renderNotebook() {
   const query = (document.getElementById('notebook-search')?.value || '').trim().toLocaleLowerCase();
   const tags = [...new Set(notebookItems.flatMap(item => item.tags || []))].sort();
-  document.getElementById('notebook-tags').innerHTML = tags.map(tag => `<button class="tag-chip" type="button" onclick="notebookTagFilter='${escapeHtml(tag)}'; renderNotebook()">#${escapeHtml(tag)}</button>`).join('');
+  const tagContainer = document.getElementById('notebook-tags');
+  tagContainer.replaceChildren(...tags.map(tag => {
+    const button = document.createElement('button');
+    button.className = 'tag-chip';
+    button.type = 'button';
+    button.textContent = `#${tag}`;
+    button.addEventListener('click', () => { notebookTagFilter = tag; renderNotebook(); });
+    return button;
+  }));
   const filtered = notebookItems.filter(item => (!query || `${item.excerpt || ''} ${item.note || ''} ${item.book_title || ''} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(query)) && (!notebookTagFilter || (item.tags || []).includes(notebookTagFilter)));
   document.getElementById('notebook-list').innerHTML = filtered.length ? filtered.map(item => `<article class="notebook-item"><small>${escapeHtml(item.book_title)} · ${escapeHtml(item.chapter || '')}</small><blockquote>${escapeHtml(item.excerpt || '')}</blockquote>${item.note ? `<p>${escapeHtml(item.note)}</p>` : ''}<div>${(item.tags || []).map(tag => `<span class="tag-chip">#${escapeHtml(tag)}</span>`).join(' ')} <button class="file-link-btn" onclick="editHighlightTags('${item.id}')">Edit tags</button> <button class="file-link-btn" onclick="closeNotebookModal(); openBook('${item.book_id}')">Open</button></div></article>`).join('') : '<p class="bookmark-empty">No matching highlights.</p>';
 }
@@ -4905,7 +5211,7 @@ function syncGestureSettingsUI() {
 
 function updateProgressEstimate() {
   const entry = getCurrentEntry(); const target = document.getElementById('progress-remaining');
-  if (entry && target) target.textContent = `${formatMinutes(estimatedBookMinutes(entry, true))} left`;
+  if (entry && target) { const remaining = formatMinutes(estimatedBookMinutes(entry, true)); target.textContent = remaining ? `${remaining} left` : ''; }
 }
 
 function populateTtsVoices() {
@@ -4913,7 +5219,13 @@ function populateTtsVoices() {
   const voices = speechSynthesis.getVoices(); select.replaceChildren(...voices.map(voice => new Option(`${voice.name} (${voice.lang})`, voice.voiceURI, false, voice.voiceURI === ttsVoiceURI)));
 }
 
-function applyAppUpdate() { window.__pendingServiceWorker?.postMessage({ type: 'SKIP_WAITING' }); }
+function applyAppUpdate() {
+  if (document.body.classList.contains('reader-active')) {
+    showToast('The update will be ready after you leave the reader.');
+    return;
+  }
+  window.__pendingServiceWorker?.postMessage({ type: 'SKIP_WAITING' });
+}
 function dismissInstallTip() { localStorage.setItem('endpaper_install_tip_dismissed', '1'); document.getElementById('install-tip').hidden = true; }
 
 async function saveReadingGoals() {

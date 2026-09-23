@@ -103,7 +103,44 @@ test('authenticated API enforces roles, exposes stats, and deduplicates writes',
     const payload = await stats.json();
     assert.ok(Array.isArray(payload.daily));
     assert.ok(Array.isArray(payload.monthly));
-    assert.equal(payload.reading_bytes_per_minute, null);
+    assert.equal(payload.reading_words_per_minute, null);
+
+    const epub = await fs.readFile(path.join(__dirname, 'fixtures/three-chapters.epub'));
+    const uploadBody = new FormData();
+    uploadBody.append('file', new Blob([epub], { type: 'application/epub+zip' }), 'pace.epub');
+    const upload = await fetch(`${baseUrl}/api/books`, { method: 'POST', headers: { Cookie: cookie }, body: uploadBody });
+    assert.equal(upload.status, 201);
+    const uploaded = await upload.json();
+    const Database = require('better-sqlite3');
+    const database = new Database(path.join(dataDir, 'endpaper.db'));
+    try {
+      // The small fixture represents a longer book so one session can meet
+      // the minimum sample size without slowing down the test.
+      database.prepare('UPDATE books SET word_count = 20000 WHERE id = ?').run(uploaded.id);
+      const jsonPost = async (url, body) => fetch(`${baseUrl}${url}`, {
+        method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const patchProgress = async progress => fetch(`${baseUrl}/api/books/${uploaded.id}`, {
+        method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ progress_percent: progress }),
+      });
+      const firstSession = await jsonPost('/api/sessions/start', { book_id: uploaded.id });
+      assert.equal(firstSession.status, 201);
+      const first = await firstSession.json();
+      database.prepare('UPDATE reading_sessions SET started_at = ? WHERE id = ?').run(new Date(Date.now() - 31 * 60000).toISOString(), first.id);
+      assert.equal((await patchProgress(20)).status, 200);
+      assert.equal((await jsonPost(`/api/sessions/${first.id}/end`, {})).status, 200);
+      const measured = await (await fetch(`${baseUrl}/api/stats`, { headers: { Cookie: cookie } })).json();
+      assert.ok(measured.reading_words_per_minute >= 120 && measured.reading_words_per_minute <= 140);
+
+      const jumpSession = await jsonPost('/api/sessions/start', { book_id: uploaded.id });
+      assert.equal(jumpSession.status, 201);
+      const jump = await jumpSession.json();
+      database.prepare('UPDATE reading_sessions SET started_at = ? WHERE id = ?').run(new Date(Date.now() - 2 * 60000).toISOString(), jump.id);
+      assert.equal((await patchProgress(90)).status, 200);
+      assert.equal((await jsonPost(`/api/sessions/${jump.id}/end`, {})).status, 200);
+      const afterJump = await (await fetch(`${baseUrl}/api/stats`, { headers: { Cookie: cookie } })).json();
+      assert.equal(afterJump.reading_words_per_minute, measured.reading_words_per_minute);
+    } finally { database.close(); }
   } finally {
     if (child && child.exitCode === null) {
       child.kill('SIGTERM');
