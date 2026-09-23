@@ -123,6 +123,7 @@ test('a failed progress seek restores the saved position', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.setViewportSize({ width: 1200, height: 800 });
   const before = await page.evaluate(() => getCurrentEntry().progress);
   await page.evaluate(() => {
     rendition.display = async () => { throw new Error('seek failure'); };
@@ -134,21 +135,16 @@ test('a failed progress seek restores the saved position', async ({ page }) => {
   expect(await page.evaluate(() => getCurrentEntry().progress)).toBe(before);
 });
 
-test('dragging the mobile progress slider previews and seeks', async ({ page }) => {
+test('mobile page labels advance with the book', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
-  const slider = page.locator('#progress-slider');
-  const bounds = await slider.boundingBox();
-  const y = bounds.y + bounds.height / 2;
-  await page.mouse.move(bounds.x + bounds.width * 0.1, y);
-  await page.mouse.down();
-  await page.mouse.move(bounds.x + bounds.width * 0.8, y, { steps: 8 });
-  expect(Number(await slider.inputValue())).toBeGreaterThanOrEqual(65);
-  await page.mouse.up();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Three');
-  await page.touchscreen.tap(bounds.x + bounds.width * 0.15, y);
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.locator('#loading-overlay')).not.toBeVisible();
+  await expect(page.locator('#mobile-reader-page-count')).toHaveText('1 of 3');
+  await expect(page.locator('#mobile-reader-chapter-pages')).toHaveText('0 pages left in chapter');
+  await page.evaluate(() => turnPage('next'));
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Two');
+  await expect(page.locator('#mobile-reader-page-count')).toHaveText('2 of 3');
 });
 
 test('library sheet traps focus and supports reading and downloaded filters', async ({ page }) => {
@@ -328,7 +324,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   }));
   expect(readerLayout.viewerTop).toBe(0);
   expect(readerLayout.viewerBottom).toBe(readerLayout.viewportHeight);
-  expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
+  expect(readerLayout.sliderHeight).toBe(0);
   await page.evaluate(() => setReadingTheme('paper'));
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   await expect(page.locator('#loading-overlay')).not.toBeVisible();
@@ -349,14 +345,19 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await expect(page.locator('#mobile-reader-title')).toBeHidden();
   await expect(page.locator('#progress-chapter')).toBeHidden();
   await expect(page.locator('#progress-pct')).toBeHidden();
-  await expect(page.locator('#progress-bar')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(page.locator('#progress-track')).toBeHidden();
+  await expect(page.locator('#mobile-reader-chapter-pages')).toContainText(/pages? left in chapter/);
+  await expect(page.locator('#mobile-reader-page-count')).toContainText(/^(?:\d+ of \d+|Calculating pages…)$/);
+  await expect(page.locator('#progress-bar')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   const revealedControls = await page.evaluate(() => ({
     close: document.getElementById('mobile-reader-back').getBoundingClientRect().toJSON(),
     menu: document.getElementById('mobile-reader-tools-button').getBoundingClientRect().toJSON(),
     progress: document.getElementById('progress-bar').getBoundingClientRect().toJSON(),
+    viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
   }));
-  expect(revealedControls.close.right).toBeGreaterThan(revealedControls.progress.right);
+  expect(revealedControls.progress.left).toBeGreaterThan(0);
+  expect(revealedControls.progress.right).toBeLessThan(revealedControls.viewportWidth);
   expect(revealedControls.close.bottom).toBeLessThan(revealedControls.viewportHeight / 3);
   expect(revealedControls.menu.top).toBeGreaterThan(revealedControls.viewportHeight * 0.75);
   expect(revealedControls.progress.right).toBeLessThan(revealedControls.menu.left);
@@ -521,8 +522,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.9-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.9-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.10-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.10-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

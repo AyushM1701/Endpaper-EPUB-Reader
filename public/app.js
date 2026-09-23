@@ -1740,6 +1740,8 @@ async function openBook(id){
   const initPctEl = document.getElementById('progress-pct');
   const immersivePctEl = document.getElementById('reader-immersive-progress');
   const initSliderEl = document.getElementById('progress-slider');
+  document.getElementById('mobile-reader-page-count').textContent = 'Calculating pages…';
+  document.getElementById('mobile-reader-chapter-pages').textContent = '';
   if (initPctEl) initPctEl.textContent = initialPct + '%';
   if (immersivePctEl) immersivePctEl.textContent = initialPct + '% read';
   if (initSliderEl) {
@@ -2152,6 +2154,34 @@ function bindRelocated(entry, targetRendition = rendition, targetBook = book, re
   });
 }
 
+function updateMobileReaderPageLabels(location, targetBook) {
+  const chapterPages = document.getElementById('mobile-reader-chapter-pages');
+  const bookPages = document.getElementById('mobile-reader-page-count');
+  const displayed = location?.start?.displayed;
+  if (chapterPages) {
+    const page = Number(displayed?.page);
+    const total = Number(displayed?.total);
+    const remaining = Number.isFinite(page) && Number.isFinite(total) && total > 0
+      ? Math.max(0, Math.round(total) - Math.max(1, Math.round(page))) : null;
+    chapterPages.textContent = remaining == null ? '' : `${remaining} ${remaining === 1 ? 'page' : 'pages'} left in chapter`;
+  }
+  if (!bookPages) return;
+  const locations = targetBook?.locations;
+  const cfi = location?.start?.cfi;
+  if (!locationsReady || !locations || !cfi || !Number.isFinite(locations.total) || locations.total < 0) {
+    bookPages.textContent = 'Calculating pages…';
+    return;
+  }
+  try {
+    const index = locations.locationFromCfi(cfi);
+    if (Number.isFinite(index) && index >= 0) {
+      bookPages.textContent = `${Math.min(index + 1, locations.total + 1)} of ${locations.total + 1}`;
+      return;
+    }
+  } catch (_) {}
+  bookPages.textContent = 'Calculating pages…';
+}
+
 function updateReaderLocation(entry, location, targetBook, targetRendition, request) {
     if (!location || !location.start || !isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     const cfi = location.start.cfi;
@@ -2256,6 +2286,7 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
         if (immersiveChapter) immersiveChapter.textContent = chapterLabel || entry.name;
         const immersiveProgress = document.getElementById('reader-immersive-progress');
         if (immersiveProgress && !isLockedNow) immersiveProgress.textContent = pctText + ' read';
+        updateMobileReaderPageLabels(location, targetBook);
 
         updateBookmarkIcon(cfi);
       });

@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T10:53:44.183Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T11:19:06.703Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 98,994 bytes · SHA-256: `1e894ac244e630a2972a1449dc086b423699beb7d37ee281287eea2478e958f1`
+Size: 1,00,250 bytes · SHA-256: `fb71030eb6434d8c5d0d85aee7d8eb8dc8bbf8c27ac8fa9731f275c43ed37ff8`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -813,6 +813,7 @@ html.dark-shell #fullscreen-exit-control:focus-visible{
   box-shadow: 0 0 0 3px var(--gold-bright), 0 0 0 6px var(--paper);
 }
 #progress-pct{ font-size:12px; color: var(--ink-soft); min-width:38px; text-align:right; }
+#mobile-reader-page-count,#mobile-reader-chapter-pages{display:none}
 #progress-chapter{ font-size:12.5px; color: var(--ink-soft); font-style:italic; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 #progress-track{ position:relative; flex:1; display:flex; align-items:center; }
@@ -2231,11 +2232,14 @@ html.dark-shell .admin-btn-sm:hover {
   #mobile-reader-back,#mobile-reader-tools-button{width:48px;height:48px;min-width:48px;min-height:48px;border:1px solid color-mix(in srgb,var(--reader-ink) 15%,transparent);background:color-mix(in srgb,var(--reader-page-bg) 88%,var(--reader-ink));box-shadow:0 5px 22px #0004}
   #mobile-reader-back{top:calc(13px + min(env(safe-area-inset-top),60px));right:18px;bottom:auto;left:auto}
   #mobile-reader-back svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+  #mobile-reader-chapter-pages:not(:empty){box-sizing:border-box;display:block;position:absolute;top:calc(20px + min(env(safe-area-inset-top),60px));left:50%;max-width:calc(100vw - 150px);transform:translateX(-50%);padding:9px 13px;border:1px solid color-mix(in srgb,var(--reader-ink) 12%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 74%,transparent);color:color-mix(in srgb,var(--reader-ink) 76%,transparent);box-shadow:0 4px 18px #0003;backdrop-filter:blur(18px) saturate(1.15);-webkit-backdrop-filter:blur(18px) saturate(1.15);font:500 12px/1.1 var(--font-ui);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
   #mobile-reader-tools-button{top:auto;right:18px;bottom:calc(24px + min(env(safe-area-inset-bottom),34px));left:auto}
   #mobile-reader-tools-button svg{width:23px;height:23px}
-  body.reader-active #progress-bar{display:flex;align-items:center;left:20px;right:86px;bottom:calc(26px + min(env(safe-area-inset-bottom),34px));width:auto;height:44px;min-height:44px;max-height:44px;padding:0;border:0;background:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+  body.reader-active #progress-bar{display:flex;align-items:center;justify-content:center;left:50%;right:auto;bottom:calc(29px + min(env(safe-area-inset-bottom),34px));width:auto;height:auto;min-height:0;max-height:none;transform:translateX(-50%);padding:8px 14px;border:1px solid color-mix(in srgb,var(--reader-ink) 12%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 74%,transparent);color:color-mix(in srgb,var(--reader-ink) 82%,transparent);box-shadow:0 4px 18px #0003;backdrop-filter:blur(18px) saturate(1.15);-webkit-backdrop-filter:blur(18px) saturate(1.15);pointer-events:none}
+  body.reader-active #mobile-reader-page-count{display:block;white-space:nowrap;font:500 12px/1.1 var(--font-ui)}
+  body.reader-active #app.chrome-hidden #progress-bar{transform:translate(-50%,110%)}
   body.reader-active #progress-chapter,body.reader-active #progress-pct{display:none!important}
-  body.reader-active #progress-track{grid-column:auto;grid-row:auto;min-height:44px}
+  body.reader-active #progress-track{display:none!important}
   body.reader-active #progress-slider{height:44px;min-height:44px;background-image:linear-gradient(to right,var(--gold) var(--progress,0%),color-mix(in srgb,var(--reader-ink) 40%,transparent) var(--progress,0%));background-size:100% 3px}
   body.reader-active #progress-slider::-webkit-slider-thumb{width:14px;height:14px;box-shadow:0 0 0 2px var(--reader-page-bg),0 2px 8px #0006}
   body.reader-active #reader-view:not(.scrolled) .nav-zone{opacity:0}
@@ -2318,7 +2322,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ### `public/app.js`
 
-Size: 2,32,300 bytes · SHA-256: `27f291f73468cd500d540c8739119ba2fba677c9213ea66805ad6209104b6237`
+Size: 2,33,764 bytes · SHA-256: `dfa66638b6a2dd43c7532e0ffd8be924587d97871d49caf487576aa66cab5c11`
 
 `````javascript
 /* ================================================================
@@ -4063,6 +4067,8 @@ async function openBook(id){
   const initPctEl = document.getElementById('progress-pct');
   const immersivePctEl = document.getElementById('reader-immersive-progress');
   const initSliderEl = document.getElementById('progress-slider');
+  document.getElementById('mobile-reader-page-count').textContent = 'Calculating pages…';
+  document.getElementById('mobile-reader-chapter-pages').textContent = '';
   if (initPctEl) initPctEl.textContent = initialPct + '%';
   if (immersivePctEl) immersivePctEl.textContent = initialPct + '% read';
   if (initSliderEl) {
@@ -4475,6 +4481,34 @@ function bindRelocated(entry, targetRendition = rendition, targetBook = book, re
   });
 }
 
+function updateMobileReaderPageLabels(location, targetBook) {
+  const chapterPages = document.getElementById('mobile-reader-chapter-pages');
+  const bookPages = document.getElementById('mobile-reader-page-count');
+  const displayed = location?.start?.displayed;
+  if (chapterPages) {
+    const page = Number(displayed?.page);
+    const total = Number(displayed?.total);
+    const remaining = Number.isFinite(page) && Number.isFinite(total) && total > 0
+      ? Math.max(0, Math.round(total) - Math.max(1, Math.round(page))) : null;
+    chapterPages.textContent = remaining == null ? '' : `${remaining} ${remaining === 1 ? 'page' : 'pages'} left in chapter`;
+  }
+  if (!bookPages) return;
+  const locations = targetBook?.locations;
+  const cfi = location?.start?.cfi;
+  if (!locationsReady || !locations || !cfi || !Number.isFinite(locations.total) || locations.total < 0) {
+    bookPages.textContent = 'Calculating pages…';
+    return;
+  }
+  try {
+    const index = locations.locationFromCfi(cfi);
+    if (Number.isFinite(index) && index >= 0) {
+      bookPages.textContent = `${Math.min(index + 1, locations.total + 1)} of ${locations.total + 1}`;
+      return;
+    }
+  } catch (_) {}
+  bookPages.textContent = 'Calculating pages…';
+}
+
 function updateReaderLocation(entry, location, targetBook, targetRendition, request) {
     if (!location || !location.start || !isReaderRequestCurrent(request, targetBook, targetRendition)) return;
     const cfi = location.start.cfi;
@@ -4579,6 +4613,7 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
         if (immersiveChapter) immersiveChapter.textContent = chapterLabel || entry.name;
         const immersiveProgress = document.getElementById('reader-immersive-progress');
         if (immersiveProgress && !isLockedNow) immersiveProgress.textContent = pctText + ' read';
+        updateMobileReaderPageLabels(location, targetBook);
 
         updateBookmarkIcon(cfi);
       });
@@ -8007,7 +8042,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 48,611 bytes · SHA-256: `affab024b8c09f0c8179c866a18196055f260d6c1ccac6d1a2a9ae155c00eee6`
+Size: 48,777 bytes · SHA-256: `db03fb34729e6274c18e0a1ea2cc3825716311cda9a430c259b1afccce889228`
 
 `````html
 <!DOCTYPE html>
@@ -8023,9 +8058,9 @@ Size: 48,611 bytes · SHA-256: `affab024b8c09f0c8179c866a18196055f260d6c1ccac6d1
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.9-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.9-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.9-20260923">
+<script src="/jszip.min.js?v=v15.0.10-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.10-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.10-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -8248,6 +8283,7 @@ Size: 48,611 bytes · SHA-256: `affab024b8c09f0c8179c866a18196055f260d6c1ccac6d1
     <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
       <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Close reader"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+      <span id="mobile-reader-chapter-pages" aria-live="polite"></span>
       <span id="mobile-reader-title"></span>
       <button type="button" id="mobile-reader-tools-button" aria-label="Reading tools" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <div id="mobile-reader-tools-menu" hidden aria-label="Reading tools menu">
@@ -8264,6 +8300,7 @@ Size: 48,611 bytes · SHA-256: `affab024b8c09f0c8179c866a18196055f260d6c1ccac6d1
       </div>
     </div>
     <div id="progress-bar">
+      <span id="mobile-reader-page-count" aria-live="polite">Calculating pages…</span>
       <span id="progress-chapter"></span>
       <div id="progress-track">
         <label class="sr-only" for="progress-slider">Reading progress</label>
@@ -8701,8 +8738,8 @@ Size: 48,611 bytes · SHA-256: `affab024b8c09f0c8179c866a18196055f260d6c1ccac6d1
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.9-20260923"></script>
-<script src="/mobile.js?v=v15.0.9-20260923"></script>
+<script src="/app.js?v=v15.0.10-20260923"></script>
+<script src="/mobile.js?v=v15.0.10-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -9466,10 +9503,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `3428ac0bb40e73d7a0f28a57ae747eaabf9aef4f97411b7ccc6fe2412b10a347`
+Size: 8,357 bytes · SHA-256: `dbe05d976663b4bf55778819d98dcaf3b9e67bbe822196895a6bf9a143cead06`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.9-20260923';
+const BUILD_VERSION = 'v15.0.10-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16786,7 +16823,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 35,035 bytes · SHA-256: `40dfb58483b735b8f1b2a817c30d1a6ada6be9245c0f3a11e1658c6ce9154bb8`
+Size: 35,263 bytes · SHA-256: `72b5b82dfc80b83c18a3f309afc145e650565342376664a731b0fcb058d89825`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16914,6 +16951,7 @@ test('a failed progress seek restores the saved position', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.setViewportSize({ width: 1200, height: 800 });
   const before = await page.evaluate(() => getCurrentEntry().progress);
   await page.evaluate(() => {
     rendition.display = async () => { throw new Error('seek failure'); };
@@ -16925,21 +16963,16 @@ test('a failed progress seek restores the saved position', async ({ page }) => {
   expect(await page.evaluate(() => getCurrentEntry().progress)).toBe(before);
 });
 
-test('dragging the mobile progress slider previews and seeks', async ({ page }) => {
+test('mobile page labels advance with the book', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
-  const slider = page.locator('#progress-slider');
-  const bounds = await slider.boundingBox();
-  const y = bounds.y + bounds.height / 2;
-  await page.mouse.move(bounds.x + bounds.width * 0.1, y);
-  await page.mouse.down();
-  await page.mouse.move(bounds.x + bounds.width * 0.8, y, { steps: 8 });
-  expect(Number(await slider.inputValue())).toBeGreaterThanOrEqual(65);
-  await page.mouse.up();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Three');
-  await page.touchscreen.tap(bounds.x + bounds.width * 0.15, y);
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.locator('#loading-overlay')).not.toBeVisible();
+  await expect(page.locator('#mobile-reader-page-count')).toHaveText('1 of 3');
+  await expect(page.locator('#mobile-reader-chapter-pages')).toHaveText('0 pages left in chapter');
+  await page.evaluate(() => turnPage('next'));
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Two');
+  await expect(page.locator('#mobile-reader-page-count')).toHaveText('2 of 3');
 });
 
 test('library sheet traps focus and supports reading and downloaded filters', async ({ page }) => {
@@ -17119,7 +17152,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   }));
   expect(readerLayout.viewerTop).toBe(0);
   expect(readerLayout.viewerBottom).toBe(readerLayout.viewportHeight);
-  expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
+  expect(readerLayout.sliderHeight).toBe(0);
   await page.evaluate(() => setReadingTheme('paper'));
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   await expect(page.locator('#loading-overlay')).not.toBeVisible();
@@ -17140,14 +17173,19 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await expect(page.locator('#mobile-reader-title')).toBeHidden();
   await expect(page.locator('#progress-chapter')).toBeHidden();
   await expect(page.locator('#progress-pct')).toBeHidden();
-  await expect(page.locator('#progress-bar')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(page.locator('#progress-track')).toBeHidden();
+  await expect(page.locator('#mobile-reader-chapter-pages')).toContainText(/pages? left in chapter/);
+  await expect(page.locator('#mobile-reader-page-count')).toContainText(/^(?:\d+ of \d+|Calculating pages…)$/);
+  await expect(page.locator('#progress-bar')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   const revealedControls = await page.evaluate(() => ({
     close: document.getElementById('mobile-reader-back').getBoundingClientRect().toJSON(),
     menu: document.getElementById('mobile-reader-tools-button').getBoundingClientRect().toJSON(),
     progress: document.getElementById('progress-bar').getBoundingClientRect().toJSON(),
+    viewportWidth: window.innerWidth,
     viewportHeight: window.innerHeight,
   }));
-  expect(revealedControls.close.right).toBeGreaterThan(revealedControls.progress.right);
+  expect(revealedControls.progress.left).toBeGreaterThan(0);
+  expect(revealedControls.progress.right).toBeLessThan(revealedControls.viewportWidth);
   expect(revealedControls.close.bottom).toBeLessThan(revealedControls.viewportHeight / 3);
   expect(revealedControls.menu.top).toBeGreaterThan(revealedControls.viewportHeight * 0.75);
   expect(revealedControls.progress.right).toBeLessThan(revealedControls.menu.left);
@@ -17312,8 +17350,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.9-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.9-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.10-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.10-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);
