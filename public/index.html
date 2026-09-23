@@ -11,9 +11,9 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.8-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.8-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.8-20260923">
+<script src="/jszip.min.js?v=v15.0.9-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.9-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.9-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -235,7 +235,7 @@
     <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Show reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
-      <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
+      <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Close reader"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
       <span id="mobile-reader-title"></span>
       <button type="button" id="mobile-reader-tools-button" aria-label="Reading tools" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <div id="mobile-reader-tools-menu" hidden aria-label="Reading tools menu">
@@ -689,8 +689,8 @@
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.8-20260923"></script>
-<script src="/mobile.js?v=v15.0.8-20260923"></script>
+<script src="/app.js?v=v15.0.9-20260923"></script>
+<script src="/mobile.js?v=v15.0.9-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

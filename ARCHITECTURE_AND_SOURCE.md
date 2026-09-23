@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T10:42:24.243Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T10:53:44.183Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 97,258 bytes · SHA-256: `eeda9c537f714ec02822c74389264b6ae36e64f270db4ee1ff314dc17705714f`
+Size: 98,994 bytes · SHA-256: `1e894ac244e630a2972a1449dc086b423699beb7d37ee281287eea2478e958f1`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -2226,7 +2226,20 @@ html.dark-shell .admin-btn-sm:hover {
 
   body.reader-active #mobile-reader-controls::before{background:color-mix(in srgb,var(--reader-page-bg) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
   body.reader-active #progress-bar{background:color-mix(in srgb,var(--reader-page-bg) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
-  #mobile-reader-tools-menu{position:fixed;inset:auto 18px calc(78px + min(env(safe-area-inset-bottom),34px));width:auto;max-height:min(70dvh,540px);display:grid;gap:8px;padding:0;border:0;border-radius:0;background:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+  body.reader-active #mobile-reader-controls::before{display:none}
+  #mobile-reader-title{display:none!important}
+  #mobile-reader-back,#mobile-reader-tools-button{width:48px;height:48px;min-width:48px;min-height:48px;border:1px solid color-mix(in srgb,var(--reader-ink) 15%,transparent);background:color-mix(in srgb,var(--reader-page-bg) 88%,var(--reader-ink));box-shadow:0 5px 22px #0004}
+  #mobile-reader-back{top:calc(13px + min(env(safe-area-inset-top),60px));right:18px;bottom:auto;left:auto}
+  #mobile-reader-back svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+  #mobile-reader-tools-button{top:auto;right:18px;bottom:calc(24px + min(env(safe-area-inset-bottom),34px));left:auto}
+  #mobile-reader-tools-button svg{width:23px;height:23px}
+  body.reader-active #progress-bar{display:flex;align-items:center;left:20px;right:86px;bottom:calc(26px + min(env(safe-area-inset-bottom),34px));width:auto;height:44px;min-height:44px;max-height:44px;padding:0;border:0;background:transparent;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+  body.reader-active #progress-chapter,body.reader-active #progress-pct{display:none!important}
+  body.reader-active #progress-track{grid-column:auto;grid-row:auto;min-height:44px}
+  body.reader-active #progress-slider{height:44px;min-height:44px;background-image:linear-gradient(to right,var(--gold) var(--progress,0%),color-mix(in srgb,var(--reader-ink) 40%,transparent) var(--progress,0%));background-size:100% 3px}
+  body.reader-active #progress-slider::-webkit-slider-thumb{width:14px;height:14px;box-shadow:0 0 0 2px var(--reader-page-bg),0 2px 8px #0006}
+  body.reader-active #reader-view:not(.scrolled) .nav-zone{opacity:0}
+  #mobile-reader-tools-menu{position:fixed;inset:auto 18px calc(84px + min(env(safe-area-inset-bottom),34px));width:auto;max-height:min(70dvh,540px);display:grid;gap:8px;padding:0;border:0;border-radius:0;background:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
   #mobile-reader-tools-menu[hidden]{display:none}
   #mobile-reader-tools-menu .mobile-reader-tool-main{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:55px;padding:10px 18px;border:1px solid color-mix(in srgb,var(--reader-ink) 20%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 76%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 8px 25px var(--shadow);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);font:500 15px var(--font-ui)}
   #mobile-reader-tools-menu .mobile-reader-tool-main svg{flex:0 0 22px;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -7994,7 +8007,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 48,524 bytes · SHA-256: `9261f188dee84d0ea6077ce91000f81f81c8f4306c7314009908f39edd609df3`
+Size: 48,611 bytes · SHA-256: `affab024b8c09f0c8179c866a18196055f260d6c1ccac6d1a2a9ae155c00eee6`
 
 `````html
 <!DOCTYPE html>
@@ -8010,9 +8023,9 @@ Size: 48,524 bytes · SHA-256: `9261f188dee84d0ea6077ce91000f81f81c8f4306c731400
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.8-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.8-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.8-20260923">
+<script src="/jszip.min.js?v=v15.0.9-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.9-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.9-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -8234,7 +8247,7 @@ Size: 48,524 bytes · SHA-256: `9261f188dee84d0ea6077ce91000f81f81c8f4306c731400
     <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Show reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
-      <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
+      <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Close reader"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
       <span id="mobile-reader-title"></span>
       <button type="button" id="mobile-reader-tools-button" aria-label="Reading tools" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
       <div id="mobile-reader-tools-menu" hidden aria-label="Reading tools menu">
@@ -8688,8 +8701,8 @@ Size: 48,524 bytes · SHA-256: `9261f188dee84d0ea6077ce91000f81f81c8f4306c731400
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.8-20260923"></script>
-<script src="/mobile.js?v=v15.0.8-20260923"></script>
+<script src="/app.js?v=v15.0.9-20260923"></script>
+<script src="/mobile.js?v=v15.0.9-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -9453,10 +9466,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `d5e7ae4899881b5463be5ed86b88a6ccbf8956843770f682ba1e69713ec1c5bc`
+Size: 8,356 bytes · SHA-256: `3428ac0bb40e73d7a0f28a57ae747eaabf9aef4f97411b7ccc6fe2412b10a347`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.8-20260923';
+const BUILD_VERSION = 'v15.0.9-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16773,7 +16786,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 33,806 bytes · SHA-256: `a5416e9f8936d231bb609ac3d8613b8a84d0c22121a938998f48b12bbcce9636`
+Size: 35,035 bytes · SHA-256: `40dfb58483b735b8f1b2a817c30d1a6ada6be9245c0f3a11e1658c6ce9154bb8`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -17078,7 +17091,7 @@ test('scrolling hides reader controls and a tap fades them back in', async ({ pa
     }
   });
   await expect(page.locator('#app')).not.toHaveClass(/chrome-hidden/);
-  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close reader' })).toBeVisible();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
   await page.screenshot({ path: 'test-results/mobile-scrolled-controls.png' });
   await page.evaluate(() => { document.getElementById('epub-scroll-container').scrollTop += 120; });
@@ -17095,6 +17108,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.locator('#loading-overlay')).not.toBeVisible();
   await page.evaluate(() => setLayout('paginated'));
   await expect(page.locator('#reader-view')).not.toHaveClass(/scrolled/);
   const readerLayout = await page.evaluate(() => ({
@@ -17108,6 +17122,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
   await page.evaluate(() => setReadingTheme('paper'));
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.locator('#loading-overlay')).not.toBeVisible();
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
@@ -17120,8 +17135,23 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
   await expect(page.locator('#progress-bar')).toHaveCSS('opacity', '1');
-  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close reader' })).toBeVisible();
   await expect(page.locator('#mobile-reader-tools-button')).toBeVisible();
+  await expect(page.locator('#mobile-reader-title')).toBeHidden();
+  await expect(page.locator('#progress-chapter')).toBeHidden();
+  await expect(page.locator('#progress-pct')).toBeHidden();
+  await expect(page.locator('#progress-bar')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  const revealedControls = await page.evaluate(() => ({
+    close: document.getElementById('mobile-reader-back').getBoundingClientRect().toJSON(),
+    menu: document.getElementById('mobile-reader-tools-button').getBoundingClientRect().toJSON(),
+    progress: document.getElementById('progress-bar').getBoundingClientRect().toJSON(),
+    viewportHeight: window.innerHeight,
+  }));
+  expect(revealedControls.close.right).toBeGreaterThan(revealedControls.progress.right);
+  expect(revealedControls.close.bottom).toBeLessThan(revealedControls.viewportHeight / 3);
+  expect(revealedControls.menu.top).toBeGreaterThan(revealedControls.viewportHeight * 0.75);
+  expect(revealedControls.progress.right).toBeLessThan(revealedControls.menu.left);
+  await page.screenshot({ path: 'test-results/mobile-reader-revealed.png' });
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   await page.evaluate(() => enterImmersiveReading());
   await page.locator('#reader-tap-layer').evaluate(target => {
@@ -17282,8 +17312,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.8-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.8-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.9-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.9-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);
