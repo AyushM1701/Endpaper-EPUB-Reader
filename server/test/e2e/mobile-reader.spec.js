@@ -311,7 +311,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   expect(readerLayout.viewerTop).toBe(0);
   expect(readerLayout.viewerBottom).toBe(readerLayout.viewportHeight);
   expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
-  await page.evaluate(() => setReadingTheme('dark'));
+  await page.evaluate(() => setReadingTheme('paper'));
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
@@ -332,14 +332,27 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await expect.poll(() => page.locator('#settings-drawer').evaluate(element => Math.round(element.getBoundingClientRect().bottom))).toBeLessThanOrEqual(852);
   await page.screenshot({ path: 'test-results/mobile-reader-settings.png' });
   await expect(page.locator('#settings-drawer .mobile-reading-quick')).toBeVisible();
-  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(4);
+  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(6);
   await expect(page.locator('#settings-drawer .layout-options')).toBeHidden();
   const initialFontSize = await page.evaluate(() => settings.fontSize);
   await page.locator('.mobile-reading-quick').getByRole('button', { name: 'Increase font size' }).click();
   expect(await page.evaluate(() => settings.fontSize)).toBeGreaterThan(initialFontSize);
-  await page.locator('#settings-drawer .theme-swatch.sepia').click();
-  await expect(page.locator('#settings-drawer .theme-swatch.sepia')).toHaveAttribute('aria-checked', 'true');
-  await page.locator('#settings-drawer .theme-swatch.dark').click();
+  for (const [name, background] of Object.entries({
+    original: 'rgb(5, 5, 5)',
+    quiet: 'rgb(8, 8, 8)',
+    paper: 'rgb(41, 41, 43)',
+    bold: 'rgb(6, 6, 6)',
+    calm: 'rgb(68, 59, 49)',
+    focus: 'rgb(36, 32, 23)',
+  })) {
+    await page.locator(`#settings-drawer .theme-swatch.${name}`).click();
+    await expect(page.locator(`#settings-drawer .theme-swatch.${name}`)).toHaveAttribute('aria-checked', 'true');
+    await expect(page.frameLocator('#viewer iframe').locator('body')).toHaveCSS('background-color', background);
+    if (name === 'bold') await expect(page.frameLocator('#viewer iframe').locator('body')).toHaveCSS('font-weight', '600');
+  }
+  await page.locator('#settings-drawer .theme-swatch.paper').click();
+  expect(await page.evaluate(() => { settings.theme = 'sepia'; normalizeSettings(); return settings.theme; })).toBe('calm');
+  await page.locator('#settings-drawer .theme-swatch.paper').click();
   await page.getByRole('button', { name: 'Customize reading' }).click();
   await expect(page.locator('#settings-drawer .layout-options')).toBeVisible();
   await page.evaluate(() => {
@@ -432,8 +445,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.6-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.6-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.7-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.7-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

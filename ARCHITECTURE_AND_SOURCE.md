@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T09:58:22.277Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T10:08:01.699Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 96,890 bytes · SHA-256: `6ea652fdd16c093b6f7c6b33a272fb4d6341d235b9824f82cee0b0927e4fdba8`
+Size: 97,078 bytes · SHA-256: `83d16e450af8fe75aa55bfaa630348cdee6a2b6555fe52d2521919b6344009b1`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -866,18 +866,22 @@ html.dark-shell #fullscreen-exit-control:focus-visible{
   font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.7px;
   color: var(--ink-soft); font-weight:600; margin-bottom:10px; display:block;
 }
-.theme-swatches{ display:flex; gap:8px; }
+.theme-swatches{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 .theme-swatch{
-  flex:1; height:52px; border-radius: var(--radius); cursor:pointer;
+  min-width:0; height:96px; border-radius: var(--radius); cursor:pointer;
   border: 2px solid transparent; position:relative;
-  display:flex; align-items:flex-end; justify-content:center; padding-bottom:5px;
-  font-family:var(--font-ui); font-size:10px; font-weight:600; letter-spacing:0.3px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+  font-family:Georgia,serif; font-size:15px; font-weight:400;
 }
+.theme-swatch::before{content:'Aa';font:34px Georgia,serif}
 .theme-swatch.active{ border-color: var(--gold); }
-.theme-swatch.light{ background:#F6F1E7; color:#3a332a; }
-.theme-swatch.sepia{ background:#EBDCC0; color:#4a3a22; }
-.theme-swatch.dark{ background:#2B2E33; color:#d8d3c8; }
-.theme-swatch.night{ background:#000; color:#8a8a8a; }
+.theme-swatch.original{ background:#050505; color:#F7F5F1; }
+.theme-swatch.quiet{ background:#080808; color:#A8A5A1; }
+.theme-swatch.paper{ background:#29292B; color:#F1EFEB; }
+.theme-swatch.bold{ background:#060606; color:#FFFFFF; font-weight:700; }
+.theme-swatch.bold::before{font-weight:700}
+.theme-swatch.calm{ background:#443B31; color:#F1E1CB; }
+.theme-swatch.focus{ background:#242017; color:#EEE6D5; }
 
 /* Continue reading */
 #continue-card{
@@ -2237,9 +2241,8 @@ html.dark-shell .admin-btn-sm:hover {
   #settings-drawer .mobile-reading-quick{order:1;display:grid;grid-template-columns:1fr 1fr;gap:1px;overflow:hidden;margin:0 0 22px;border-radius:999px;background:color-mix(in srgb,var(--reader-ink) 24%,transparent)}
   #settings-drawer .mobile-reading-quick button{min-height:52px;border:0;background:color-mix(in srgb,var(--reader-page-bg) 76%,var(--reader-ink));color:var(--reader-ink);font:600 20px Georgia,serif}
   #settings-drawer .mobile-theme-group{order:2;display:block;margin:0 0 18px}
-  #settings-drawer .theme-swatches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
-  #settings-drawer .theme-swatch{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;height:94px;padding:8px 2px;border:2px solid transparent;border-radius:16px;font:600 11px var(--font-ui);letter-spacing:0;box-shadow:0 5px 18px #0002}
-  #settings-drawer .theme-swatch::before{content:'Aa';font:34px Georgia,serif}
+  #settings-drawer .theme-swatches{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  #settings-drawer .theme-swatch{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;height:94px;padding:8px 2px;border:2px solid transparent;border-radius:16px;font-size:14px;letter-spacing:0;box-shadow:0 5px 18px #0002}
   #settings-drawer .theme-swatch.active{border-color:var(--reader-ink);outline:2px solid var(--reader-page-bg);outline-offset:-5px}
   #settings-drawer #mobile-reading-customize{order:3;display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border:1px solid color-mix(in srgb,var(--reader-ink) 22%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 75%,var(--reader-ink));color:var(--reader-ink);font:600 14px var(--font-ui)}
   #settings-drawer #mobile-reading-customize[aria-expanded="true"] span{transform:rotate(180deg)}
@@ -2300,7 +2303,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ### `public/app.js`
 
-Size: 2,28,699 bytes · SHA-256: `4e7aef5bda1cd40d1b8b459f0a6d8f2728563dec8d28c1533c409b0467e0e02c`
+Size: 2,29,246 bytes · SHA-256: `7e3c8c98fea31e1dcd230f27269d4f042d9cfe0fc666ed192afd0ae58e8f0bc2`
 
 `````javascript
 /* ================================================================
@@ -2761,7 +2764,7 @@ async function refreshCurrentUser() {
 }
 
 const DEFAULT_READER_SETTINGS = Object.freeze({
-  theme: 'light',
+  theme: 'paper',
   font: 'Serif (Georgia)',
   fontSize: 100,
   lineHeight: 150,
@@ -2782,11 +2785,15 @@ const FONTS = [
 ];
 
 const THEMES = {
-  light: { body: '#F6F1E7', text: '#201C16', link: '#A9803F' },
-  sepia: { body: '#EBDCC0', text: '#4A3A22', link: '#8A6A2F' },
-  dark:  { body: '#22262C', text: '#DAD5C8', link: '#C9973F' },
-  night: { body: '#000000', text: '#B8B8B8', link: '#E0B15C' },
+  original: { body: '#050505', text: '#F7F5F1', link: '#D9B67A' },
+  quiet: { body: '#080808', text: '#A8A5A1', link: '#B79C78' },
+  paper: { body: '#29292B', text: '#F1EFEB', link: '#D4AF77' },
+  bold: { body: '#060606', text: '#FFFFFF', link: '#E7BF81', weight: 600 },
+  calm: { body: '#443B31', text: '#F1E1CB', link: '#E8C49A' },
+  focus: { body: '#242017', text: '#EEE6D5', link: '#D9B97F' },
 };
+
+const LEGACY_READER_THEMES = { light: 'paper', sepia: 'calm', dark: 'paper', night: 'original' };
 
 // Many EPUBs hard-code foreground colours on individual text elements. Keep
 // the override deliberately text-only so page art and SVG illustrations retain
@@ -2801,7 +2808,9 @@ const SPACING_VALUES = ['normal', '0.5px', '1px', '1.6px'];
 const spineColors = ['#3F5D4C','#7A3B32','#3B4A6B','#6B4C3B','#5B3F5D','#2C4237','#8A6A2F','#43506B'];
 
 function normalizeSettings() {
-  if (!THEMES[settings.theme]) settings.theme = 'light';
+  settings.theme = Object.hasOwn(LEGACY_READER_THEMES, settings.theme)
+    ? LEGACY_READER_THEMES[settings.theme]
+    : Object.hasOwn(THEMES, settings.theme) ? settings.theme : 'paper';
   if (!FONTS.some(font => font.name === settings.font)) settings.font = FONTS[0].name;
   settings.fontSize = Number.isFinite(settings.fontSize) ? Math.max(70, Math.min(220, Math.round(settings.fontSize / 10) * 10)) : 100;
   settings.lineHeight = Number.isFinite(settings.lineHeight) ? Math.max(120, Math.min(220, Math.round(settings.lineHeight / 10) * 10)) : 150;
@@ -3302,7 +3311,7 @@ function applyReaderContentStyles(contents) {
     style.id = 'endpaper-reader-content-style';
     (doc.head || doc.documentElement).appendChild(style);
   }
-  const theme = THEMES[settings.theme] || THEMES.light;
+  const theme = THEMES[settings.theme] || THEMES.paper;
   const isScrolled = settings.layout === 'scrolled';
   style.textContent = `
     @font-face { font-family: 'Atkinson Hyperlegible'; src: url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2'); font-style: normal; font-weight: 400; }
@@ -3326,8 +3335,10 @@ function applyReaderContentStyles(contents) {
     }
     body {
       margin: 0 !important;
+      font-weight: ${theme.weight || 400} !important;
       ${isScrolled ? 'padding-top: 14px !important; padding-bottom: 80px !important;' : 'padding-top: 0 !important; padding-bottom: 0 !important;'}
     }
+    ${theme.weight ? `body p, body li, body blockquote { font-weight: ${theme.weight} !important; }` : ''}
     body p, body div, body span, body li, body dd, body dt, body blockquote, body figcaption, body td, body th, body h1, body h2, body h3, body h4, body h5, body h6 {
       color: inherit !important;
       background-color: transparent !important;
@@ -3346,6 +3357,9 @@ function applyReaderContentStyles(contents) {
       transition: background-color 0.15s ease, box-shadow 0.15s ease !important;
     }
   `;
+  // EPUB.js retains earlier theme stylesheets. Keep this current palette last
+  // so switching back to a previously used theme updates the visible page.
+  (doc.head || doc.documentElement).appendChild(style);
 }
 
 function isInteractiveReaderTarget(target) {
@@ -4780,12 +4794,11 @@ function finishPendingHighlight(context, returnFocus = true){
 }
 
 function highlightStyle(color){
-  const isDarkPage = settings.theme === 'dark' || settings.theme === 'night';
   return {
     fill: color,
-    'fill-opacity': isDarkPage ? '0.62' : '0.4',
-    // Multiply makes coloured SVG highlights almost disappear on black pages.
-    'mix-blend-mode': isDarkPage ? 'screen' : 'multiply',
+    'fill-opacity': '0.62',
+    // All six page palettes are dark; screen blending keeps highlights visible.
+    'mix-blend-mode': 'screen',
   };
 }
 
@@ -5189,7 +5202,7 @@ function registerThemes(){
 }
 
 function syncReaderPalette(){
-  const readerTheme = THEMES[settings.theme] || THEMES.light;
+  const readerTheme = THEMES[settings.theme] || THEMES.paper;
   const app = document.getElementById('app');
   if (app) {
     app.style.setProperty('--reader-page-bg', readerTheme.body);
@@ -5240,10 +5253,8 @@ function applyTheme(){
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
   // Keep the installed app's exposed safe area in the same reading palette.
-  if (rendition && typeof rendition.views === 'function') {
-    rendition.views().forEach(v => {
-      if (v && v.contents) applyReaderContentStyles(v.contents);
-    });
+  if (typeof rendition.getContents === 'function') {
+    rendition.getContents().forEach(applyReaderContentStyles);
   }
   updateSettingsUI();
   saveSettings();
@@ -5273,7 +5284,7 @@ function updateSettingsUI(){
 }
 
 function setReadingTheme(name){
-  if (!THEMES[name]) return;
+  if (!Object.hasOwn(THEMES, name)) return;
   settings.theme = name;
   applyTheme();
   refreshHighlightStyles();
@@ -7909,7 +7920,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 48,124 bytes · SHA-256: `7e9c802bb7aa8953fd4cc3c9b6f98a69b12a2aa89c90c239d1cbf82c1dc0153e`
+Size: 48,456 bytes · SHA-256: `e1c99a3927f15d951a6a7e5845a9d2afdf7df11242238c9841ae40a1affe70a2`
 
 `````html
 <!DOCTYPE html>
@@ -7925,9 +7936,9 @@ Size: 48,124 bytes · SHA-256: `7e9c802bb7aa8953fd4cc3c9b6f98a69b12a2aa89c90c239
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.6-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.6-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.6-20260923">
+<script src="/jszip.min.js?v=v15.0.7-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.7-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.7-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -8294,10 +8305,12 @@ Size: 48,124 bytes · SHA-256: `7e9c802bb7aa8953fd4cc3c9b6f98a69b12a2aa89c90c239
       <div class="setting-group mobile-theme-group" role="radiogroup" aria-label="Book page theme">
         <span class="setting-label">Page theme</span>
         <div class="theme-swatches">
-          <button type="button" class="theme-swatch light" role="radio" aria-checked="true" data-theme="light" onclick="setReadingTheme('light')">Light</button>
-          <button type="button" class="theme-swatch sepia" role="radio" aria-checked="false" data-theme="sepia" onclick="setReadingTheme('sepia')">Sepia</button>
-          <button type="button" class="theme-swatch dark" role="radio" aria-checked="false" data-theme="dark" onclick="setReadingTheme('dark')">Dark</button>
-          <button type="button" class="theme-swatch night" role="radio" aria-checked="false" data-theme="night" onclick="setReadingTheme('night')">Night</button>
+          <button type="button" class="theme-swatch original" role="radio" aria-checked="false" data-theme="original" onclick="setReadingTheme('original')">Original</button>
+          <button type="button" class="theme-swatch quiet" role="radio" aria-checked="false" data-theme="quiet" onclick="setReadingTheme('quiet')">Quiet</button>
+          <button type="button" class="theme-swatch paper" role="radio" aria-checked="true" data-theme="paper" onclick="setReadingTheme('paper')">Paper</button>
+          <button type="button" class="theme-swatch bold" role="radio" aria-checked="false" data-theme="bold" onclick="setReadingTheme('bold')">Bold</button>
+          <button type="button" class="theme-swatch calm" role="radio" aria-checked="false" data-theme="calm" onclick="setReadingTheme('calm')">Calm</button>
+          <button type="button" class="theme-swatch focus" role="radio" aria-checked="false" data-theme="focus" onclick="setReadingTheme('focus')">Focus</button>
         </div>
       </div>
 
@@ -8600,8 +8613,8 @@ Size: 48,124 bytes · SHA-256: `7e9c802bb7aa8953fd4cc3c9b6f98a69b12a2aa89c90c239
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.6-20260923"></script>
-<script src="/mobile.js?v=v15.0.6-20260923"></script>
+<script src="/app.js?v=v15.0.7-20260923"></script>
+<script src="/mobile.js?v=v15.0.7-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -9365,10 +9378,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `31ad087c5b20ee14e7f7287fa128d121b79c569328360ad1990a16af5a0bac68`
+Size: 8,356 bytes · SHA-256: `dc6a45933e1a2da932aa23100e35d3497b21453560bf59ed4f41fe88ad5c05d1`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.6-20260923';
+const BUILD_VERSION = 'v15.0.7-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16685,7 +16698,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 29,383 bytes · SHA-256: `ec56ca61024f2269d0bc4dd04c4172f4661ca26c8ceba4ed82b6fd2ef4c24cb6`
+Size: 30,061 bytes · SHA-256: `bb851d636f64fc66b8a36472460d7605f255df6229e25cd0f06ead43ea988c76`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -17001,7 +17014,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   expect(readerLayout.viewerTop).toBe(0);
   expect(readerLayout.viewerBottom).toBe(readerLayout.viewportHeight);
   expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
-  await page.evaluate(() => setReadingTheme('dark'));
+  await page.evaluate(() => setReadingTheme('paper'));
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
@@ -17022,14 +17035,27 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await expect.poll(() => page.locator('#settings-drawer').evaluate(element => Math.round(element.getBoundingClientRect().bottom))).toBeLessThanOrEqual(852);
   await page.screenshot({ path: 'test-results/mobile-reader-settings.png' });
   await expect(page.locator('#settings-drawer .mobile-reading-quick')).toBeVisible();
-  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(4);
+  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(6);
   await expect(page.locator('#settings-drawer .layout-options')).toBeHidden();
   const initialFontSize = await page.evaluate(() => settings.fontSize);
   await page.locator('.mobile-reading-quick').getByRole('button', { name: 'Increase font size' }).click();
   expect(await page.evaluate(() => settings.fontSize)).toBeGreaterThan(initialFontSize);
-  await page.locator('#settings-drawer .theme-swatch.sepia').click();
-  await expect(page.locator('#settings-drawer .theme-swatch.sepia')).toHaveAttribute('aria-checked', 'true');
-  await page.locator('#settings-drawer .theme-swatch.dark').click();
+  for (const [name, background] of Object.entries({
+    original: 'rgb(5, 5, 5)',
+    quiet: 'rgb(8, 8, 8)',
+    paper: 'rgb(41, 41, 43)',
+    bold: 'rgb(6, 6, 6)',
+    calm: 'rgb(68, 59, 49)',
+    focus: 'rgb(36, 32, 23)',
+  })) {
+    await page.locator(`#settings-drawer .theme-swatch.${name}`).click();
+    await expect(page.locator(`#settings-drawer .theme-swatch.${name}`)).toHaveAttribute('aria-checked', 'true');
+    await expect(page.frameLocator('#viewer iframe').locator('body')).toHaveCSS('background-color', background);
+    if (name === 'bold') await expect(page.frameLocator('#viewer iframe').locator('body')).toHaveCSS('font-weight', '600');
+  }
+  await page.locator('#settings-drawer .theme-swatch.paper').click();
+  expect(await page.evaluate(() => { settings.theme = 'sepia'; normalizeSettings(); return settings.theme; })).toBe('calm');
+  await page.locator('#settings-drawer .theme-swatch.paper').click();
   await page.getByRole('button', { name: 'Customize reading' }).click();
   await expect(page.locator('#settings-drawer .layout-options')).toBeVisible();
   await page.evaluate(() => {
@@ -17122,8 +17148,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.6-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.6-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.7-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.7-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

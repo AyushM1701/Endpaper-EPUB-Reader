@@ -11,9 +11,9 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.6-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.6-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.6-20260923">
+<script src="/jszip.min.js?v=v15.0.7-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.7-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.7-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -380,10 +380,12 @@
       <div class="setting-group mobile-theme-group" role="radiogroup" aria-label="Book page theme">
         <span class="setting-label">Page theme</span>
         <div class="theme-swatches">
-          <button type="button" class="theme-swatch light" role="radio" aria-checked="true" data-theme="light" onclick="setReadingTheme('light')">Light</button>
-          <button type="button" class="theme-swatch sepia" role="radio" aria-checked="false" data-theme="sepia" onclick="setReadingTheme('sepia')">Sepia</button>
-          <button type="button" class="theme-swatch dark" role="radio" aria-checked="false" data-theme="dark" onclick="setReadingTheme('dark')">Dark</button>
-          <button type="button" class="theme-swatch night" role="radio" aria-checked="false" data-theme="night" onclick="setReadingTheme('night')">Night</button>
+          <button type="button" class="theme-swatch original" role="radio" aria-checked="false" data-theme="original" onclick="setReadingTheme('original')">Original</button>
+          <button type="button" class="theme-swatch quiet" role="radio" aria-checked="false" data-theme="quiet" onclick="setReadingTheme('quiet')">Quiet</button>
+          <button type="button" class="theme-swatch paper" role="radio" aria-checked="true" data-theme="paper" onclick="setReadingTheme('paper')">Paper</button>
+          <button type="button" class="theme-swatch bold" role="radio" aria-checked="false" data-theme="bold" onclick="setReadingTheme('bold')">Bold</button>
+          <button type="button" class="theme-swatch calm" role="radio" aria-checked="false" data-theme="calm" onclick="setReadingTheme('calm')">Calm</button>
+          <button type="button" class="theme-swatch focus" role="radio" aria-checked="false" data-theme="focus" onclick="setReadingTheme('focus')">Focus</button>
         </div>
       </div>
 
@@ -686,8 +688,8 @@
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.6-20260923"></script>
-<script src="/mobile.js?v=v15.0.6-20260923"></script>
+<script src="/app.js?v=v15.0.7-20260923"></script>
+<script src="/mobile.js?v=v15.0.7-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

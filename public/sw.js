@@ -1,4 +1,4 @@
-const BUILD_VERSION = 'v15.0.6-20260923';
+const BUILD_VERSION = 'v15.0.7-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';

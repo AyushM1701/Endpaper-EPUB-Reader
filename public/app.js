@@ -456,7 +456,7 @@ async function refreshCurrentUser() {
 }
 
 const DEFAULT_READER_SETTINGS = Object.freeze({
-  theme: 'light',
+  theme: 'paper',
   font: 'Serif (Georgia)',
   fontSize: 100,
   lineHeight: 150,
@@ -477,11 +477,15 @@ const FONTS = [
 ];
 
 const THEMES = {
-  light: { body: '#F6F1E7', text: '#201C16', link: '#A9803F' },
-  sepia: { body: '#EBDCC0', text: '#4A3A22', link: '#8A6A2F' },
-  dark:  { body: '#22262C', text: '#DAD5C8', link: '#C9973F' },
-  night: { body: '#000000', text: '#B8B8B8', link: '#E0B15C' },
+  original: { body: '#050505', text: '#F7F5F1', link: '#D9B67A' },
+  quiet: { body: '#080808', text: '#A8A5A1', link: '#B79C78' },
+  paper: { body: '#29292B', text: '#F1EFEB', link: '#D4AF77' },
+  bold: { body: '#060606', text: '#FFFFFF', link: '#E7BF81', weight: 600 },
+  calm: { body: '#443B31', text: '#F1E1CB', link: '#E8C49A' },
+  focus: { body: '#242017', text: '#EEE6D5', link: '#D9B97F' },
 };
+
+const LEGACY_READER_THEMES = { light: 'paper', sepia: 'calm', dark: 'paper', night: 'original' };
 
 // Many EPUBs hard-code foreground colours on individual text elements. Keep
 // the override deliberately text-only so page art and SVG illustrations retain
@@ -496,7 +500,9 @@ const SPACING_VALUES = ['normal', '0.5px', '1px', '1.6px'];
 const spineColors = ['#3F5D4C','#7A3B32','#3B4A6B','#6B4C3B','#5B3F5D','#2C4237','#8A6A2F','#43506B'];
 
 function normalizeSettings() {
-  if (!THEMES[settings.theme]) settings.theme = 'light';
+  settings.theme = Object.hasOwn(LEGACY_READER_THEMES, settings.theme)
+    ? LEGACY_READER_THEMES[settings.theme]
+    : Object.hasOwn(THEMES, settings.theme) ? settings.theme : 'paper';
   if (!FONTS.some(font => font.name === settings.font)) settings.font = FONTS[0].name;
   settings.fontSize = Number.isFinite(settings.fontSize) ? Math.max(70, Math.min(220, Math.round(settings.fontSize / 10) * 10)) : 100;
   settings.lineHeight = Number.isFinite(settings.lineHeight) ? Math.max(120, Math.min(220, Math.round(settings.lineHeight / 10) * 10)) : 150;
@@ -997,7 +1003,7 @@ function applyReaderContentStyles(contents) {
     style.id = 'endpaper-reader-content-style';
     (doc.head || doc.documentElement).appendChild(style);
   }
-  const theme = THEMES[settings.theme] || THEMES.light;
+  const theme = THEMES[settings.theme] || THEMES.paper;
   const isScrolled = settings.layout === 'scrolled';
   style.textContent = `
     @font-face { font-family: 'Atkinson Hyperlegible'; src: url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2'); font-style: normal; font-weight: 400; }
@@ -1021,8 +1027,10 @@ function applyReaderContentStyles(contents) {
     }
     body {
       margin: 0 !important;
+      font-weight: ${theme.weight || 400} !important;
       ${isScrolled ? 'padding-top: 14px !important; padding-bottom: 80px !important;' : 'padding-top: 0 !important; padding-bottom: 0 !important;'}
     }
+    ${theme.weight ? `body p, body li, body blockquote { font-weight: ${theme.weight} !important; }` : ''}
     body p, body div, body span, body li, body dd, body dt, body blockquote, body figcaption, body td, body th, body h1, body h2, body h3, body h4, body h5, body h6 {
       color: inherit !important;
       background-color: transparent !important;
@@ -1041,6 +1049,9 @@ function applyReaderContentStyles(contents) {
       transition: background-color 0.15s ease, box-shadow 0.15s ease !important;
     }
   `;
+  // EPUB.js retains earlier theme stylesheets. Keep this current palette last
+  // so switching back to a previously used theme updates the visible page.
+  (doc.head || doc.documentElement).appendChild(style);
 }
 
 function isInteractiveReaderTarget(target) {
@@ -2475,12 +2486,11 @@ function finishPendingHighlight(context, returnFocus = true){
 }
 
 function highlightStyle(color){
-  const isDarkPage = settings.theme === 'dark' || settings.theme === 'night';
   return {
     fill: color,
-    'fill-opacity': isDarkPage ? '0.62' : '0.4',
-    // Multiply makes coloured SVG highlights almost disappear on black pages.
-    'mix-blend-mode': isDarkPage ? 'screen' : 'multiply',
+    'fill-opacity': '0.62',
+    // All six page palettes are dark; screen blending keeps highlights visible.
+    'mix-blend-mode': 'screen',
   };
 }
 
@@ -2884,7 +2894,7 @@ function registerThemes(){
 }
 
 function syncReaderPalette(){
-  const readerTheme = THEMES[settings.theme] || THEMES.light;
+  const readerTheme = THEMES[settings.theme] || THEMES.paper;
   const app = document.getElementById('app');
   if (app) {
     app.style.setProperty('--reader-page-bg', readerTheme.body);
@@ -2935,10 +2945,8 @@ function applyTheme(){
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
   // Keep the installed app's exposed safe area in the same reading palette.
-  if (rendition && typeof rendition.views === 'function') {
-    rendition.views().forEach(v => {
-      if (v && v.contents) applyReaderContentStyles(v.contents);
-    });
+  if (typeof rendition.getContents === 'function') {
+    rendition.getContents().forEach(applyReaderContentStyles);
   }
   updateSettingsUI();
   saveSettings();
@@ -2968,7 +2976,7 @@ function updateSettingsUI(){
 }
 
 function setReadingTheme(name){
-  if (!THEMES[name]) return;
+  if (!Object.hasOwn(THEMES, name)) return;
   settings.theme = name;
   applyTheme();
   refreshHighlightStyles();
