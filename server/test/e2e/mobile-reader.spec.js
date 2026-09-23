@@ -274,10 +274,27 @@ test('scrolling hides reader controls and a tap fades them back in', async ({ pa
   await expect(page.locator('#reader-reveal-controls')).toHaveCSS('opacity', '0');
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
   await page.screenshot({ path: 'test-results/mobile-scrolled-immersive.png' });
-  await page.locator('#viewer-wrap').evaluate(target => {
-    const touch = { identifier: 1, clientX: 190, clientY: 350 };
+  const beforeScroll = await page.locator('#epub-scroll-container').evaluate(element => element.scrollTop);
+  await page.locator('#reader-tap-layer').dispatchEvent('wheel', { deltaY: 100, cancelable: true });
+  await expect.poll(() => page.locator('#epub-scroll-container').evaluate(element => element.scrollTop)).toBeGreaterThan(beforeScroll);
+  const afterWheel = await page.locator('#epub-scroll-container').evaluate(element => element.scrollTop);
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    for (const [type, y] of [['touchstart', 350], ['touchmove', 300], ['touchend', 300]]) {
+      const touch = { identifier: 1, clientX: 190, clientY: y };
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        touches: { value: type === 'touchend' ? [] : [touch] },
+        changedTouches: { value: [touch] },
+      });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect.poll(() => page.locator('#epub-scroll-container').evaluate(element => element.scrollTop)).toBeGreaterThan(afterWheel);
+  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    const touch = { identifier: 2, clientX: 190, clientY: 350 };
     for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
-      const event = new Event(type, { bubbles: true });
+      const event = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
       target.dispatchEvent(event);
     }
@@ -316,15 +333,57 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
-  await expect(page.getByRole('button', { name: 'Reading menu' })).toHaveCSS('opacity', '0');
+  await expect(page.getByRole('button', { name: 'Show reading controls' })).toHaveCSS('opacity', '0');
   await expect(page.locator('#reader-immersive-progress')).toContainText('% read');
   await expect(page.locator('#reader-immersive-progress')).toBeHidden();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
   await page.screenshot({ path: 'test-results/mobile-reader-immersive.png' });
-  await page.getByRole('button', { name: 'Reading menu' }).click();
+  await page.locator('#reader-tap-layer').click({ position: { x: 20, y: 210 } });
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
-  await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.locator('#progress-bar')).toHaveCSS('opacity', '1');
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(page.locator('#mobile-reader-tools-button')).toBeVisible();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => enterImmersiveReading());
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    const touch = { identifier: 3, clientX: 20, clientY: 220 };
+    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => enterImmersiveReading());
+  await page.locator('#reader-tap-layer').click({ position: { x: 365, y: 260 } });
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => enterImmersiveReading());
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    for (const [type, x] of [['touchstart', 340], ['touchmove', 40], ['touchend', 40]]) {
+      const touch = { identifier: 4, clientX: x, clientY: 350 };
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        touches: { value: type === 'touchend' ? [] : [touch] },
+        changedTouches: { value: [touch] },
+      });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Two');
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    const touch = { identifier: 5, clientX: 190, clientY: 350 };
+    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await page.locator('#mobile-reader-tools-button').click();
+  await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
   await expect(page.locator('[data-reader-tool="fullscreen"] svg')).toBeVisible();
   await page.screenshot({ path: 'test-results/mobile-reader-tools.png' });
   await page.getByRole('button', { name: 'Themes & settings' }).click();
@@ -362,8 +421,8 @@ test('immersive reading always exposes a route back to settings', async ({ page 
     app.webkitRequestFullscreen = undefined;
     toggleFullscreen();
   });
-  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
-  await page.getByRole('button', { name: 'Reading menu' }).click();
+  await expect(page.locator('#reader-tap-layer')).toBeVisible();
+  await page.locator('#reader-tap-layer').click({ position: { x: 195, y: 425 } });
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
 });
 
@@ -445,8 +504,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.7-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.7-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.8-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.8-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

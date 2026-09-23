@@ -1782,6 +1782,7 @@ html.dark-shell .admin-btn-sm:hover {
 #mobile-shell{display:none}
 #mobile-reader-controls{display:none}
 #reader-reveal-controls{display:none}
+#reader-tap-layer{display:none}
 #reader-immersive-chapter,#reader-immersive-progress{display:none}
 .mobile-reading-quick,#mobile-reading-customize{display:none}
 @media (max-width:700px), (max-width:900px) and (pointer:coarse){
@@ -1908,7 +1909,8 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:block;position:fixed;z-index:76;left:70px;right:70px;bottom:calc(17px + min(env(safe-area-inset-bottom),34px));text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-reveal-controls{top:calc(4px + min(env(safe-area-inset-top),60px));right:15px;width:44px;min-height:44px;padding:0;border-radius:50%}
   body.reader-active #reader-view.scrolled #viewer-wrap{inset:0}
-  body.reader-active #app.chrome-hidden #reader-reveal-controls{opacity:0;pointer-events:auto}
+  body.reader-active #app.chrome-hidden #reader-reveal-controls{opacity:0;pointer-events:none}
+  body.reader-active #app.chrome-hidden #reader-tap-layer{display:block;position:fixed;inset:0;z-index:77;background:transparent;touch-action:none}
   body.reader-active #app.chrome-hidden #reader-immersive-chapter,
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:none}
   #reader-reveal-controls{transition:opacity .18s ease}

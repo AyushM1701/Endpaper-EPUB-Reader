@@ -11,9 +11,9 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.7-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.7-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.7-20260923">
+<script src="/jszip.min.js?v=v15.0.8-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.8-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.8-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -232,7 +232,7 @@
   <!-- Reader -->
   <div id="reader-view">
     <span id="reader-immersive-chapter" aria-hidden="true"></span>
-    <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Reading menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Show reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
       <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
@@ -269,6 +269,7 @@
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
+      <div id="reader-tap-layer" aria-hidden="true"></div>
       <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" onclick="turnPage('prev')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
@@ -688,8 +689,8 @@
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.7-20260923"></script>
-<script src="/mobile.js?v=v15.0.7-20260923"></script>
+<script src="/app.js?v=v15.0.8-20260923"></script>
+<script src="/mobile.js?v=v15.0.8-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

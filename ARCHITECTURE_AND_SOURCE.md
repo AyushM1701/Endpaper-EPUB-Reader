@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T10:08:01.699Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T10:42:24.243Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 97,078 bytes · SHA-256: `83d16e450af8fe75aa55bfaa630348cdee6a2b6555fe52d2521919b6344009b1`
+Size: 97,258 bytes · SHA-256: `eeda9c537f714ec02822c74389264b6ae36e64f270db4ee1ff314dc17705714f`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -2090,6 +2090,7 @@ html.dark-shell .admin-btn-sm:hover {
 #mobile-shell{display:none}
 #mobile-reader-controls{display:none}
 #reader-reveal-controls{display:none}
+#reader-tap-layer{display:none}
 #reader-immersive-chapter,#reader-immersive-progress{display:none}
 .mobile-reading-quick,#mobile-reading-customize{display:none}
 @media (max-width:700px), (max-width:900px) and (pointer:coarse){
@@ -2216,7 +2217,8 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:block;position:fixed;z-index:76;left:70px;right:70px;bottom:calc(17px + min(env(safe-area-inset-bottom),34px));text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-reveal-controls{top:calc(4px + min(env(safe-area-inset-top),60px));right:15px;width:44px;min-height:44px;padding:0;border-radius:50%}
   body.reader-active #reader-view.scrolled #viewer-wrap{inset:0}
-  body.reader-active #app.chrome-hidden #reader-reveal-controls{opacity:0;pointer-events:auto}
+  body.reader-active #app.chrome-hidden #reader-reveal-controls{opacity:0;pointer-events:none}
+  body.reader-active #app.chrome-hidden #reader-tap-layer{display:block;position:fixed;inset:0;z-index:77;background:transparent;touch-action:none}
   body.reader-active #app.chrome-hidden #reader-immersive-chapter,
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:none}
   #reader-reveal-controls{transition:opacity .18s ease}
@@ -2303,7 +2305,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ### `public/app.js`
 
-Size: 2,29,246 bytes · SHA-256: `7e3c8c98fea31e1dcd230f27269d4f042d9cfe0fc666ed192afd0ae58e8f0bc2`
+Size: 2,32,300 bytes · SHA-256: `27f291f73468cd500d540c8739119ba2fba677c9213ea66805ad6209104b6237`
 
 `````javascript
 /* ================================================================
@@ -3385,8 +3387,12 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
     }
   }
 
-  // 2. Clean tap: tap-to-turn zones (left 25% = prev, right 25% = next, center = toggle controls)
+  // 2. Any clean tap reveals hidden controls; edge turns apply while visible.
   if (!isCancel && !moved && Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 450) {
+    if (isImmersiveReading()) {
+      showReaderChromeTemporarily();
+      return true;
+    }
     if (settings.layout === 'paginated' && settings.gestures.edge) {
       if (ex < width * 0.25) {
         turnPage('prev');
@@ -3408,6 +3414,77 @@ function initViewerWrapGestures() {
   const wrap = document.getElementById('viewer-wrap');
   if (!wrap || wrap.__gestureBound) return;
   wrap.__gestureBound = true;
+  const tapLayer = document.getElementById('reader-tap-layer');
+  if (tapLayer) {
+    let lastTouchY = 0;
+    let startTouchX = 0;
+    let startTouchY = 0;
+    let touchMoved = false;
+    let scrollVelocity = 0;
+    let lastMoveAt = 0;
+    let momentumFrame = null;
+    tapLayer.addEventListener('touchstart', e => {
+      if (momentumFrame != null) cancelAnimationFrame(momentumFrame);
+      momentumFrame = null;
+      startTouchX = e.touches[0]?.clientX || 0;
+      startTouchY = e.touches[0]?.clientY || 0;
+      lastTouchY = startTouchY;
+      touchMoved = false;
+      scrollVelocity = 0;
+      lastMoveAt = performance.now();
+    }, { passive: true });
+    tapLayer.addEventListener('touchmove', e => {
+      if (e.touches.length !== 1) return;
+      const nextX = e.touches[0].clientX;
+      const nextY = e.touches[0].clientY;
+      if (Math.abs(nextX - startTouchX) > 10 || Math.abs(nextY - startTouchY) > 10) touchMoved = true;
+      if (settings.layout !== 'scrolled') return;
+      const scroller = document.getElementById('epub-scroll-container');
+      if (!scroller) return;
+      const delta = lastTouchY - nextY;
+      if (Math.abs(delta) > 1) {
+        scroller.scrollTop += delta;
+        const now = performance.now();
+        const velocity = delta / Math.max(8, now - lastMoveAt);
+        scrollVelocity = Math.max(-1, Math.min(1, scrollVelocity * 0.6 + velocity * 0.4));
+        lastMoveAt = now;
+        e.preventDefault();
+      }
+      lastTouchY = nextY;
+    }, { passive: false });
+    tapLayer.addEventListener('touchend', e => {
+      if (!touchMoved && isImmersiveReading()) {
+        e.stopPropagation();
+        showReaderChromeTemporarily();
+      } else if (touchMoved && settings.layout === 'scrolled' && Math.abs(scrollVelocity) > 0.05) {
+        let previousFrame = performance.now();
+        const coast = now => {
+          const scroller = document.getElementById('epub-scroll-container');
+          if (!scroller || !isImmersiveReading() || Math.abs(scrollVelocity) < 0.05) {
+            momentumFrame = null;
+            return;
+          }
+          const elapsed = Math.min(32, now - previousFrame);
+          previousFrame = now;
+          scroller.scrollTop += scrollVelocity * elapsed;
+          scrollVelocity *= Math.pow(0.72, elapsed / 16);
+          momentumFrame = requestAnimationFrame(coast);
+        };
+        momentumFrame = requestAnimationFrame(coast);
+      }
+    }, { passive: true });
+    tapLayer.addEventListener('click', () => {
+      if (!touchMoved && isImmersiveReading()) showReaderChromeTemporarily();
+      touchMoved = false;
+    });
+    tapLayer.addEventListener('wheel', e => {
+      if (settings.layout !== 'scrolled') return;
+      const scroller = document.getElementById('epub-scroll-container');
+      if (!scroller) return;
+      scroller.scrollTop += e.deltaY;
+      e.preventDefault();
+    }, { passive: false });
+  }
 
   let sx = 0, sy = 0, st = 0, moved = false, handled = false;
 
@@ -3440,6 +3517,9 @@ function initViewerWrapGestures() {
 
   wrap.addEventListener('touchend', (e) => onEndOrCancel(e, false), { passive: true });
   wrap.addEventListener('touchcancel', (e) => onEndOrCancel(e, true), { passive: true });
+  wrap.addEventListener('click', (e) => {
+    if (isImmersiveReading() && !isInteractiveReaderTarget(e.target)) showReaderChromeTemporarily();
+  });
 }
 
 function registerSwipeGestures(){
@@ -3452,7 +3532,6 @@ function registerSwipeGestures(){
     doc.addEventListener('keydown', handleReaderShortcut);
 
     let sx = 0, sy = 0, st = 0, moved = false, handled = false;
-
     const onTouchStart = (e) => {
       if (e.touches.length !== 1) return;
       sx = e.touches[0].clientX;
@@ -3461,24 +3540,20 @@ function registerSwipeGestures(){
       moved = false;
       handled = false;
     };
-
     const onTouchMove = (e) => {
       if (e.touches.length !== 1) return;
       const dx = e.touches[0].clientX - sx;
       const dy = e.touches[0].clientY - sy;
       if (Math.abs(dx) > 10 || Math.abs(dy) > 10) moved = true;
     };
-
     const onTouchEndOrCancel = (e, isCancel) => {
       if (handled || !rendition || !e.changedTouches || !e.changedTouches.length) return;
       if (isInteractiveReaderTarget(e.target)) return;
-
       const t = e.changedTouches[0];
       const width = win ? win.innerWidth : (doc.documentElement ? doc.documentElement.clientWidth : window.innerWidth);
       const res = handleReaderSwipeOrTap(sx, sy, t.clientX, t.clientY, Date.now() - st, moved, width, win, isCancel);
       if (res) handled = true;
     };
-
     doc.addEventListener('touchstart', onTouchStart, { passive: true });
     doc.addEventListener('touchmove', onTouchMove, { passive: true });
     doc.addEventListener('touchend', (e) => onTouchEndOrCancel(e, false), { passive: true });
@@ -3492,6 +3567,7 @@ let chromeResizeFrame = null;
 let lastReaderViewportSize = { width: 0, height: 0 };
 // Auto-hide timer for the Kindle-like 3-second chrome dismiss (R-13)
 let readerChromeTimer = null;
+let readerChromeRevealedAt = 0;
 
 // Page-turn serialization mutex — all rendition.next()/prev() calls route through
 // turnPage() to prevent overlapping navigations from swipe, tap, keyboard, and TTS (R-09)
@@ -3716,6 +3792,7 @@ function isReaderInteractionOpen() {
 function showReaderChromeTemporarily(delay = 3000) {
   const app = document.getElementById('app');
   if (!app || !document.body.classList.contains('reader-active')) return;
+  readerChromeRevealedAt = Date.now();
   app.classList.remove('chrome-hidden');
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
@@ -3767,7 +3844,7 @@ function tuneScrollContainer(targetRendition = rendition, entry = getCurrentEntr
       lastReaderInteractionAt = Date.now();
       if (Math.abs(el.scrollTop - lastScrollTop) > 2 && isReaderRequestCurrent(request, book, targetRendition)) {
         lastScrollTop = el.scrollTop;
-        if (!isImmersiveReading() && !isReaderInteractionOpen()) enterImmersiveReading();
+        if (!isImmersiveReading() && !isReaderInteractionOpen() && Date.now() - readerChromeRevealedAt > 300) enterImmersiveReading();
       }
       if (scrollRaf) return;
       scrollRaf = requestAnimationFrame(async () => {
@@ -5724,10 +5801,7 @@ async function boot(){
 }
 
 function showImmersiveTools(){
-  exitImmersiveReading();
-  const button = document.getElementById('mobile-reader-tools-button');
-  button?.click();
-  button?.focus({ preventScroll: true });
+  showReaderChromeTemporarily();
 }
 
 function abortReaderRequests() {
@@ -7920,7 +7994,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 48,456 bytes · SHA-256: `e1c99a3927f15d951a6a7e5845a9d2afdf7df11242238c9841ae40a1affe70a2`
+Size: 48,524 bytes · SHA-256: `9261f188dee84d0ea6077ce91000f81f81c8f4306c7314009908f39edd609df3`
 
 `````html
 <!DOCTYPE html>
@@ -7936,9 +8010,9 @@ Size: 48,456 bytes · SHA-256: `e1c99a3927f15d951a6a7e5845a9d2afdf7df11242238c98
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.7-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.7-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.7-20260923">
+<script src="/jszip.min.js?v=v15.0.8-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.8-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.8-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -8157,7 +8231,7 @@ Size: 48,456 bytes · SHA-256: `e1c99a3927f15d951a6a7e5845a9d2afdf7df11242238c98
   <!-- Reader -->
   <div id="reader-view">
     <span id="reader-immersive-chapter" aria-hidden="true"></span>
-    <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Reading menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Show reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
       <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
@@ -8194,6 +8268,7 @@ Size: 48,456 bytes · SHA-256: `e1c99a3927f15d951a6a7e5845a9d2afdf7df11242238c98
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
+      <div id="reader-tap-layer" aria-hidden="true"></div>
       <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" onclick="turnPage('prev')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
@@ -8613,8 +8688,8 @@ Size: 48,456 bytes · SHA-256: `e1c99a3927f15d951a6a7e5845a9d2afdf7df11242238c98
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.7-20260923"></script>
-<script src="/mobile.js?v=v15.0.7-20260923"></script>
+<script src="/app.js?v=v15.0.8-20260923"></script>
+<script src="/mobile.js?v=v15.0.8-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -9378,10 +9453,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `dc6a45933e1a2da932aa23100e35d3497b21453560bf59ed4f41fe88ad5c05d1`
+Size: 8,356 bytes · SHA-256: `d5e7ae4899881b5463be5ed86b88a6ccbf8956843770f682ba1e69713ec1c5bc`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.7-20260923';
+const BUILD_VERSION = 'v15.0.8-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16698,7 +16773,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 30,061 bytes · SHA-256: `bb851d636f64fc66b8a36472460d7605f255df6229e25cd0f06ead43ea988c76`
+Size: 33,806 bytes · SHA-256: `a5416e9f8936d231bb609ac3d8613b8a84d0c22121a938998f48b12bbcce9636`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16977,10 +17052,27 @@ test('scrolling hides reader controls and a tap fades them back in', async ({ pa
   await expect(page.locator('#reader-reveal-controls')).toHaveCSS('opacity', '0');
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
   await page.screenshot({ path: 'test-results/mobile-scrolled-immersive.png' });
-  await page.locator('#viewer-wrap').evaluate(target => {
-    const touch = { identifier: 1, clientX: 190, clientY: 350 };
+  const beforeScroll = await page.locator('#epub-scroll-container').evaluate(element => element.scrollTop);
+  await page.locator('#reader-tap-layer').dispatchEvent('wheel', { deltaY: 100, cancelable: true });
+  await expect.poll(() => page.locator('#epub-scroll-container').evaluate(element => element.scrollTop)).toBeGreaterThan(beforeScroll);
+  const afterWheel = await page.locator('#epub-scroll-container').evaluate(element => element.scrollTop);
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    for (const [type, y] of [['touchstart', 350], ['touchmove', 300], ['touchend', 300]]) {
+      const touch = { identifier: 1, clientX: 190, clientY: y };
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        touches: { value: type === 'touchend' ? [] : [touch] },
+        changedTouches: { value: [touch] },
+      });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect.poll(() => page.locator('#epub-scroll-container').evaluate(element => element.scrollTop)).toBeGreaterThan(afterWheel);
+  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    const touch = { identifier: 2, clientX: 190, clientY: 350 };
     for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
-      const event = new Event(type, { bubbles: true });
+      const event = new Event(type, { bubbles: true, cancelable: true });
       Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
       target.dispatchEvent(event);
     }
@@ -17019,15 +17111,57 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
-  await expect(page.getByRole('button', { name: 'Reading menu' })).toHaveCSS('opacity', '0');
+  await expect(page.getByRole('button', { name: 'Show reading controls' })).toHaveCSS('opacity', '0');
   await expect(page.locator('#reader-immersive-progress')).toContainText('% read');
   await expect(page.locator('#reader-immersive-progress')).toBeHidden();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
   await page.screenshot({ path: 'test-results/mobile-reader-immersive.png' });
-  await page.getByRole('button', { name: 'Reading menu' }).click();
+  await page.locator('#reader-tap-layer').click({ position: { x: 20, y: 210 } });
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
-  await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.locator('#progress-bar')).toHaveCSS('opacity', '1');
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(page.locator('#mobile-reader-tools-button')).toBeVisible();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => enterImmersiveReading());
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    const touch = { identifier: 3, clientX: 20, clientY: 220 };
+    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => enterImmersiveReading());
+  await page.locator('#reader-tap-layer').click({ position: { x: 365, y: 260 } });
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => enterImmersiveReading());
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    for (const [type, x] of [['touchstart', 340], ['touchmove', 40], ['touchend', 40]]) {
+      const touch = { identifier: 4, clientX: x, clientY: 350 };
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        touches: { value: type === 'touchend' ? [] : [touch] },
+        changedTouches: { value: [touch] },
+      });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Two');
+  await page.locator('#reader-tap-layer').evaluate(target => {
+    const touch = { identifier: 5, clientX: 190, clientY: 350 };
+    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await page.locator('#mobile-reader-tools-button').click();
+  await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
   await expect(page.locator('[data-reader-tool="fullscreen"] svg')).toBeVisible();
   await page.screenshot({ path: 'test-results/mobile-reader-tools.png' });
   await page.getByRole('button', { name: 'Themes & settings' }).click();
@@ -17065,8 +17199,8 @@ test('immersive reading always exposes a route back to settings', async ({ page 
     app.webkitRequestFullscreen = undefined;
     toggleFullscreen();
   });
-  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
-  await page.getByRole('button', { name: 'Reading menu' }).click();
+  await expect(page.locator('#reader-tap-layer')).toBeVisible();
+  await page.locator('#reader-tap-layer').click({ position: { x: 195, y: 425 } });
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
 });
 
@@ -17148,8 +17282,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.7-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.7-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.8-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.8-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);
