@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T09:23:05.325Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T09:42:49.327Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 89,855 bytes · SHA-256: `786c359b4e0db430371b625eecd4dddc9a8a0f5c1091dac9893fd519d424d07b`
+Size: 91,725 bytes · SHA-256: `bef5df787a8d7e400bfb28429796f1d40f3dab9e7b95870a7149da7250aa12a1`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -1441,6 +1441,7 @@ input.shelf-select:focus{ width:220px; }
 #login-error{
   color: #C14B4B; font-size:12.5px; margin-top:10px; min-height:18px;
 }
+#login-offline-hint{margin:18px 0 0;color:var(--ink-soft);font:13px/1.5 var(--font-ui);text-align:center}
 #toast{
   position:fixed; z-index:120; left:50%; bottom:calc(24px + env(safe-area-inset-bottom));
   transform:translate(-50%, 18px); opacity:0; pointer-events:none;
@@ -2209,7 +2210,25 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #app.chrome-hidden #reader-immersive-chapter{display:block;position:fixed;z-index:76;top:calc(15px + min(env(safe-area-inset-top),60px));left:70px;right:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:block;position:fixed;z-index:76;left:70px;right:70px;bottom:calc(17px + min(env(safe-area-inset-bottom),34px));text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-reveal-controls{top:calc(4px + min(env(safe-area-inset-top),60px));right:15px;width:44px;min-height:44px;padding:0;border-radius:50%}
+  body.reader-active #reader-view.scrolled #viewer-wrap{inset:calc(min(env(safe-area-inset-top),60px) + 8px) 0 calc(min(env(safe-area-inset-bottom),34px) + 8px)}
+  body.reader-active #app.chrome-hidden #reader-view.scrolled #reader-reveal-controls{opacity:0;pointer-events:auto}
+  body.reader-active #app.chrome-hidden #reader-view.scrolled #reader-immersive-chapter,
+  body.reader-active #app.chrome-hidden #reader-view.scrolled #reader-immersive-progress{display:none}
+  #reader-reveal-controls{transition:opacity .18s ease}
   #reader-reveal-controls svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}
+
+  .mobile-offline-access{margin:12px 0 24px;padding:20px;border:1px solid #5b503c;border-radius:16px;background:#292821}
+  .mobile-offline-home{display:grid;gap:8px;margin:0 0 26px;padding:18px;border:1px solid #5b503c;border-radius:16px;background:#292821;color:#f5efe5}
+  .mobile-offline-home strong{font:600 19px Georgia,serif}
+  .mobile-offline-home span{color:#b9b0a2;font:13px/1.5 var(--font-ui)}
+  .mobile-offline-home button{justify-self:start;min-height:44px;padding:8px 0;border:0;background:none;color:#d2ad69;font:700 14px var(--font-ui)}
+  .mobile-offline-access h2{margin:0 0 9px;color:#f5efe5;font:600 22px/1.2 Georgia,serif}
+  .mobile-offline-access p{margin:0;color:#b9b0a2;font:14px/1.5 var(--font-ui)}
+  .mobile-offline-setup{display:grid;gap:10px;margin-top:18px}
+  .mobile-offline-setup input{box-sizing:border-box;width:100%;min-height:48px;padding:10px 13px;border:1px solid #5d5546;border-radius:11px;background:#171714;color:#f5efe5;font:16px var(--font-ui)}
+  .mobile-offline-setup button{min-height:48px;border:0;border-radius:11px;background:#d2ad69;color:#1b1a16;font:700 14px var(--font-ui)}
+  .mobile-offline-setup button:disabled{opacity:.55}
+  .mobile-offline-setup .mobile-offline-error{color:#f0a9a1}
 
   :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal).show{--paper:#24231f;--paper-card:#2c2a25;--ink:#f5efe5;--ink-soft:#b9b0a2;--line:#504b41;--gold:#d2ad69;padding:0;align-items:stretch;background:#171714}
   :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal).show .modal-card{box-sizing:border-box;width:100%;max-width:none;max-height:none;height:100dvh;margin:0;padding:calc(18px + min(env(safe-area-inset-top),60px)) 20px calc(28px + min(env(safe-area-inset-bottom),34px));border:0;border-radius:0;box-shadow:none;background:#171714;color:var(--ink);overflow-y:auto}
@@ -2249,7 +2268,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ### `public/app.js`
 
-Size: 2,26,435 bytes · SHA-256: `d458eeadc3b32072aa1bda9599ad70634315ba5f9bc65643c22b1fa77322d8d9`
+Size: 2,28,486 bytes · SHA-256: `11f2c6e65ad8dacd7cbec3f8215f4cda47b0a07d803dc043412bed6b1a3cbeb9`
 
 `````javascript
 /* ================================================================
@@ -2834,6 +2853,7 @@ async function unlockOfflineSnapshot(username, passphrase) {
     normalizeSettings();
     renderFontOptions(); updateSettingsUI(); renderShelf();
     hideLoginGate();
+    if (typeof isMobileShell === 'function' && isMobileShell()) mobileNavigate('offline');
     showToast('Offline library unlocked. Pinned books are available to read.');
     return true;
   } catch (_) { return false; }
@@ -2841,6 +2861,8 @@ async function unlockOfflineSnapshot(username, passphrase) {
 
 function showLoginGate() {
   document.getElementById('login-gate').classList.remove('hidden');
+  const hint = document.getElementById('login-offline-hint');
+  if (hint) hint.hidden = !Object.keys(localStorage).some(key => key.startsWith(OFFLINE_SNAPSHOT_PREFIX));
 }
 
 function hideLoginGate() {
@@ -3648,6 +3670,10 @@ function showReaderChromeTemporarily(delay = 3000) {
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
   clearTimeout(readerChromeTimer);
+  readerChromeTimer = null;
+  // In continuous reading, the next scroll dismisses the controls. Keep them
+  // available while the page is still so the reader can use them at leisure.
+  if (settings.layout === 'scrolled') return;
   readerChromeTimer = setTimeout(() => {
     readerChromeTimer = null;
     if (
@@ -3660,8 +3686,11 @@ function showReaderChromeTemporarily(delay = 3000) {
 }
 
 function toggleReaderChrome(){
-  // Tapping center: if currently immersive — show chrome briefly then auto-hide;
-  // if chrome is visible — hide it immediately and cancel any pending timer.
+  if (settings.layout === 'scrolled') {
+    showReaderChromeTemporarily();
+    return;
+  }
+  // In paginated mode a center tap toggles the controls.
   if (isImmersiveReading()) showReaderChromeTemporarily();
   else enterImmersiveReading();
 }
@@ -3683,8 +3712,13 @@ function tuneScrollContainer(targetRendition = rendition, entry = getCurrentEntr
   if (!el.__endpaperScrollListenerBound) {
     el.__endpaperScrollListenerBound = true;
     let scrollRaf = null;
+    let lastScrollTop = el.scrollTop;
     el.addEventListener('scroll', () => {
       lastReaderInteractionAt = Date.now();
+      if (Math.abs(el.scrollTop - lastScrollTop) > 2 && isReaderRequestCurrent(request, book, targetRendition)) {
+        lastScrollTop = el.scrollTop;
+        if (!isImmersiveReading() && !isReaderInteractionOpen()) enterImmersiveReading();
+      }
       if (scrollRaf) return;
       scrollRaf = requestAnimationFrame(async () => {
         scrollRaf = null;
@@ -7291,6 +7325,16 @@ function updateBulkToolbar() {
 }
 
 async function downloadBookOffline(id) {
+  if (!offlineSnapshotKey || !currentUser?.username) {
+    const error = new Error('Set up offline access with your passphrase before downloading.');
+    error.code = 'OFFLINE_SETUP_REQUIRED';
+    throw error;
+  }
+  const workerState = await serviceWorkerMessage('GET_PINNED_BOOKS');
+  const cacheName = workerState?.ok ? (await caches.keys()).find(name => name.startsWith('endpaper-shell-')) : null;
+  const shell = cacheName ? await caches.open(cacheName) : null;
+  if (!shell || !(await shell.match('/index.html'))) throw new Error('The app is not ready for offline launch yet. Reopen it on a secure connection and try again.');
+  await persistOfflineSnapshot();
   setSyncState('saving', 'Downloading…');
   const [fileResponse, coverResponse] = await Promise.all([
     api.fetch(`/api/books/${id}/file`, { headers: {} }),
@@ -7302,8 +7346,18 @@ async function downloadBookOffline(id) {
   // the file was written to its persistent cache before the UI reports success.
   const result = await serviceWorkerMessage('PIN_BOOK', { bookId: id, fileBlob, coverBlob });
   if (!result?.ok) throw new Error('The offline copy could not be confirmed.');
-  await persistOfflineSnapshot().catch(error => console.warn('Could not save offline library:', error));
   setSyncState('saved', 'Available offline');
+}
+
+async function enableOfflineAccess(passphrase) {
+  if (!currentUser?.username || !passphrase) throw new Error('Enter your passphrase to enable offline access.');
+  const response = await fetch('/api/login', {
+    method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: currentUser.username, passphrase }),
+  });
+  if (!response.ok) throw new Error(response.status === 401 ? 'Incorrect passphrase.' : 'Connect to your library server to enable offline access.');
+  await initializeOfflineSnapshot(passphrase);
+  if (!localStorage.getItem(offlineSnapshotStorageKey(currentUser.username))) throw new Error('The offline library could not be saved on this device.');
 }
 
 async function removeOfflineBook(id) {
@@ -7818,7 +7872,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 46,300 bytes · SHA-256: `12e69d0e2e326be233fb069d2a734ae1592a9f8ca1616e1605ff89dc4c92d520`
+Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655267a3a853d81a00f`
 
 `````html
 <!DOCTYPE html>
@@ -7834,9 +7888,9 @@ Size: 46,300 bytes · SHA-256: `12e69d0e2e326be233fb069d2a734ae1592a9f8ca1616e16
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.4-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.4-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.4-20260923">
+<script src="/jszip.min.js?v=v15.0.5-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.5-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.5-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -7887,6 +7941,7 @@ Size: 46,300 bytes · SHA-256: `12e69d0e2e326be233fb069d2a734ae1592a9f8ca1616e16
       <input type="password" id="passphrase-input" placeholder="Passphrase" autocomplete="current-password">
       <button type="submit" id="login-btn">Unlock</button>
       <div id="login-error"></div>
+      <p id="login-offline-hint" hidden>Reading offline? Use the same username and passphrase you used when setting up your downloads.</p>
     </form>
   </div>
 </div>
@@ -8499,8 +8554,8 @@ Size: 46,300 bytes · SHA-256: `12e69d0e2e326be233fb069d2a734ae1592a9f8ca1616e16
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.4-20260923"></script>
-<script src="/mobile.js?v=v15.0.4-20260923"></script>
+<script src="/app.js?v=v15.0.5-20260923"></script>
+<script src="/mobile.js?v=v15.0.5-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -8566,7 +8621,7 @@ Size: 689 bytes · SHA-256: `5d80f5a029e9b1cc1e3506940eac8e1c350a6503a8faa2f2ab9
 
 ### `public/mobile.js`
 
-Size: 39,627 bytes · SHA-256: `8f7341b7deeecd19308cd660e8b7be7524b5492f6a9686439dca7d935851d0e0`
+Size: 41,903 bytes · SHA-256: `f39205e616ebea4b12c206f1405e50c05408518f4ccedb6103f0586e814ac06d`
 
 `````javascript
 /* Mobile presentation over the same library, API, and reader used on desktop. */
@@ -8690,6 +8745,13 @@ function mobileRail(title, entries, onSelect) {
 
 function mobileHome(root) {
   root.appendChild(mobileHeading('Your reading', 'ENDPAPER'));
+  if (offlineSession) {
+    const notice = mobileElement('section', 'mobile-offline-home');
+    notice.appendChild(mobileElement('strong', '', 'Reading offline'));
+    notice.appendChild(mobileElement('span', '', 'Your saved books are ready on this device. Changes will sync when the library server returns.'));
+    notice.appendChild(mobileButton('Open downloaded books →', () => mobileNavigate('offline')));
+    root.appendChild(notice);
+  }
   const resume = library.filter(entry => entry.lastOpenedAt && mobileReadingStatus(entry) === 'reading')
     .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)[0];
   if (resume) {
@@ -8960,7 +9022,10 @@ function mobileBookDetail(root, id) {
       if (mobilePinnedIds.has(id)) { await removeOfflineBook(id); mobilePinnedIds.delete(id); }
       else { await downloadBookOffline(id); mobilePinnedIds.add(id); }
       offline.textContent = mobilePinnedIds.has(id) ? 'Remove download' : 'Download for offline';
-    } catch (error) { showToast(error.message || 'Offline download failed.'); }
+    } catch (error) {
+      if (error.code === 'OFFLINE_SETUP_REQUIRED') mobileNavigate('offline');
+      showToast(error.message || 'Offline download failed.');
+    }
     finally { offline.disabled = false; }
   });
   offline.disabled = true;
@@ -9004,6 +9069,32 @@ function mobileBookDetail(root, id) {
 
 async function mobileOffline(root, version) {
   root.appendChild(mobileHeading('Offline downloads', '', true));
+  const access = mobileElement('section', 'mobile-offline-access');
+  access.appendChild(mobileElement('h2', '', offlineSession ? 'Reading offline' : offlineSnapshotKey ? 'Ready to go offline' : 'Set up offline access'));
+  access.appendChild(mobileElement('p', '', offlineSession
+    ? 'Your downloaded books are stored on this device. Reading changes will sync when your library server is available.'
+    : offlineSnapshotKey
+      ? 'Open Endpaper without Wi-Fi and unlock with this same username and passphrase. Downloaded books will be ready here.'
+      : 'Save an encrypted copy of your library on this device. Enter your passphrase once while connected, then download the books you want to read.'));
+  if (!offlineSnapshotKey) {
+    const form = mobileElement('form', 'mobile-offline-setup');
+    const passphrase = mobileElement('input');
+    passphrase.type = 'password'; passphrase.autocomplete = 'current-password';
+    passphrase.placeholder = 'Your passphrase'; passphrase.setAttribute('aria-label', 'Passphrase for offline access');
+    const submit = mobileElement('button', '', 'Enable offline access'); submit.type = 'submit';
+    const error = mobileElement('p', 'mobile-offline-error'); error.setAttribute('role', 'alert');
+    form.append(passphrase, submit, error);
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); submit.disabled = true; error.textContent = '';
+      try {
+        await enableOfflineAccess(passphrase.value);
+        passphrase.value = '';
+        renderMobileShell();
+      } catch (failure) { error.textContent = failure.message || 'Could not enable offline access.'; submit.disabled = false; }
+    });
+    access.appendChild(form);
+  }
+  root.appendChild(access);
   const usage = mobileElement('p', 'mobile-detail-meta'); root.appendChild(usage);
   const list = mobileElement('div', 'mobile-books mobile-books-list'); root.appendChild(list);
   list.appendChild(mobileElement('p', 'mobile-empty', 'Checking downloads…'));
@@ -9222,10 +9313,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `c4d697eb445d03ea729674e36f4aa20688fa610ef8c875117b4d92313be56767`
+Size: 8,356 bytes · SHA-256: `199bab5bf1a3c84908fbb44e4d0eacd51557a2848d8d7fc7d5fa89fe9bd4c7c0`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.4-20260923';
+const BUILD_VERSION = 'v15.0.5-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -9421,7 +9512,7 @@ self.addEventListener('fetch', (e) => {
 
 ### `README.md`
 
-Size: 10,697 bytes · SHA-256: `ca0280b8adf4869935ca956276ed4c496d6459e8d47c3851847cbaa393596b0f`
+Size: 10,949 bytes · SHA-256: `3d0f2e072a1799fee8d9754f0bc816a1a5d51e36fe39b62ccb342218f2849d39`
 
 `````markdown
 # Endpaper
@@ -9451,7 +9542,7 @@ Use an admin account for yourself and add friends and family as readers from **A
 
 The Atkinson Hyperlegible and Work Sans reader fonts are bundled for offline use. Their redistribution terms are in `public/fonts/ATKINSON-OFL.txt` and `public/fonts/WORK-SANS-LICENSE.txt`.
 
-To prepare for a cold offline launch, sign in with your passphrase while online and download the books you want to read. When offline, open Endpaper and sign in with the same username and passphrase. The device stores an encrypted library snapshot; books that have not been downloaded still require the server. An account's snapshot reflects its last online sign-in and subsequent changes made on that device.
+To prepare for a cold offline launch, open **More → Offline downloads** while connected. If prompted, enter your passphrase once to enable offline access on that device, then download the books you want. The app verifies that its shell, encrypted library snapshot, and book bytes are stored before confirming a download. When offline, open the installed Endpaper app and unlock with the same username and passphrase; it takes you directly to your downloads. Books that have not been downloaded still require the server. Offline installation needs a secure origin (HTTPS or localhost); a plain HTTP address on a local network cannot install the service worker.
 
 ## Reliability and security
 
@@ -16542,7 +16633,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 23,659 bytes · SHA-256: `58679e99515bb470259d68e860535a2d76ad3af6d7d62ed58e7b19ed095b3454`
+Size: 27,754 bytes · SHA-256: `1667678db6ae164f396119f093898ba2aa46fcbdbea8791f26234e0884649f1a`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16754,6 +16845,7 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
   try {
     await page.reload();
     await expect(page.locator('#login-btn')).toBeVisible();
+    await expect(page.locator('#login-offline-hint')).toBeVisible();
     await page.locator('#username-input').fill('admin');
     await page.locator('#passphrase-input').fill('incorrect offline passphrase');
     await page.locator('#login-btn').click();
@@ -16761,11 +16853,72 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
     await expect(page.locator('#mobile-content')).toBeEmpty();
     await page.locator('#passphrase-input').fill('correct horse battery');
     await page.locator('#login-btn').click();
+    await expect(page.locator('#mobile-content h1')).toHaveText('Offline downloads');
+    await page.locator('[data-mobile-tab="home"]').click();
+    await expect(page.locator('.mobile-offline-home')).toContainText('Reading offline');
+    await page.getByRole('button', { name: 'Open downloaded books' }).click();
+    await expect(page.locator('#mobile-content h1')).toHaveText('Offline downloads');
     await page.locator('[data-mobile-tab="library"]').click();
     await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
     await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
     await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   } finally { await page.context().setOffline(false); }
+});
+
+test('offline download requires a local unlock for a restored session', async ({ page }) => {
+  await page.evaluate(() => {
+    offlineSnapshotKey = null;
+    offlineSnapshotSalt = null;
+    localStorage.removeItem(offlineSnapshotStorageKey(currentUser.username));
+  });
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.getByRole('button', { name: 'Download for offline' }).click();
+  await expect(page.locator('#mobile-content h1')).toHaveText('Offline downloads');
+  await page.getByRole('textbox', { name: 'Passphrase for offline access' }).fill('wrong passphrase');
+  await page.getByRole('button', { name: 'Enable offline access' }).click();
+  await expect(page.locator('.mobile-offline-error')).toContainText('Incorrect passphrase');
+  await page.getByRole('textbox', { name: 'Passphrase for offline access' }).fill('correct horse battery');
+  await page.getByRole('button', { name: 'Enable offline access' }).click();
+  await expect(page.locator('.mobile-offline-access')).toContainText('Ready to go offline');
+  await page.locator('[data-mobile-tab="library"]').click();
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.getByRole('button', { name: 'Download for offline' }).click();
+  await expect(page.getByRole('button', { name: 'Remove download' })).toBeVisible();
+});
+
+test('scrolling hides reader controls and a tap fades them back in', async ({ page }) => {
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => setLayout('scrolled'));
+  await expect(page.locator('#reader-view')).toHaveClass(/scrolled/);
+  await expect(page.locator('#epub-scroll-container')).toBeVisible();
+  await page.evaluate(() => {
+    const scroller = document.getElementById('epub-scroll-container');
+    const spacer = document.createElement('div');
+    spacer.style.height = '1600px';
+    scroller.appendChild(spacer);
+    scroller.scrollTop = 120;
+  });
+  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
+  await expect(page.locator('#reader-reveal-controls')).toHaveCSS('opacity', '0');
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
+  await page.screenshot({ path: 'test-results/mobile-scrolled-immersive.png' });
+  await page.locator('#viewer-wrap').evaluate(target => {
+    const touch = { identifier: 1, clientX: 190, clientY: 350 };
+    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.locator('#app')).not.toHaveClass(/chrome-hidden/);
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await page.screenshot({ path: 'test-results/mobile-scrolled-controls.png' });
+  await page.evaluate(() => { document.getElementById('epub-scroll-container').scrollTop += 120; });
+  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
 });
 
 test('immersive reading always exposes a route back to settings', async ({ page }) => {
@@ -16778,6 +16931,8 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => setLayout('paginated'));
+  await expect(page.locator('#reader-view')).not.toHaveClass(/scrolled/);
   const readerLayout = await page.evaluate(() => ({
     headerBottom: document.getElementById('mobile-reader-back').getBoundingClientRect().bottom,
     viewerTop: document.getElementById('viewer-wrap').getBoundingClientRect().top,
@@ -16892,8 +17047,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.4-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.4-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.5-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.5-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

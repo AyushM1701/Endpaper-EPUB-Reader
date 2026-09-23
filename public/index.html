@@ -11,9 +11,9 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.4-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.4-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.4-20260923">
+<script src="/jszip.min.js?v=v15.0.5-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.5-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.5-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -64,6 +64,7 @@
       <input type="password" id="passphrase-input" placeholder="Passphrase" autocomplete="current-password">
       <button type="submit" id="login-btn">Unlock</button>
       <div id="login-error"></div>
+      <p id="login-offline-hint" hidden>Reading offline? Use the same username and passphrase you used when setting up your downloads.</p>
     </form>
   </div>
 </div>
@@ -676,8 +677,8 @@
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.4-20260923"></script>
-<script src="/mobile.js?v=v15.0.4-20260923"></script>
+<script src="/app.js?v=v15.0.5-20260923"></script>
+<script src="/mobile.js?v=v15.0.5-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

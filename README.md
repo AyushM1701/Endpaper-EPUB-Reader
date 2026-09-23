@@ -25,7 +25,7 @@ Use an admin account for yourself and add friends and family as readers from **A
 
 The Atkinson Hyperlegible and Work Sans reader fonts are bundled for offline use. Their redistribution terms are in `public/fonts/ATKINSON-OFL.txt` and `public/fonts/WORK-SANS-LICENSE.txt`.
 
-To prepare for a cold offline launch, sign in with your passphrase while online and download the books you want to read. When offline, open Endpaper and sign in with the same username and passphrase. The device stores an encrypted library snapshot; books that have not been downloaded still require the server. An account's snapshot reflects its last online sign-in and subsequent changes made on that device.
+To prepare for a cold offline launch, open **More → Offline downloads** while connected. If prompted, enter your passphrase once to enable offline access on that device, then download the books you want. The app verifies that its shell, encrypted library snapshot, and book bytes are stored before confirming a download. When offline, open the installed Endpaper app and unlock with the same username and passphrase; it takes you directly to your downloads. Books that have not been downloaded still require the server. Offline installation needs a secure origin (HTTPS or localhost); a plain HTTP address on a local network cannot install the service worker.
 
 ## Reliability and security
 

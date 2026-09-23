@@ -207,6 +207,7 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
   try {
     await page.reload();
     await expect(page.locator('#login-btn')).toBeVisible();
+    await expect(page.locator('#login-offline-hint')).toBeVisible();
     await page.locator('#username-input').fill('admin');
     await page.locator('#passphrase-input').fill('incorrect offline passphrase');
     await page.locator('#login-btn').click();
@@ -214,11 +215,72 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
     await expect(page.locator('#mobile-content')).toBeEmpty();
     await page.locator('#passphrase-input').fill('correct horse battery');
     await page.locator('#login-btn').click();
+    await expect(page.locator('#mobile-content h1')).toHaveText('Offline downloads');
+    await page.locator('[data-mobile-tab="home"]').click();
+    await expect(page.locator('.mobile-offline-home')).toContainText('Reading offline');
+    await page.getByRole('button', { name: 'Open downloaded books' }).click();
+    await expect(page.locator('#mobile-content h1')).toHaveText('Offline downloads');
     await page.locator('[data-mobile-tab="library"]').click();
     await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
     await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
     await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   } finally { await page.context().setOffline(false); }
+});
+
+test('offline download requires a local unlock for a restored session', async ({ page }) => {
+  await page.evaluate(() => {
+    offlineSnapshotKey = null;
+    offlineSnapshotSalt = null;
+    localStorage.removeItem(offlineSnapshotStorageKey(currentUser.username));
+  });
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.getByRole('button', { name: 'Download for offline' }).click();
+  await expect(page.locator('#mobile-content h1')).toHaveText('Offline downloads');
+  await page.getByRole('textbox', { name: 'Passphrase for offline access' }).fill('wrong passphrase');
+  await page.getByRole('button', { name: 'Enable offline access' }).click();
+  await expect(page.locator('.mobile-offline-error')).toContainText('Incorrect passphrase');
+  await page.getByRole('textbox', { name: 'Passphrase for offline access' }).fill('correct horse battery');
+  await page.getByRole('button', { name: 'Enable offline access' }).click();
+  await expect(page.locator('.mobile-offline-access')).toContainText('Ready to go offline');
+  await page.locator('[data-mobile-tab="library"]').click();
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.getByRole('button', { name: 'Download for offline' }).click();
+  await expect(page.getByRole('button', { name: 'Remove download' })).toBeVisible();
+});
+
+test('scrolling hides reader controls and a tap fades them back in', async ({ page }) => {
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => setLayout('scrolled'));
+  await expect(page.locator('#reader-view')).toHaveClass(/scrolled/);
+  await expect(page.locator('#epub-scroll-container')).toBeVisible();
+  await page.evaluate(() => {
+    const scroller = document.getElementById('epub-scroll-container');
+    const spacer = document.createElement('div');
+    spacer.style.height = '1600px';
+    scroller.appendChild(spacer);
+    scroller.scrollTop = 120;
+  });
+  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
+  await expect(page.locator('#reader-reveal-controls')).toHaveCSS('opacity', '0');
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
+  await page.screenshot({ path: 'test-results/mobile-scrolled-immersive.png' });
+  await page.locator('#viewer-wrap').evaluate(target => {
+    const touch = { identifier: 1, clientX: 190, clientY: 350 };
+    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
+      target.dispatchEvent(event);
+    }
+  });
+  await expect(page.locator('#app')).not.toHaveClass(/chrome-hidden/);
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await page.screenshot({ path: 'test-results/mobile-scrolled-controls.png' });
+  await page.evaluate(() => { document.getElementById('epub-scroll-container').scrollTop += 120; });
+  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
 });
 
 test('immersive reading always exposes a route back to settings', async ({ page }) => {
@@ -231,6 +293,8 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => setLayout('paginated'));
+  await expect(page.locator('#reader-view')).not.toHaveClass(/scrolled/);
   const readerLayout = await page.evaluate(() => ({
     headerBottom: document.getElementById('mobile-reader-back').getBoundingClientRect().bottom,
     viewerTop: document.getElementById('viewer-wrap').getBoundingClientRect().top,
@@ -345,8 +409,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.4-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.4-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.5-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.5-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

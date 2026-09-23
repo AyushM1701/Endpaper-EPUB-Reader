@@ -119,6 +119,13 @@ function mobileRail(title, entries, onSelect) {
 
 function mobileHome(root) {
   root.appendChild(mobileHeading('Your reading', 'ENDPAPER'));
+  if (offlineSession) {
+    const notice = mobileElement('section', 'mobile-offline-home');
+    notice.appendChild(mobileElement('strong', '', 'Reading offline'));
+    notice.appendChild(mobileElement('span', '', 'Your saved books are ready on this device. Changes will sync when the library server returns.'));
+    notice.appendChild(mobileButton('Open downloaded books →', () => mobileNavigate('offline')));
+    root.appendChild(notice);
+  }
   const resume = library.filter(entry => entry.lastOpenedAt && mobileReadingStatus(entry) === 'reading')
     .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)[0];
   if (resume) {
@@ -389,7 +396,10 @@ function mobileBookDetail(root, id) {
       if (mobilePinnedIds.has(id)) { await removeOfflineBook(id); mobilePinnedIds.delete(id); }
       else { await downloadBookOffline(id); mobilePinnedIds.add(id); }
       offline.textContent = mobilePinnedIds.has(id) ? 'Remove download' : 'Download for offline';
-    } catch (error) { showToast(error.message || 'Offline download failed.'); }
+    } catch (error) {
+      if (error.code === 'OFFLINE_SETUP_REQUIRED') mobileNavigate('offline');
+      showToast(error.message || 'Offline download failed.');
+    }
     finally { offline.disabled = false; }
   });
   offline.disabled = true;
@@ -433,6 +443,32 @@ function mobileBookDetail(root, id) {
 
 async function mobileOffline(root, version) {
   root.appendChild(mobileHeading('Offline downloads', '', true));
+  const access = mobileElement('section', 'mobile-offline-access');
+  access.appendChild(mobileElement('h2', '', offlineSession ? 'Reading offline' : offlineSnapshotKey ? 'Ready to go offline' : 'Set up offline access'));
+  access.appendChild(mobileElement('p', '', offlineSession
+    ? 'Your downloaded books are stored on this device. Reading changes will sync when your library server is available.'
+    : offlineSnapshotKey
+      ? 'Open Endpaper without Wi-Fi and unlock with this same username and passphrase. Downloaded books will be ready here.'
+      : 'Save an encrypted copy of your library on this device. Enter your passphrase once while connected, then download the books you want to read.'));
+  if (!offlineSnapshotKey) {
+    const form = mobileElement('form', 'mobile-offline-setup');
+    const passphrase = mobileElement('input');
+    passphrase.type = 'password'; passphrase.autocomplete = 'current-password';
+    passphrase.placeholder = 'Your passphrase'; passphrase.setAttribute('aria-label', 'Passphrase for offline access');
+    const submit = mobileElement('button', '', 'Enable offline access'); submit.type = 'submit';
+    const error = mobileElement('p', 'mobile-offline-error'); error.setAttribute('role', 'alert');
+    form.append(passphrase, submit, error);
+    form.addEventListener('submit', async event => {
+      event.preventDefault(); submit.disabled = true; error.textContent = '';
+      try {
+        await enableOfflineAccess(passphrase.value);
+        passphrase.value = '';
+        renderMobileShell();
+      } catch (failure) { error.textContent = failure.message || 'Could not enable offline access.'; submit.disabled = false; }
+    });
+    access.appendChild(form);
+  }
+  root.appendChild(access);
   const usage = mobileElement('p', 'mobile-detail-meta'); root.appendChild(usage);
   const list = mobileElement('div', 'mobile-books mobile-books-list'); root.appendChild(list);
   list.appendChild(mobileElement('p', 'mobile-empty', 'Checking downloads…'));

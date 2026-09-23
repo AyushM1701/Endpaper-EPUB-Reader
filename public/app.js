@@ -580,6 +580,7 @@ async function unlockOfflineSnapshot(username, passphrase) {
     normalizeSettings();
     renderFontOptions(); updateSettingsUI(); renderShelf();
     hideLoginGate();
+    if (typeof isMobileShell === 'function' && isMobileShell()) mobileNavigate('offline');
     showToast('Offline library unlocked. Pinned books are available to read.');
     return true;
   } catch (_) { return false; }
@@ -587,6 +588,8 @@ async function unlockOfflineSnapshot(username, passphrase) {
 
 function showLoginGate() {
   document.getElementById('login-gate').classList.remove('hidden');
+  const hint = document.getElementById('login-offline-hint');
+  if (hint) hint.hidden = !Object.keys(localStorage).some(key => key.startsWith(OFFLINE_SNAPSHOT_PREFIX));
 }
 
 function hideLoginGate() {
@@ -1394,6 +1397,10 @@ function showReaderChromeTemporarily(delay = 3000) {
   syncReaderChromeAccessibility();
   updateFullscreenControlUI();
   clearTimeout(readerChromeTimer);
+  readerChromeTimer = null;
+  // In continuous reading, the next scroll dismisses the controls. Keep them
+  // available while the page is still so the reader can use them at leisure.
+  if (settings.layout === 'scrolled') return;
   readerChromeTimer = setTimeout(() => {
     readerChromeTimer = null;
     if (
@@ -1406,8 +1413,11 @@ function showReaderChromeTemporarily(delay = 3000) {
 }
 
 function toggleReaderChrome(){
-  // Tapping center: if currently immersive — show chrome briefly then auto-hide;
-  // if chrome is visible — hide it immediately and cancel any pending timer.
+  if (settings.layout === 'scrolled') {
+    showReaderChromeTemporarily();
+    return;
+  }
+  // In paginated mode a center tap toggles the controls.
   if (isImmersiveReading()) showReaderChromeTemporarily();
   else enterImmersiveReading();
 }
@@ -1429,8 +1439,13 @@ function tuneScrollContainer(targetRendition = rendition, entry = getCurrentEntr
   if (!el.__endpaperScrollListenerBound) {
     el.__endpaperScrollListenerBound = true;
     let scrollRaf = null;
+    let lastScrollTop = el.scrollTop;
     el.addEventListener('scroll', () => {
       lastReaderInteractionAt = Date.now();
+      if (Math.abs(el.scrollTop - lastScrollTop) > 2 && isReaderRequestCurrent(request, book, targetRendition)) {
+        lastScrollTop = el.scrollTop;
+        if (!isImmersiveReading() && !isReaderInteractionOpen()) enterImmersiveReading();
+      }
       if (scrollRaf) return;
       scrollRaf = requestAnimationFrame(async () => {
         scrollRaf = null;
@@ -5037,6 +5052,16 @@ function updateBulkToolbar() {
 }
 
 async function downloadBookOffline(id) {
+  if (!offlineSnapshotKey || !currentUser?.username) {
+    const error = new Error('Set up offline access with your passphrase before downloading.');
+    error.code = 'OFFLINE_SETUP_REQUIRED';
+    throw error;
+  }
+  const workerState = await serviceWorkerMessage('GET_PINNED_BOOKS');
+  const cacheName = workerState?.ok ? (await caches.keys()).find(name => name.startsWith('endpaper-shell-')) : null;
+  const shell = cacheName ? await caches.open(cacheName) : null;
+  if (!shell || !(await shell.match('/index.html'))) throw new Error('The app is not ready for offline launch yet. Reopen it on a secure connection and try again.');
+  await persistOfflineSnapshot();
   setSyncState('saving', 'Downloading…');
   const [fileResponse, coverResponse] = await Promise.all([
     api.fetch(`/api/books/${id}/file`, { headers: {} }),
@@ -5048,8 +5073,18 @@ async function downloadBookOffline(id) {
   // the file was written to its persistent cache before the UI reports success.
   const result = await serviceWorkerMessage('PIN_BOOK', { bookId: id, fileBlob, coverBlob });
   if (!result?.ok) throw new Error('The offline copy could not be confirmed.');
-  await persistOfflineSnapshot().catch(error => console.warn('Could not save offline library:', error));
   setSyncState('saved', 'Available offline');
+}
+
+async function enableOfflineAccess(passphrase) {
+  if (!currentUser?.username || !passphrase) throw new Error('Enter your passphrase to enable offline access.');
+  const response = await fetch('/api/login', {
+    method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: currentUser.username, passphrase }),
+  });
+  if (!response.ok) throw new Error(response.status === 401 ? 'Incorrect passphrase.' : 'Connect to your library server to enable offline access.');
+  await initializeOfflineSnapshot(passphrase);
+  if (!localStorage.getItem(offlineSnapshotStorageKey(currentUser.username))) throw new Error('The offline library could not be saved on this device.');
 }
 
 async function removeOfflineBook(id) {
