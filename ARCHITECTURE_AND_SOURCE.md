@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T03:06:57.604Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T03:32:55.594Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 81,794 bytes · SHA-256: `3df73567aab23c9d5428a326d27ce1494a80847718f448234bffd32723764c33`
+Size: 89,798 bytes · SHA-256: `e112aa0ca8ea706e1f25d91fc865cc07944b0b63bc5e5df14a1ef8c274500e33`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -2085,6 +2085,7 @@ html.dark-shell .admin-btn-sm:hover {
 #mobile-shell{display:none}
 #mobile-reader-controls{display:none}
 #reader-reveal-controls{display:none}
+#reader-immersive-chapter,#reader-immersive-progress{display:none}
 @media (max-width:700px), (max-width:900px) and (pointer:coarse){
   #mobile-shell{display:block;min-height:100dvh;color:#f5efe5;font-family:var(--font-ui);background:#171714}
   body:not(.reader-active) #topbar{display:none}
@@ -2176,11 +2177,78 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #app{height:100vh;bottom:auto}
   #shelf-view,#mobile-shell,.mobile-page{min-height:100vh}
 }
+
+/* Phone reading chrome, library rows, and management screens. */
+@media (max-width:700px), (max-width:900px) and (pointer:coarse){
+  .mobile-books-list,.mobile-search-results{width:100%;min-width:0;grid-template-columns:minmax(0,1fr)}
+  .mobile-library-row{min-width:0;max-width:100%}
+  .mobile-library-row .mobile-book{min-width:0;max-width:calc(100% - 44px);overflow:hidden}
+  .mobile-list{box-sizing:border-box;min-width:0;max-width:100%;overflow:hidden}
+  .mobile-list .mobile-book-info{flex:1 1 0;min-width:0;overflow:hidden}
+  .mobile-list .mobile-book-info strong{display:block;-webkit-line-clamp:unset;white-space:normal;overflow:visible;overflow-wrap:anywhere;line-height:1.22}
+  .mobile-list .mobile-book-info small{max-width:100%}
+  .mobile-list .mobile-cover-title{font:700 25px Georgia,serif}
+  .mobile-library-tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-right:0;padding:0 0 12px;overflow:visible}
+  .mobile-library-tools>span{grid-column:1/3;grid-row:1;align-self:center;margin-right:0}
+  .mobile-library-tools .mobile-pill{width:100%;min-width:0;min-height:44px;margin-right:0;padding:8px 5px;white-space:normal;line-height:1.2}
+  .mobile-library-tools .mobile-pill:nth-of-type(1){grid-column:1;grid-row:2}
+  .mobile-library-tools .mobile-pill:nth-of-type(2){grid-column:2;grid-row:2}
+  .mobile-library-tools .mobile-pill:nth-of-type(3){grid-column:3;grid-row:2}
+  .mobile-library-tools .mobile-pill:nth-of-type(4){grid-column:3;grid-row:1}
+
+  body.reader-active #viewer-wrap{inset:calc(min(env(safe-area-inset-top),60px) + 50px) 0 calc(min(env(safe-area-inset-bottom),34px) + 58px)}
+  body.reader-active #mobile-reader-controls::before{height:calc(min(env(safe-area-inset-top),60px) + 50px)}
+  #mobile-reader-back,#mobile-reader-tools-button{top:calc(3px + min(env(safe-area-inset-top),60px));min-width:44px;min-height:44px}
+  #mobile-reader-title{top:calc(17px + min(env(safe-area-inset-top),60px));font-size:12px}
+  #mobile-reader-tools-menu{top:calc(53px + min(env(safe-area-inset-top),60px))}
+  body.reader-active #progress-bar{grid-template-rows:auto 24px;gap:2px 12px;min-height:58px;padding:4px 18px calc(4px + min(env(safe-area-inset-bottom),34px))}
+  body.reader-active #progress-track{min-height:24px}
+  body.reader-active #progress-slider{height:24px;min-height:24px}
+  #reader-immersive-chapter,#reader-immersive-progress{display:none}
+  body.reader-active #app.chrome-hidden #reader-immersive-chapter{display:block;position:fixed;z-index:76;top:calc(15px + min(env(safe-area-inset-top),60px));left:70px;right:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
+  body.reader-active #app.chrome-hidden #reader-immersive-progress{display:block;position:fixed;z-index:76;left:70px;right:70px;bottom:calc(17px + min(env(safe-area-inset-bottom),34px));text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
+  body.reader-active #app.chrome-hidden #reader-reveal-controls{top:calc(4px + min(env(safe-area-inset-top),60px));right:15px;width:44px;min-height:44px;padding:0;border-radius:50%}
+  #reader-reveal-controls svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}
+
+  :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal).show{--paper:#24231f;--paper-card:#2c2a25;--ink:#f5efe5;--ink-soft:#b9b0a2;--line:#504b41;--gold:#d2ad69;padding:0;align-items:stretch;background:#171714}
+  :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal).show .modal-card{box-sizing:border-box;width:100%;max-width:none;max-height:none;height:100dvh;margin:0;padding:calc(18px + min(env(safe-area-inset-top),60px)) 20px calc(28px + min(env(safe-area-inset-bottom),34px));border:0;border-radius:0;box-shadow:none;background:#171714;color:var(--ink);overflow-y:auto}
+  :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal) .modal-title{position:sticky;top:-1px;z-index:2;min-height:54px;margin:0 0 18px;padding:0 0 12px;border-bottom:1px solid #403d35;background:#171714}
+  :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal) .modal-title h3{margin:0;font:600 27px/1.15 Georgia,serif;color:#f5efe5}
+  :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal) .modal-close{display:flex;align-items:center;justify-content:center;flex:0 0 44px;width:44px;height:44px;margin:0;border:1px solid #555047;border-radius:50%;background:#292821;color:#f5efe5}
+  :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal) .modal-close svg{width:20px;height:20px}
+  .collections-intro{margin:0 0 20px;color:#b9b0a2;font:14px/1.5 var(--font-ui)}
+  #collections-card .new-collection-row{display:flex;align-items:stretch;gap:8px}
+  #collections-card .new-collection-input{flex:1 1 0;min-width:0;min-height:48px;padding:10px 13px;border:1px solid #5d5546;border-radius:11px;background:#292821;color:#f5efe5;font-size:16px}
+  #collections-card .new-collection-btn{min-height:48px;padding:8px 16px;border-radius:11px;font-size:14px}
+  #collection-list{display:grid;gap:10px;margin-top:22px;color:#b9b0a2}
+  #collection-list .collection-item-manage{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:64px;padding:12px 14px;border:1px solid #49453c;border-radius:12px;background:#292821;color:#f5efe5}
+  #collection-list .collection-item-manage>span{flex:1 1 0;min-width:0;overflow-wrap:anywhere;font:600 15px/1.35 var(--font-ui)}
+  #collection-list .collection-actions{display:flex;gap:5px}
+  #collection-list .collection-actions button{min-height:44px;padding:7px 9px;border:0;border-radius:8px;background:#39362e;color:#e7d4b2;font:12px var(--font-ui)}
+  #collection-list .collection-actions button:last-child{color:#f0a9a1}
+  #collections-card .close-row{display:none}
+  #admin-modal .admin-modal-header{align-items:center;padding-bottom:14px;border-bottom:1px solid #403d35}
+  #admin-modal #admin-title{font:600 27px/1.15 Georgia,serif;color:#f5efe5}
+  #admin-modal .admin-description{color:#b9b0a2;font-size:14px;line-height:1.5}
+  #admin-modal .admin-section-title{margin:24px 0 12px;color:#d2ad69}
+  #admin-modal .admin-user-item,#admin-modal .admin-role-option{padding:14px;border:1px solid #49453c;border-radius:12px;background:#292821}
+  #admin-modal .admin-user-name,#admin-modal .admin-role-option strong{color:#f5efe5}
+  #admin-modal .admin-field input{min-height:48px;border:1px solid #5d5546;border-radius:11px;background:#292821;color:#f5efe5;font-size:16px}
+  #admin-modal .admin-btn-sm,#admin-modal .collection-delete{min-height:44px;padding:8px 10px;border:1px solid #5d5546;border-radius:8px;background:#39362e;color:#e7d4b2}
+  #admin-modal .admin-create-actions .new-collection-btn{min-height:48px;border-radius:11px;font-size:14px}
+  :is(#confirm-modal,#reset-passphrase-modal).show{--paper:#24231f;--paper-card:#2c2a25;--ink:#f5efe5;--ink-soft:#b9b0a2;--line:#504b41;--gold:#d2ad69;align-items:flex-end;padding:0;background:#0009}
+  :is(#confirm-modal,#reset-passphrase-modal).show .modal-card{width:100%;max-width:none!important;height:auto;max-height:78dvh;margin:0;padding:24px 20px calc(24px + min(env(safe-area-inset-bottom),34px));border:0;border-radius:20px 20px 0 0;background:#292821;color:#f5efe5;overflow-y:auto}
+  :is(#confirm-modal,#reset-passphrase-modal) .modal-title h3{margin:0;font:600 24px Georgia,serif}
+}
+
+@media (display-mode:standalone) and (max-width:900px){
+  :is(#stats-modal,#collections-modal,#admin-modal,#book-details-modal,#notebook-modal,#shortcuts-modal).show .modal-card{height:100vh}
+}
 `````
 
 ### `public/app.js`
 
-Size: 2,24,205 bytes · SHA-256: `da8d93bb0a1504331b16be122dee24aff5731a1762e48aecf3fbb04542740548`
+Size: 2,25,043 bytes · SHA-256: `f7d8fc500ace9e109814d2336dc82d2c7e446821ccff9a5d1e3eb8584462662c`
 
 `````javascript
 /* ================================================================
@@ -3818,8 +3886,10 @@ async function openBook(id){
     ? Math.max(0, Math.min(100, entry.progress))
     : 0;
   const initPctEl = document.getElementById('progress-pct');
+  const immersivePctEl = document.getElementById('reader-immersive-progress');
   const initSliderEl = document.getElementById('progress-slider');
   if (initPctEl) initPctEl.textContent = initialPct + '%';
+  if (immersivePctEl) immersivePctEl.textContent = initialPct + '% read';
   if (initSliderEl) {
     initSliderEl.value = initialPct;
     initSliderEl.style.setProperty('--progress', initialPct + '%');
@@ -3850,6 +3920,8 @@ async function openBook(id){
   window.currentBookData = entry;
   const mobileReaderTitle = document.getElementById('mobile-reader-title');
   if (mobileReaderTitle) mobileReaderTitle.textContent = entry.name;
+  const immersiveChapter = document.getElementById('reader-immersive-chapter');
+  if (immersiveChapter) immersiveChapter.textContent = entry.name;
 
   const overlay = document.getElementById('loading-overlay');
   overlay.classList.add('show');
@@ -4282,6 +4354,10 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
         if (chapterEl && chapterEl.textContent !== chapterLabel) {
           chapterEl.textContent = chapterLabel;
         }
+        const immersiveChapter = document.getElementById('reader-immersive-chapter');
+        if (immersiveChapter) immersiveChapter.textContent = chapterLabel || entry.name;
+        const immersiveProgress = document.getElementById('reader-immersive-progress');
+        if (immersiveProgress && !isLockedNow) immersiveProgress.textContent = pctText + ' read';
 
         updateBookmarkIcon(cfi);
       });
@@ -5518,6 +5594,13 @@ async function boot(){
   return true;
 }
 
+function showImmersiveTools(){
+  exitImmersiveReading();
+  const button = document.getElementById('mobile-reader-tools-button');
+  button?.click();
+  button?.focus({ preventScroll: true });
+}
+
 function abortReaderRequests() {
   readerRequestVersion += 1;
   readerNavigationReady = false;
@@ -5780,7 +5863,7 @@ async function openCollectionsManager() {
   const active = document.activeElement;
   collectionsModalReturnFocus = active instanceof HTMLElement ? active : document.getElementById('library-tools-btn');
   activeOrganizeBookId = null;
-  document.getElementById('collections-title').textContent = 'Manage Collections';
+  document.getElementById('collections-title').textContent = 'Collections';
   const list = document.getElementById('collection-list');
   list.innerHTML = '<div style="color:var(--ink-soft); font-size:13px; padding:6px 0;">Loading collections…</div>';
   const modal = document.getElementById('collections-modal');
@@ -5793,7 +5876,7 @@ async function openCollectionsManager() {
     renderCollectionsFilter();
     list.innerHTML = '';
     if (allCollections.length === 0) {
-      list.innerHTML = '<div style="color:var(--ink-soft); font-size:13px; font-style:italic; padding:4px 0;">No collections yet. Create one below.</div>';
+      list.innerHTML = '<div style="color:var(--ink-soft); font-size:13px; font-style:italic; padding:4px 0;">No collections yet. Create one above.</div>';
     } else {
       allCollections.forEach(collection => {
         const row = document.createElement('div');
@@ -7685,7 +7768,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 46,019 bytes · SHA-256: `8750745215387bad2b59ab97f8fa4e5de3a96a1ab252a3eff94b0f2a4b6d2560`
+Size: 46,300 bytes · SHA-256: `074ddb943df0e17d603bf3ab2dda93921de5aae45f3e846487547e1db983cc7f`
 
 `````html
 <!DOCTYPE html>
@@ -7701,9 +7784,9 @@ Size: 46,019 bytes · SHA-256: `8750745215387bad2b59ab97f8fa4e5de3a96a1ab252a3ef
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.2-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.2-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.2-20260923">
+<script src="/jszip.min.js?v=v15.0.3-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.3-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.3-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -7920,7 +8003,9 @@ Size: 46,019 bytes · SHA-256: `8750745215387bad2b59ab97f8fa4e5de3a96a1ab252a3ef
 
   <!-- Reader -->
   <div id="reader-view">
-    <button type="button" id="reader-reveal-controls" onclick="exitImmersiveReading()" aria-label="Show reading controls and settings">Controls</button>
+    <span id="reader-immersive-chapter" aria-hidden="true"></span>
+    <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Reading menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
       <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
       <span id="mobile-reader-title"></span>
@@ -8201,16 +8286,17 @@ Size: 46,019 bytes · SHA-256: `8750745215387bad2b59ab97f8fa4e5de3a96a1ab252a3ef
 <div id="collections-modal" class="modal" role="dialog" aria-modal="true" aria-label="Manage collections" aria-hidden="true" onclick="if(event.target===this) closeCollectionsModal()">
   <div id="collections-card" class="modal-card">
     <div class="modal-title">
-      <h3 id="collections-title">Organize Collections</h3>
+      <h3 id="collections-title">Collections</h3>
       <button type="button" class="modal-close" aria-label="Close collections" title="Close" onclick="closeCollectionsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <div class="collection-list" id="collection-list"></div>
+    <p class="collections-intro">Create groups for your shared library. Everyone can browse them.</p>
     <div class="new-collection-row">
       <input type="text" id="new-collection-input" class="new-collection-input" placeholder="New collection..." onkeydown="if(event.key==='Enter') createCollection()">
       <button type="button" class="new-collection-btn" onclick="createCollection()">Create</button>
     </div>
+    <div class="collection-list" id="collection-list"></div>
     <div class="close-row" style="text-align:right; margin-top:16px;"><button type="button" class="new-collection-btn" onclick="closeCollectionsModal()">Done</button></div>
   </div>
 </div>
@@ -8363,8 +8449,8 @@ Size: 46,019 bytes · SHA-256: `8750745215387bad2b59ab97f8fa4e5de3a96a1ab252a3ef
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.2-20260923"></script>
-<script src="/mobile.js?v=v15.0.2-20260923"></script>
+<script src="/app.js?v=v15.0.3-20260923"></script>
+<script src="/mobile.js?v=v15.0.3-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -8430,7 +8516,7 @@ Size: 689 bytes · SHA-256: `5d80f5a029e9b1cc1e3506940eac8e1c350a6503a8faa2f2ab9
 
 ### `public/mobile.js`
 
-Size: 39,399 bytes · SHA-256: `ea26d0dfd1d030f9855ed41bb8e21c33995a525aefb750d0f80868baa46ce6d1`
+Size: 39,627 bytes · SHA-256: `8f7341b7deeecd19308cd660e8b7be7524b5492f6a9686439dca7d935851d0e0`
 
 `````javascript
 /* Mobile presentation over the same library, API, and reader used on desktop. */
@@ -8517,7 +8603,9 @@ function mobileCover(entry, className = '') {
     image.loading = 'lazy';
     cover.appendChild(image);
   } else {
-    cover.appendChild(mobileElement('span', 'mobile-cover-title', entry.name));
+    const fallback = mobileElement('span', 'mobile-cover-title', className.includes('mobile-list-cover') ? (entry.name.trim().charAt(0) || 'B').toLocaleUpperCase() : entry.name);
+    fallback.setAttribute('aria-hidden', 'true');
+    cover.appendChild(fallback);
   }
   return cover;
 }
@@ -8531,7 +8619,7 @@ function mobileBookCard(entry, layout = 'grid', selectable = false) {
   }, `mobile-book mobile-${layout}${selectable && bulkSelection.has(entry.id) ? ' mobile-selected' : ''}`);
   card.setAttribute('aria-label', `${selectable && bulkMode ? bulkSelection.has(entry.id) ? 'Deselect' : 'Select' : 'Details for'} ${entry.name}`);
   if (selectable && bulkMode) card.setAttribute('aria-pressed', String(bulkSelection.has(entry.id)));
-  card.appendChild(mobileCover(entry));
+  card.appendChild(mobileCover(entry, layout === 'list' ? 'mobile-list-cover' : ''));
   const info = mobileElement('span', 'mobile-book-info');
   info.appendChild(mobileElement('strong', '', entry.name));
   info.appendChild(mobileElement('small', '', entry.author || 'Unknown author'));
@@ -9084,10 +9172,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `ac9ad917ca06b1c559a4a3866dbbf45585f7412a1094484dba970d1d5098a80a`
+Size: 8,356 bytes · SHA-256: `a2c01ed7cd07726d13a5c39531772cfb3f6fde70cc39230ca182025a701546dd`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.2-20260923';
+const BUILD_VERSION = 'v15.0.3-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16404,7 +16492,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 20,152 bytes · SHA-256: `8af848c9c1794a1097a8080a107a47e5cab7c7ff8b5cf122cdfcabdf66c8d7a6`
+Size: 22,626 bytes · SHA-256: `0e4aa63501a98dedc55b52c6228563a5c0b18041f1e875a5eecf372192e043f9`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16638,10 +16726,13 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
-  await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
-  await page.getByRole('button', { name: 'Show reading controls and settings' }).click();
+  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
+  await expect(page.locator('#reader-immersive-progress')).toContainText('% read');
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
+  await page.screenshot({ path: 'test-results/mobile-reader-immersive.png' });
+  await page.getByRole('button', { name: 'Reading menu' }).click();
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
-  await page.getByRole('button', { name: 'Reading tools' }).click();
+  await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
   await page.getByRole('button', { name: 'Appearance' }).click();
   await expect(page.locator('#settings-drawer')).toHaveClass(/open/);
   await page.evaluate(() => {
@@ -16651,9 +16742,49 @@ test('immersive reading always exposes a route back to settings', async ({ page 
     app.webkitRequestFullscreen = undefined;
     toggleFullscreen();
   });
-  await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
-  await page.getByRole('button', { name: 'Show reading controls and settings' }).click();
+  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reading menu' }).click();
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
+});
+
+test('long list titles and management screens fit the phone viewport', async ({ page }) => {
+  await page.evaluate(() => {
+    library.find(book => book.name === 'Three Chapter Test Book').name = 'He Who Fights with Monsters: A Very Long LitRPG Adventure Title';
+    renderMobileShell();
+  });
+  const title = page.locator('.mobile-library-row .mobile-book-info strong').first();
+  await expect(title).toContainText('He Who Fights with Monsters');
+  const titleBounds = await title.boundingBox();
+  expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(393);
+  expect(await title.evaluate(element => getComputedStyle(element).webkitLineClamp)).toBe('none');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(393);
+  const toolbarButtons = page.locator('.mobile-library-tools button');
+  expect(await toolbarButtons.count()).toBe(4);
+  for (const button of await toolbarButtons.all()) {
+    const bounds = await button.boundingBox();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(393);
+  }
+  await page.screenshot({ path: 'test-results/mobile-library-list.png' });
+
+  await page.locator('[data-mobile-tab="more"]').click();
+  await page.getByRole('button', { name: /^Collections/ }).click();
+  await expect(page.locator('#collections-card')).toBeVisible();
+  const collectionsLayout = await page.locator('#collections-card').evaluate(element => ({
+    x: element.getBoundingClientRect().x,
+    width: element.getBoundingClientRect().width,
+    background: getComputedStyle(element).backgroundColor,
+  }));
+  expect(collectionsLayout).toEqual({ x: 0, width: 393, background: 'rgb(23, 23, 20)' });
+  await expect(page.locator('#new-collection-input')).toBeVisible();
+  await page.screenshot({ path: 'test-results/mobile-collections.png' });
+  await page.getByRole('button', { name: 'Close collections' }).click();
+
+  await page.getByRole('button', { name: /^People & permissions/ }).click();
+  await expect(page.locator('#admin-card')).toBeVisible();
+  expect(await page.locator('#admin-card').evaluate(element => element.getBoundingClientRect().width)).toBe(393);
+  await expect(page.locator('#new-user-username')).toBeVisible();
+  await page.screenshot({ path: 'test-results/mobile-people.png' });
 });
 
 test('invalid saved position recovers and layout switching keeps text visible', async ({ page }) => {
@@ -16694,8 +16825,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.2-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.2-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.3-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.3-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

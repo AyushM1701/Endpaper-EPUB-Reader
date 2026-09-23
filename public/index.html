@@ -11,9 +11,9 @@
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.2-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.2-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.2-20260923">
+<script src="/jszip.min.js?v=v15.0.3-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.3-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.3-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -230,7 +230,9 @@
 
   <!-- Reader -->
   <div id="reader-view">
-    <button type="button" id="reader-reveal-controls" onclick="exitImmersiveReading()" aria-label="Show reading controls and settings">Controls</button>
+    <span id="reader-immersive-chapter" aria-hidden="true"></span>
+    <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Reading menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
       <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
       <span id="mobile-reader-title"></span>
@@ -511,16 +513,17 @@
 <div id="collections-modal" class="modal" role="dialog" aria-modal="true" aria-label="Manage collections" aria-hidden="true" onclick="if(event.target===this) closeCollectionsModal()">
   <div id="collections-card" class="modal-card">
     <div class="modal-title">
-      <h3 id="collections-title">Organize Collections</h3>
+      <h3 id="collections-title">Collections</h3>
       <button type="button" class="modal-close" aria-label="Close collections" title="Close" onclick="closeCollectionsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <div class="collection-list" id="collection-list"></div>
+    <p class="collections-intro">Create groups for your shared library. Everyone can browse them.</p>
     <div class="new-collection-row">
       <input type="text" id="new-collection-input" class="new-collection-input" placeholder="New collection..." onkeydown="if(event.key==='Enter') createCollection()">
       <button type="button" class="new-collection-btn" onclick="createCollection()">Create</button>
     </div>
+    <div class="collection-list" id="collection-list"></div>
     <div class="close-row" style="text-align:right; margin-top:16px;"><button type="button" class="new-collection-btn" onclick="closeCollectionsModal()">Done</button></div>
   </div>
 </div>
@@ -673,8 +676,8 @@
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.2-20260923"></script>
-<script src="/mobile.js?v=v15.0.2-20260923"></script>
+<script src="/app.js?v=v15.0.3-20260923"></script>
+<script src="/mobile.js?v=v15.0.3-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

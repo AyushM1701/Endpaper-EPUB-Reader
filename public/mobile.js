@@ -82,7 +82,9 @@ function mobileCover(entry, className = '') {
     image.loading = 'lazy';
     cover.appendChild(image);
   } else {
-    cover.appendChild(mobileElement('span', 'mobile-cover-title', entry.name));
+    const fallback = mobileElement('span', 'mobile-cover-title', className.includes('mobile-list-cover') ? (entry.name.trim().charAt(0) || 'B').toLocaleUpperCase() : entry.name);
+    fallback.setAttribute('aria-hidden', 'true');
+    cover.appendChild(fallback);
   }
   return cover;
 }
@@ -96,7 +98,7 @@ function mobileBookCard(entry, layout = 'grid', selectable = false) {
   }, `mobile-book mobile-${layout}${selectable && bulkSelection.has(entry.id) ? ' mobile-selected' : ''}`);
   card.setAttribute('aria-label', `${selectable && bulkMode ? bulkSelection.has(entry.id) ? 'Deselect' : 'Select' : 'Details for'} ${entry.name}`);
   if (selectable && bulkMode) card.setAttribute('aria-pressed', String(bulkSelection.has(entry.id)));
-  card.appendChild(mobileCover(entry));
+  card.appendChild(mobileCover(entry, layout === 'list' ? 'mobile-list-cover' : ''));
   const info = mobileElement('span', 'mobile-book-info');
   info.appendChild(mobileElement('strong', '', entry.name));
   info.appendChild(mobileElement('small', '', entry.author || 'Unknown author'));

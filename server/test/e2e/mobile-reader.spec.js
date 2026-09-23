@@ -229,10 +229,13 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
-  await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
-  await page.getByRole('button', { name: 'Show reading controls and settings' }).click();
+  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
+  await expect(page.locator('#reader-immersive-progress')).toContainText('% read');
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
+  await page.screenshot({ path: 'test-results/mobile-reader-immersive.png' });
+  await page.getByRole('button', { name: 'Reading menu' }).click();
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
-  await page.getByRole('button', { name: 'Reading tools' }).click();
+  await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
   await page.getByRole('button', { name: 'Appearance' }).click();
   await expect(page.locator('#settings-drawer')).toHaveClass(/open/);
   await page.evaluate(() => {
@@ -242,9 +245,49 @@ test('immersive reading always exposes a route back to settings', async ({ page 
     app.webkitRequestFullscreen = undefined;
     toggleFullscreen();
   });
-  await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
-  await page.getByRole('button', { name: 'Show reading controls and settings' }).click();
+  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reading menu' }).click();
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
+});
+
+test('long list titles and management screens fit the phone viewport', async ({ page }) => {
+  await page.evaluate(() => {
+    library.find(book => book.name === 'Three Chapter Test Book').name = 'He Who Fights with Monsters: A Very Long LitRPG Adventure Title';
+    renderMobileShell();
+  });
+  const title = page.locator('.mobile-library-row .mobile-book-info strong').first();
+  await expect(title).toContainText('He Who Fights with Monsters');
+  const titleBounds = await title.boundingBox();
+  expect(titleBounds.x + titleBounds.width).toBeLessThanOrEqual(393);
+  expect(await title.evaluate(element => getComputedStyle(element).webkitLineClamp)).toBe('none');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(393);
+  const toolbarButtons = page.locator('.mobile-library-tools button');
+  expect(await toolbarButtons.count()).toBe(4);
+  for (const button of await toolbarButtons.all()) {
+    const bounds = await button.boundingBox();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(393);
+  }
+  await page.screenshot({ path: 'test-results/mobile-library-list.png' });
+
+  await page.locator('[data-mobile-tab="more"]').click();
+  await page.getByRole('button', { name: /^Collections/ }).click();
+  await expect(page.locator('#collections-card')).toBeVisible();
+  const collectionsLayout = await page.locator('#collections-card').evaluate(element => ({
+    x: element.getBoundingClientRect().x,
+    width: element.getBoundingClientRect().width,
+    background: getComputedStyle(element).backgroundColor,
+  }));
+  expect(collectionsLayout).toEqual({ x: 0, width: 393, background: 'rgb(23, 23, 20)' });
+  await expect(page.locator('#new-collection-input')).toBeVisible();
+  await page.screenshot({ path: 'test-results/mobile-collections.png' });
+  await page.getByRole('button', { name: 'Close collections' }).click();
+
+  await page.getByRole('button', { name: /^People & permissions/ }).click();
+  await expect(page.locator('#admin-card')).toBeVisible();
+  expect(await page.locator('#admin-card').evaluate(element => element.getBoundingClientRect().width)).toBe(393);
+  await expect(page.locator('#new-user-username')).toBeVisible();
+  await page.screenshot({ path: 'test-results/mobile-people.png' });
 });
 
 test('invalid saved position recovers and layout switching keeps text visible', async ({ page }) => {
@@ -285,8 +328,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.2-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.2-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.3-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.3-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

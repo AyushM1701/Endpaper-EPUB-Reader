@@ -1633,8 +1633,10 @@ async function openBook(id){
     ? Math.max(0, Math.min(100, entry.progress))
     : 0;
   const initPctEl = document.getElementById('progress-pct');
+  const immersivePctEl = document.getElementById('reader-immersive-progress');
   const initSliderEl = document.getElementById('progress-slider');
   if (initPctEl) initPctEl.textContent = initialPct + '%';
+  if (immersivePctEl) immersivePctEl.textContent = initialPct + '% read';
   if (initSliderEl) {
     initSliderEl.value = initialPct;
     initSliderEl.style.setProperty('--progress', initialPct + '%');
@@ -1665,6 +1667,8 @@ async function openBook(id){
   window.currentBookData = entry;
   const mobileReaderTitle = document.getElementById('mobile-reader-title');
   if (mobileReaderTitle) mobileReaderTitle.textContent = entry.name;
+  const immersiveChapter = document.getElementById('reader-immersive-chapter');
+  if (immersiveChapter) immersiveChapter.textContent = entry.name;
 
   const overlay = document.getElementById('loading-overlay');
   overlay.classList.add('show');
@@ -2097,6 +2101,10 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
         if (chapterEl && chapterEl.textContent !== chapterLabel) {
           chapterEl.textContent = chapterLabel;
         }
+        const immersiveChapter = document.getElementById('reader-immersive-chapter');
+        if (immersiveChapter) immersiveChapter.textContent = chapterLabel || entry.name;
+        const immersiveProgress = document.getElementById('reader-immersive-progress');
+        if (immersiveProgress && !isLockedNow) immersiveProgress.textContent = pctText + ' read';
 
         updateBookmarkIcon(cfi);
       });
@@ -3333,6 +3341,13 @@ async function boot(){
   return true;
 }
 
+function showImmersiveTools(){
+  exitImmersiveReading();
+  const button = document.getElementById('mobile-reader-tools-button');
+  button?.click();
+  button?.focus({ preventScroll: true });
+}
+
 function abortReaderRequests() {
   readerRequestVersion += 1;
   readerNavigationReady = false;
@@ -3595,7 +3610,7 @@ async function openCollectionsManager() {
   const active = document.activeElement;
   collectionsModalReturnFocus = active instanceof HTMLElement ? active : document.getElementById('library-tools-btn');
   activeOrganizeBookId = null;
-  document.getElementById('collections-title').textContent = 'Manage Collections';
+  document.getElementById('collections-title').textContent = 'Collections';
   const list = document.getElementById('collection-list');
   list.innerHTML = '<div style="color:var(--ink-soft); font-size:13px; padding:6px 0;">Loading collections…</div>';
   const modal = document.getElementById('collections-modal');
@@ -3608,7 +3623,7 @@ async function openCollectionsManager() {
     renderCollectionsFilter();
     list.innerHTML = '';
     if (allCollections.length === 0) {
-      list.innerHTML = '<div style="color:var(--ink-soft); font-size:13px; font-style:italic; padding:4px 0;">No collections yet. Create one below.</div>';
+      list.innerHTML = '<div style="color:var(--ink-soft); font-size:13px; font-style:italic; padding:4px 0;">No collections yet. Create one above.</div>';
     } else {
       allCollections.forEach(collection => {
         const row = document.createElement('div');
