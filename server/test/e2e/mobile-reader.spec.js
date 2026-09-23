@@ -134,6 +134,23 @@ test('a failed progress seek restores the saved position', async ({ page }) => {
   expect(await page.evaluate(() => getCurrentEntry().progress)).toBe(before);
 });
 
+test('dragging the mobile progress slider previews and seeks', async ({ page }) => {
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  const slider = page.locator('#progress-slider');
+  const bounds = await slider.boundingBox();
+  const y = bounds.y + bounds.height / 2;
+  await page.mouse.move(bounds.x + bounds.width * 0.1, y);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * 0.8, y, { steps: 8 });
+  expect(Number(await slider.inputValue())).toBeGreaterThanOrEqual(65);
+  await page.mouse.up();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Three');
+  await page.touchscreen.tap(bounds.x + bounds.width * 0.15, y);
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+});
+
 test('library sheet traps focus and supports reading and downloaded filters', async ({ page }) => {
   await page.getByRole('button', { name: 'Sort & filter' }).click();
   const dialog = page.getByRole('dialog', { name: 'Library options' });
@@ -328,8 +345,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.3-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.3-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.4-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.4-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

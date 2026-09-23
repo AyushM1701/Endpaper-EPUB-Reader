@@ -1824,30 +1824,74 @@ async function openBook(id){
 
   const sliderEl = document.getElementById('progress-slider');
   if (sliderEl) {
+    let resumeChromeAfterSeek = false;
     const startSliderDrag = () => {
       isDraggingProgressSlider = true;
       seekLockUntil = Date.now() + 5000;
+      if (readerChromeTimer) {
+        clearTimeout(readerChromeTimer);
+        readerChromeTimer = null;
+        resumeChromeAfterSeek = true;
+      }
     };
+
+    const previewSliderValue = value => {
+      const dragPct = Math.max(0, Math.min(100, Math.round(Number(value))));
+      sliderEl.value = dragPct;
+      sliderEl.style.setProperty('--progress', dragPct + '%');
+      const pctEl = document.getElementById('progress-pct');
+      if (pctEl) pctEl.textContent = dragPct + '%';
+      const immersivePctEl = document.getElementById('reader-immersive-progress');
+      if (immersivePctEl) immersivePctEl.textContent = dragPct + '% read';
+    };
+
+    const previewTouch = touch => {
+      if (!touch) return;
+      const bounds = sliderEl.getBoundingClientRect();
+      if (bounds.width) previewSliderValue((touch.clientX - bounds.left) / bounds.width * 100);
+    };
+
+    let lastTouchSeekAt = 0;
 
     sliderEl.onpointerdown = startSliderDrag;
     sliderEl.onmousedown = startSliderDrag;
-    sliderEl.ontouchstart = startSliderDrag;
+    sliderEl.ontouchstart = e => {
+      e.preventDefault();
+      startSliderDrag();
+      previewTouch(e.touches[0]);
+    };
+    sliderEl.ontouchmove = e => {
+      e.preventDefault();
+      startSliderDrag();
+      previewTouch(e.touches[0]);
+    };
+    sliderEl.ontouchend = e => {
+      e.preventDefault();
+      previewTouch(e.changedTouches[0]);
+      lastTouchSeekAt = Date.now();
+      sliderEl.onchange({ target: sliderEl });
+    };
+    sliderEl.ontouchcancel = () => {
+      isDraggingProgressSlider = false;
+      seekLockUntil = 0;
+      previewSliderValue(entry.progress || 0);
+      if (resumeChromeAfterSeek) {
+        resumeChromeAfterSeek = false;
+        showReaderChromeTemporarily();
+      }
+    };
 
     sliderEl.oninput = (e) => {
-      isDraggingProgressSlider = true;
-      seekLockUntil = Date.now() + 5000;
-      const dragPct = Math.max(0, Math.min(100, Math.round(Number(e.target.value))));
-      const pctEl = document.getElementById('progress-pct');
-      if (pctEl) pctEl.textContent = dragPct + '%';
-      sliderEl.style.setProperty('--progress', dragPct + '%');
+      startSliderDrag();
+      previewSliderValue(e.target.value);
     };
 
     sliderEl.onchange = (e) => {
+      if (e.isTrusted && Date.now() - lastTouchSeekAt < 300) return;
       isDraggingProgressSlider = true;
       seekLockUntil = Date.now() + 2000;
       const dragPct = Math.max(0, Math.min(100, Math.round(Number(e.target.value))));
-      sliderEl.value = dragPct;
-      sliderEl.style.setProperty('--progress', dragPct + '%');
+      previewSliderValue(dragPct);
       const pctEl = document.getElementById('progress-pct');
       if (pctEl) pctEl.textContent = dragPct + '%';
       const targetFraction = dragPct / 100;
@@ -1856,6 +1900,10 @@ async function openBook(id){
       const unlockSeek = () => {
         isDraggingProgressSlider = false;
         seekLockUntil = 0;
+        if (resumeChromeAfterSeek) {
+          resumeChromeAfterSeek = false;
+          showReaderChromeTemporarily();
+        }
       };
 
       let target = null;
@@ -1873,8 +1921,10 @@ async function openBook(id){
         const totalSpine = Math.max(1, spineItems.length || targetBook.spine.length || 1);
         const targetIndex = Math.min(totalSpine - 1, Math.max(0, Math.floor(targetFraction * totalSpine)));
         const item = targetBook.spine.get(targetIndex) || spineItems[targetIndex];
-        if (item && (item.cfiBase || item.href)) {
-          target = item.cfiBase || item.href;
+        if (item && item.href) {
+          // EPUB.js accepts a spine href here. cfiBase is only a CFI fragment
+          // (such as /6/6), so passing it to display() fails before locations load.
+          target = item.href;
         }
       }
 
@@ -1885,15 +1935,11 @@ async function openBook(id){
           await syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
         }
         else if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
-          sliderEl.value = Math.round(Number(entry.progress) || 0);
-          sliderEl.style.setProperty('--progress', `${sliderEl.value}%`);
-          if (pctEl) pctEl.textContent = `${sliderEl.value}%`;
+          previewSliderValue(entry.progress || 0);
         }
       }).catch(unlockSeek);
       else {
-        sliderEl.value = Math.round(Number(entry.progress) || 0);
-        sliderEl.style.setProperty('--progress', `${sliderEl.value}%`);
-        if (pctEl) pctEl.textContent = `${sliderEl.value}%`;
+        previewSliderValue(entry.progress || 0);
         unlockSeek();
       }
     };
@@ -3433,6 +3479,9 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
     progressSliderEl.onpointerdown = null;
     progressSliderEl.onmousedown = null;
     progressSliderEl.ontouchstart = null;
+    progressSliderEl.ontouchmove = null;
+    progressSliderEl.ontouchend = null;
+    progressSliderEl.ontouchcancel = null;
   }
   isDraggingProgressSlider = false;
   seekLockUntil = 0;

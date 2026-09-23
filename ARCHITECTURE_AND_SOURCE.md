@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T03:32:55.594Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T09:23:05.325Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 89,798 bytes · SHA-256: `e112aa0ca8ea706e1f25d91fc865cc07944b0b63bc5e5df14a1ef8c274500e33`
+Size: 89,855 bytes · SHA-256: `786c359b4e0db430371b625eecd4dddc9a8a0f5c1091dac9893fd519d424d07b`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -2204,6 +2204,7 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #progress-bar{grid-template-rows:auto 24px;gap:2px 12px;min-height:58px;padding:4px 18px calc(4px + min(env(safe-area-inset-bottom),34px))}
   body.reader-active #progress-track{min-height:24px}
   body.reader-active #progress-slider{height:24px;min-height:24px}
+  body.reader-active #progress-slider{touch-action:none}
   #reader-immersive-chapter,#reader-immersive-progress{display:none}
   body.reader-active #app.chrome-hidden #reader-immersive-chapter{display:block;position:fixed;z-index:76;top:calc(15px + min(env(safe-area-inset-top),60px));left:70px;right:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:block;position:fixed;z-index:76;left:70px;right:70px;bottom:calc(17px + min(env(safe-area-inset-bottom),34px));text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
@@ -2248,7 +2249,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ### `public/app.js`
 
-Size: 2,25,043 bytes · SHA-256: `f7d8fc500ace9e109814d2336dc82d2c7e446821ccff9a5d1e3eb8584462662c`
+Size: 2,26,435 bytes · SHA-256: `d458eeadc3b32072aa1bda9599ad70634315ba5f9bc65643c22b1fa77322d8d9`
 
 `````javascript
 /* ================================================================
@@ -4077,30 +4078,74 @@ async function openBook(id){
 
   const sliderEl = document.getElementById('progress-slider');
   if (sliderEl) {
+    let resumeChromeAfterSeek = false;
     const startSliderDrag = () => {
       isDraggingProgressSlider = true;
       seekLockUntil = Date.now() + 5000;
+      if (readerChromeTimer) {
+        clearTimeout(readerChromeTimer);
+        readerChromeTimer = null;
+        resumeChromeAfterSeek = true;
+      }
     };
+
+    const previewSliderValue = value => {
+      const dragPct = Math.max(0, Math.min(100, Math.round(Number(value))));
+      sliderEl.value = dragPct;
+      sliderEl.style.setProperty('--progress', dragPct + '%');
+      const pctEl = document.getElementById('progress-pct');
+      if (pctEl) pctEl.textContent = dragPct + '%';
+      const immersivePctEl = document.getElementById('reader-immersive-progress');
+      if (immersivePctEl) immersivePctEl.textContent = dragPct + '% read';
+    };
+
+    const previewTouch = touch => {
+      if (!touch) return;
+      const bounds = sliderEl.getBoundingClientRect();
+      if (bounds.width) previewSliderValue((touch.clientX - bounds.left) / bounds.width * 100);
+    };
+
+    let lastTouchSeekAt = 0;
 
     sliderEl.onpointerdown = startSliderDrag;
     sliderEl.onmousedown = startSliderDrag;
-    sliderEl.ontouchstart = startSliderDrag;
+    sliderEl.ontouchstart = e => {
+      e.preventDefault();
+      startSliderDrag();
+      previewTouch(e.touches[0]);
+    };
+    sliderEl.ontouchmove = e => {
+      e.preventDefault();
+      startSliderDrag();
+      previewTouch(e.touches[0]);
+    };
+    sliderEl.ontouchend = e => {
+      e.preventDefault();
+      previewTouch(e.changedTouches[0]);
+      lastTouchSeekAt = Date.now();
+      sliderEl.onchange({ target: sliderEl });
+    };
+    sliderEl.ontouchcancel = () => {
+      isDraggingProgressSlider = false;
+      seekLockUntil = 0;
+      previewSliderValue(entry.progress || 0);
+      if (resumeChromeAfterSeek) {
+        resumeChromeAfterSeek = false;
+        showReaderChromeTemporarily();
+      }
+    };
 
     sliderEl.oninput = (e) => {
-      isDraggingProgressSlider = true;
-      seekLockUntil = Date.now() + 5000;
-      const dragPct = Math.max(0, Math.min(100, Math.round(Number(e.target.value))));
-      const pctEl = document.getElementById('progress-pct');
-      if (pctEl) pctEl.textContent = dragPct + '%';
-      sliderEl.style.setProperty('--progress', dragPct + '%');
+      startSliderDrag();
+      previewSliderValue(e.target.value);
     };
 
     sliderEl.onchange = (e) => {
+      if (e.isTrusted && Date.now() - lastTouchSeekAt < 300) return;
       isDraggingProgressSlider = true;
       seekLockUntil = Date.now() + 2000;
       const dragPct = Math.max(0, Math.min(100, Math.round(Number(e.target.value))));
-      sliderEl.value = dragPct;
-      sliderEl.style.setProperty('--progress', dragPct + '%');
+      previewSliderValue(dragPct);
       const pctEl = document.getElementById('progress-pct');
       if (pctEl) pctEl.textContent = dragPct + '%';
       const targetFraction = dragPct / 100;
@@ -4109,6 +4154,10 @@ async function openBook(id){
       const unlockSeek = () => {
         isDraggingProgressSlider = false;
         seekLockUntil = 0;
+        if (resumeChromeAfterSeek) {
+          resumeChromeAfterSeek = false;
+          showReaderChromeTemporarily();
+        }
       };
 
       let target = null;
@@ -4126,8 +4175,10 @@ async function openBook(id){
         const totalSpine = Math.max(1, spineItems.length || targetBook.spine.length || 1);
         const targetIndex = Math.min(totalSpine - 1, Math.max(0, Math.floor(targetFraction * totalSpine)));
         const item = targetBook.spine.get(targetIndex) || spineItems[targetIndex];
-        if (item && (item.cfiBase || item.href)) {
-          target = item.cfiBase || item.href;
+        if (item && item.href) {
+          // EPUB.js accepts a spine href here. cfiBase is only a CFI fragment
+          // (such as /6/6), so passing it to display() fails before locations load.
+          target = item.href;
         }
       }
 
@@ -4138,15 +4189,11 @@ async function openBook(id){
           await syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
         }
         else if (isReaderRequestCurrent(request, targetBook, targetRendition)) {
-          sliderEl.value = Math.round(Number(entry.progress) || 0);
-          sliderEl.style.setProperty('--progress', `${sliderEl.value}%`);
-          if (pctEl) pctEl.textContent = `${sliderEl.value}%`;
+          previewSliderValue(entry.progress || 0);
         }
       }).catch(unlockSeek);
       else {
-        sliderEl.value = Math.round(Number(entry.progress) || 0);
-        sliderEl.style.setProperty('--progress', `${sliderEl.value}%`);
-        if (pctEl) pctEl.textContent = `${sliderEl.value}%`;
+        previewSliderValue(entry.progress || 0);
         unlockSeek();
       }
     };
@@ -5686,6 +5733,9 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
     progressSliderEl.onpointerdown = null;
     progressSliderEl.onmousedown = null;
     progressSliderEl.ontouchstart = null;
+    progressSliderEl.ontouchmove = null;
+    progressSliderEl.ontouchend = null;
+    progressSliderEl.ontouchcancel = null;
   }
   isDraggingProgressSlider = false;
   seekLockUntil = 0;
@@ -7768,7 +7818,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 46,300 bytes · SHA-256: `074ddb943df0e17d603bf3ab2dda93921de5aae45f3e846487547e1db983cc7f`
+Size: 46,300 bytes · SHA-256: `12e69d0e2e326be233fb069d2a734ae1592a9f8ca1616e1605ff89dc4c92d520`
 
 `````html
 <!DOCTYPE html>
@@ -7784,9 +7834,9 @@ Size: 46,300 bytes · SHA-256: `074ddb943df0e17d603bf3ab2dda93921de5aae45f3e8464
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.3-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.3-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.3-20260923">
+<script src="/jszip.min.js?v=v15.0.4-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.4-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.4-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -8449,8 +8499,8 @@ Size: 46,300 bytes · SHA-256: `074ddb943df0e17d603bf3ab2dda93921de5aae45f3e8464
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.3-20260923"></script>
-<script src="/mobile.js?v=v15.0.3-20260923"></script>
+<script src="/app.js?v=v15.0.4-20260923"></script>
+<script src="/mobile.js?v=v15.0.4-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -9172,10 +9222,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `a2c01ed7cd07726d13a5c39531772cfb3f6fde70cc39230ca182025a701546dd`
+Size: 8,356 bytes · SHA-256: `c4d697eb445d03ea729674e36f4aa20688fa610ef8c875117b4d92313be56767`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.3-20260923';
+const BUILD_VERSION = 'v15.0.4-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16492,7 +16542,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 22,626 bytes · SHA-256: `0e4aa63501a98dedc55b52c6228563a5c0b18041f1e875a5eecf372192e043f9`
+Size: 23,659 bytes · SHA-256: `58679e99515bb470259d68e860535a2d76ad3af6d7d62ed58e7b19ed095b3454`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16629,6 +16679,23 @@ test('a failed progress seek restores the saved position', async ({ page }) => {
   });
   await expect(page.locator('#progress-slider')).toHaveValue(String(Math.round(before)));
   expect(await page.evaluate(() => getCurrentEntry().progress)).toBe(before);
+});
+
+test('dragging the mobile progress slider previews and seeks', async ({ page }) => {
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  const slider = page.locator('#progress-slider');
+  const bounds = await slider.boundingBox();
+  const y = bounds.y + bounds.height / 2;
+  await page.mouse.move(bounds.x + bounds.width * 0.1, y);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * 0.8, y, { steps: 8 });
+  expect(Number(await slider.inputValue())).toBeGreaterThanOrEqual(65);
+  await page.mouse.up();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Three');
+  await page.touchscreen.tap(bounds.x + bounds.width * 0.15, y);
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
 });
 
 test('library sheet traps focus and supports reading and downloaded filters', async ({ page }) => {
@@ -16825,8 +16892,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.3-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.3-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.4-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.4-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

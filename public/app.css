@@ -1896,6 +1896,7 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #progress-bar{grid-template-rows:auto 24px;gap:2px 12px;min-height:58px;padding:4px 18px calc(4px + min(env(safe-area-inset-bottom),34px))}
   body.reader-active #progress-track{min-height:24px}
   body.reader-active #progress-slider{height:24px;min-height:24px}
+  body.reader-active #progress-slider{touch-action:none}
   #reader-immersive-chapter,#reader-immersive-progress{display:none}
   body.reader-active #app.chrome-hidden #reader-immersive-chapter{display:block;position:fixed;z-index:76;top:calc(15px + min(env(safe-area-inset-top),60px));left:70px;right:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:block;position:fixed;z-index:76;left:70px;right:70px;bottom:calc(17px + min(env(safe-area-inset-bottom),34px));text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
