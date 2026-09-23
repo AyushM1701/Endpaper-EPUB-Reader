@@ -256,6 +256,13 @@ test('scrolling hides reader controls and a tap fades them back in', async ({ pa
   await page.evaluate(() => setLayout('scrolled'));
   await expect(page.locator('#reader-view')).toHaveClass(/scrolled/);
   await expect(page.locator('#epub-scroll-container')).toBeVisible();
+  const scrolledBounds = await page.locator('#viewer-wrap').evaluate(element => ({
+    top: element.getBoundingClientRect().top,
+    bottom: element.getBoundingClientRect().bottom,
+    viewportHeight: window.innerHeight,
+  }));
+  expect(scrolledBounds.top).toBe(0);
+  expect(scrolledBounds.bottom).toBe(scrolledBounds.viewportHeight);
   await page.evaluate(() => {
     const scroller = document.getElementById('epub-scroll-container');
     const spacer = document.createElement('div');
@@ -296,29 +303,45 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.evaluate(() => setLayout('paginated'));
   await expect(page.locator('#reader-view')).not.toHaveClass(/scrolled/);
   const readerLayout = await page.evaluate(() => ({
-    headerBottom: document.getElementById('mobile-reader-back').getBoundingClientRect().bottom,
     viewerTop: document.getElementById('viewer-wrap').getBoundingClientRect().top,
     viewerBottom: document.getElementById('viewer-wrap').getBoundingClientRect().bottom,
-    progressTop: document.getElementById('progress-bar').getBoundingClientRect().top,
+    viewportHeight: window.innerHeight,
     sliderHeight: document.getElementById('progress-slider').getBoundingClientRect().height,
   }));
-  expect(readerLayout.viewerTop).toBeGreaterThan(readerLayout.headerBottom);
-  expect(readerLayout.viewerBottom).toBeLessThanOrEqual(readerLayout.progressTop);
+  expect(readerLayout.viewerTop).toBe(0);
+  expect(readerLayout.viewerBottom).toBe(readerLayout.viewportHeight);
   expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
   await page.evaluate(() => setReadingTheme('dark'));
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
-  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reading menu' })).toHaveCSS('opacity', '0');
   await expect(page.locator('#reader-immersive-progress')).toContainText('% read');
+  await expect(page.locator('#reader-immersive-progress')).toBeHidden();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
   await page.screenshot({ path: 'test-results/mobile-reader-immersive.png' });
   await page.getByRole('button', { name: 'Reading menu' }).click();
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
   await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
-  await page.getByRole('button', { name: 'Appearance' }).click();
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.locator('[data-reader-tool="fullscreen"] svg')).toBeVisible();
+  await page.screenshot({ path: 'test-results/mobile-reader-tools.png' });
+  await page.getByRole('button', { name: 'Themes & settings' }).click();
   await expect(page.locator('#settings-drawer')).toHaveClass(/open/);
+  await expect.poll(() => page.locator('#settings-drawer').evaluate(element => Math.round(element.getBoundingClientRect().bottom))).toBeLessThanOrEqual(852);
+  await page.screenshot({ path: 'test-results/mobile-reader-settings.png' });
+  await expect(page.locator('#settings-drawer .mobile-reading-quick')).toBeVisible();
+  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(4);
+  await expect(page.locator('#settings-drawer .layout-options')).toBeHidden();
+  const initialFontSize = await page.evaluate(() => settings.fontSize);
+  await page.locator('.mobile-reading-quick').getByRole('button', { name: 'Increase font size' }).click();
+  expect(await page.evaluate(() => settings.fontSize)).toBeGreaterThan(initialFontSize);
+  await page.locator('#settings-drawer .theme-swatch.sepia').click();
+  await expect(page.locator('#settings-drawer .theme-swatch.sepia')).toHaveAttribute('aria-checked', 'true');
+  await page.locator('#settings-drawer .theme-swatch.dark').click();
+  await page.getByRole('button', { name: 'Customize reading' }).click();
+  await expect(page.locator('#settings-drawer .layout-options')).toBeVisible();
   await page.evaluate(() => {
     closeDrawers();
     const app = document.getElementById('app');
@@ -409,8 +432,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.5-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.5-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.6-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.6-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

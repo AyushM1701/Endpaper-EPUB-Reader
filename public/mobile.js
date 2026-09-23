@@ -659,6 +659,12 @@ function closeMobileReaderTools() {
   document.getElementById('mobile-reader-tools-button')?.setAttribute('aria-expanded', 'false');
 }
 window.closeMobileReaderTools = closeMobileReaderTools;
+function toggleMobileReadingCustomize() {
+  const drawer = document.getElementById('settings-drawer');
+  const button = document.getElementById('mobile-reading-customize');
+  const expanded = drawer.classList.toggle('mobile-customize-open');
+  button.setAttribute('aria-expanded', String(expanded));
+}
 document.getElementById('mobile-reader-tools-button')?.addEventListener('click', () => {
   const menu = document.getElementById('mobile-reader-tools-menu');
   menu.hidden = !menu.hidden;

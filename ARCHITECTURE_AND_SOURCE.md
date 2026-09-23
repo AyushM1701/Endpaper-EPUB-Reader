@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T09:42:49.327Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T09:58:22.277Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 91,725 bytes · SHA-256: `bef5df787a8d7e400bfb28429796f1d40f3dab9e7b95870a7149da7250aa12a1`
+Size: 96,890 bytes · SHA-256: `6ea652fdd16c093b6f7c6b33a272fb4d6341d235b9824f82cee0b0927e4fdba8`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -2087,6 +2087,7 @@ html.dark-shell .admin-btn-sm:hover {
 #mobile-reader-controls{display:none}
 #reader-reveal-controls{display:none}
 #reader-immersive-chapter,#reader-immersive-progress{display:none}
+.mobile-reading-quick,#mobile-reading-customize{display:none}
 @media (max-width:700px), (max-width:900px) and (pointer:coarse){
   #mobile-shell{display:block;min-height:100dvh;color:#f5efe5;font-family:var(--font-ui);background:#171714}
   body:not(.reader-active) #topbar{display:none}
@@ -2197,7 +2198,7 @@ html.dark-shell .admin-btn-sm:hover {
   .mobile-library-tools .mobile-pill:nth-of-type(3){grid-column:3;grid-row:2}
   .mobile-library-tools .mobile-pill:nth-of-type(4){grid-column:3;grid-row:1}
 
-  body.reader-active #viewer-wrap{inset:calc(min(env(safe-area-inset-top),60px) + 50px) 0 calc(min(env(safe-area-inset-bottom),34px) + 58px)}
+  body.reader-active #viewer-wrap{inset:0;padding:0}
   body.reader-active #mobile-reader-controls::before{height:calc(min(env(safe-area-inset-top),60px) + 50px)}
   #mobile-reader-back,#mobile-reader-tools-button{top:calc(3px + min(env(safe-area-inset-top),60px));min-width:44px;min-height:44px}
   #mobile-reader-title{top:calc(17px + min(env(safe-area-inset-top),60px));font-size:12px}
@@ -2210,12 +2211,43 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #app.chrome-hidden #reader-immersive-chapter{display:block;position:fixed;z-index:76;top:calc(15px + min(env(safe-area-inset-top),60px));left:70px;right:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-immersive-progress{display:block;position:fixed;z-index:76;left:70px;right:70px;bottom:calc(17px + min(env(safe-area-inset-bottom),34px));text-align:center;color:color-mix(in srgb,var(--reader-ink) 68%,transparent);font:500 12px var(--font-ui);pointer-events:none}
   body.reader-active #app.chrome-hidden #reader-reveal-controls{top:calc(4px + min(env(safe-area-inset-top),60px));right:15px;width:44px;min-height:44px;padding:0;border-radius:50%}
-  body.reader-active #reader-view.scrolled #viewer-wrap{inset:calc(min(env(safe-area-inset-top),60px) + 8px) 0 calc(min(env(safe-area-inset-bottom),34px) + 8px)}
-  body.reader-active #app.chrome-hidden #reader-view.scrolled #reader-reveal-controls{opacity:0;pointer-events:auto}
-  body.reader-active #app.chrome-hidden #reader-view.scrolled #reader-immersive-chapter,
-  body.reader-active #app.chrome-hidden #reader-view.scrolled #reader-immersive-progress{display:none}
+  body.reader-active #reader-view.scrolled #viewer-wrap{inset:0}
+  body.reader-active #app.chrome-hidden #reader-reveal-controls{opacity:0;pointer-events:auto}
+  body.reader-active #app.chrome-hidden #reader-immersive-chapter,
+  body.reader-active #app.chrome-hidden #reader-immersive-progress{display:none}
   #reader-reveal-controls{transition:opacity .18s ease}
   #reader-reveal-controls svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}
+
+  body.reader-active #mobile-reader-controls::before{background:color-mix(in srgb,var(--reader-page-bg) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  body.reader-active #progress-bar{background:color-mix(in srgb,var(--reader-page-bg) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  #mobile-reader-tools-menu{position:fixed;inset:auto 18px calc(78px + min(env(safe-area-inset-bottom),34px));width:auto;max-height:min(70dvh,540px);display:grid;gap:8px;padding:0;border:0;border-radius:0;background:none;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+  #mobile-reader-tools-menu[hidden]{display:none}
+  #mobile-reader-tools-menu .mobile-reader-tool-main{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:55px;padding:10px 18px;border:1px solid color-mix(in srgb,var(--reader-ink) 20%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 76%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 8px 25px var(--shadow);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);font:500 15px var(--font-ui)}
+  #mobile-reader-tools-menu .mobile-reader-tool-main svg{flex:0 0 22px;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .mobile-reader-aa{font:600 23px Georgia,serif}
+  #mobile-reader-tools-menu .mobile-reader-tool-shortcuts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px}
+  #mobile-reader-tools-menu .mobile-reader-tool-shortcuts button{display:grid;place-items:center;min-width:0;min-height:54px;padding:0;border:1px solid color-mix(in srgb,var(--reader-ink) 20%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 76%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 8px 25px var(--shadow);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+  #mobile-reader-tools-menu .mobile-reader-tool-shortcuts svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+  #settings-drawer{box-sizing:border-box;display:flex;flex-direction:column;left:12px!important;right:12px!important;bottom:calc(10px + min(env(safe-area-inset-bottom),34px));width:auto;max-height:min(84dvh,720px);padding:18px 18px 22px;border:1px solid color-mix(in srgb,var(--reader-ink) 22%,transparent);border-radius:26px;background:color-mix(in srgb,var(--reader-page-bg) 83%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 20px 55px var(--shadow);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
+  #settings-drawer .drawer-title{order:0;align-items:center;min-height:44px;margin:0 0 14px;font:600 18px var(--font-ui)}
+  #settings-drawer .drawer-title button{display:grid;place-items:center;width:44px;height:44px;border:1px solid color-mix(in srgb,var(--reader-ink) 25%,transparent);border-radius:50%;background:color-mix(in srgb,var(--reader-page-bg) 70%,var(--reader-ink));color:var(--reader-ink)}
+  #settings-drawer .drawer-title button svg{width:20px;height:20px}
+  #settings-drawer .setting-label{color:color-mix(in srgb,var(--reader-ink) 72%,transparent)}
+  #settings-drawer .mobile-reading-quick{order:1;display:grid;grid-template-columns:1fr 1fr;gap:1px;overflow:hidden;margin:0 0 22px;border-radius:999px;background:color-mix(in srgb,var(--reader-ink) 24%,transparent)}
+  #settings-drawer .mobile-reading-quick button{min-height:52px;border:0;background:color-mix(in srgb,var(--reader-page-bg) 76%,var(--reader-ink));color:var(--reader-ink);font:600 20px Georgia,serif}
+  #settings-drawer .mobile-theme-group{order:2;display:block;margin:0 0 18px}
+  #settings-drawer .theme-swatches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+  #settings-drawer .theme-swatch{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;height:94px;padding:8px 2px;border:2px solid transparent;border-radius:16px;font:600 11px var(--font-ui);letter-spacing:0;box-shadow:0 5px 18px #0002}
+  #settings-drawer .theme-swatch::before{content:'Aa';font:34px Georgia,serif}
+  #settings-drawer .theme-swatch.active{border-color:var(--reader-ink);outline:2px solid var(--reader-page-bg);outline-offset:-5px}
+  #settings-drawer #mobile-reading-customize{order:3;display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border:1px solid color-mix(in srgb,var(--reader-ink) 22%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 75%,var(--reader-ink));color:var(--reader-ink);font:600 14px var(--font-ui)}
+  #settings-drawer #mobile-reading-customize[aria-expanded="true"] span{transform:rotate(180deg)}
+  #settings-drawer>.setting-group:not(.mobile-theme-group){order:4;margin:22px 0 0}
+  #settings-drawer:not(.mobile-customize-open)>.setting-group:not(.mobile-theme-group){display:none}
+  #settings-drawer :is(.layout-option,.font-option){border:1px solid color-mix(in srgb,var(--reader-ink) 24%,transparent);border-radius:12px;background:color-mix(in srgb,var(--reader-page-bg) 80%,var(--reader-ink));color:var(--reader-ink)}
+  #settings-drawer :is(.layout-option,.font-option).active{border-color:var(--reader-ink)}
+  #settings-drawer .setting-slider{accent-color:var(--reader-ink)}
 
   .mobile-offline-access{margin:12px 0 24px;padding:20px;border:1px solid #5b503c;border-radius:16px;background:#292821}
   .mobile-offline-home{display:grid;gap:8px;margin:0 0 26px;padding:18px;border:1px solid #5b503c;border-radius:16px;background:#292821;color:#f5efe5}
@@ -2268,7 +2300,7 @@ html.dark-shell .admin-btn-sm:hover {
 
 ### `public/app.js`
 
-Size: 2,28,486 bytes · SHA-256: `11f2c6e65ad8dacd7cbec3f8215f4cda47b0a07d803dc043412bed6b1a3cbeb9`
+Size: 2,28,699 bytes · SHA-256: `4e7aef5bda1cd40d1b8b459f0a6d8f2728563dec8d28c1533c409b0467e0e02c`
 
 `````javascript
 /* ================================================================
@@ -3589,7 +3621,11 @@ function updateFullscreenControlUI(){
   const fullscreen = Boolean(readerFullscreenElement());
   const immersive = isImmersiveReading();
   if (exitControl) exitControl.hidden = !fullscreen;
-  if (mobileBtn) mobileBtn.textContent = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
+  if (mobileBtn) {
+    const label = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
+    mobileBtn.setAttribute('aria-label', label);
+    mobileBtn.title = label;
+  }
   if (desktopBtn) {
     desktopBtn.setAttribute('aria-pressed', String(fullscreen || immersive));
     desktopBtn.setAttribute('aria-label', fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen');
@@ -5198,7 +5234,8 @@ function applyTheme(){
   if (window.matchMedia && window.matchMedia('(hover: hover)').matches) {
     paddingVal = `max(${paddingVal}, 44px, 8%)`;
   }
-  const vPad = settings.layout === 'scrolled' ? '0' : '12px';
+  const mobileReader = window.matchMedia?.('(max-width:700px), (max-width:900px) and (pointer:coarse)').matches;
+  const vPad = settings.layout === 'scrolled' ? '0' : mobileReader ? '8px' : '12px';
   rendition.themes.override('padding', `${vPad} ${paddingVal}`, true);
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
@@ -7872,7 +7909,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655267a3a853d81a00f`
+Size: 48,124 bytes · SHA-256: `7e9c802bb7aa8953fd4cc3c9b6f98a69b12a2aa89c90c239d1cbf82c1dc0153e`
 
 `````html
 <!DOCTYPE html>
@@ -7888,9 +7925,9 @@ Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.5-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.5-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.5-20260923">
+<script src="/jszip.min.js?v=v15.0.6-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.6-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.6-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -8115,15 +8152,17 @@ Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655
       <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
       <span id="mobile-reader-title"></span>
       <button type="button" id="mobile-reader-tools-button" aria-label="Reading tools" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-      <div id="mobile-reader-tools-menu" hidden>
-        <button type="button" data-reader-tool="toc">Contents</button>
-        <button type="button" data-reader-tool="search">Search book</button>
-        <button type="button" data-reader-tool="settings">Appearance</button>
-        <button type="button" data-reader-tool="bookmarks">Bookmarks &amp; highlights</button>
-        <button type="button" data-reader-tool="bookmark">Bookmark page</button>
-        <button type="button" data-reader-tool="tts">Read aloud</button>
-        <button type="button" data-reader-tool="fullscreen">Fullscreen</button>
-        <button type="button" data-reader-tool="share">Share book</button>
+      <div id="mobile-reader-tools-menu" hidden aria-label="Reading tools menu">
+        <button type="button" class="mobile-reader-tool-main" data-reader-tool="toc"><span>Contents</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <button type="button" class="mobile-reader-tool-main" data-reader-tool="search"><span>Search book</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
+        <button type="button" class="mobile-reader-tool-main" data-reader-tool="settings"><span>Themes &amp; settings</span><span class="mobile-reader-aa" aria-hidden="true">Aa</span></button>
+        <div class="mobile-reader-tool-shortcuts">
+          <button type="button" data-reader-tool="share" aria-label="Share book" title="Share book"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4M5 13v7h14v-7"/></svg></button>
+          <button type="button" data-reader-tool="bookmarks" aria-label="Bookmarks &amp; highlights" title="Bookmarks &amp; highlights"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
+          <button type="button" data-reader-tool="bookmark" aria-label="Bookmark page" title="Bookmark page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v18l-5-4-5 4z"/></svg></button>
+          <button type="button" data-reader-tool="tts" aria-label="Read aloud" title="Read aloud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM17 8c2 2 2 6 0 8m3-11c4 4 4 10 0 14"/></svg></button>
+          <button type="button" data-reader-tool="fullscreen" aria-label="Fullscreen" title="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
+        </div>
       </div>
     </div>
     <div id="progress-bar">
@@ -8227,7 +8266,7 @@ Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655
     <!-- Settings drawer -->
     <aside class="drawer" id="settings-drawer" aria-label="Reading settings" aria-hidden="true" inert>
       <div class="drawer-title">
-        Reading settings
+        Themes &amp; settings
         <button type="button" aria-label="Close reading settings" title="Close" onclick="toggleDrawer('settings')">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -8247,7 +8286,12 @@ Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655
         </div>
       </div>
 
-      <div class="setting-group" role="radiogroup" aria-label="Book page theme">
+      <div class="mobile-reading-quick" role="group" aria-label="Quick reading controls">
+        <button type="button" aria-label="Decrease font size" onclick="stepFontSize(-1)">A−</button>
+        <button type="button" aria-label="Increase font size" onclick="stepFontSize(1)">A+</button>
+      </div>
+
+      <div class="setting-group mobile-theme-group" role="radiogroup" aria-label="Book page theme">
         <span class="setting-label">Page theme</span>
         <div class="theme-swatches">
           <button type="button" class="theme-swatch light" role="radio" aria-checked="true" data-theme="light" onclick="setReadingTheme('light')">Light</button>
@@ -8256,6 +8300,8 @@ Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655
           <button type="button" class="theme-swatch night" role="radio" aria-checked="false" data-theme="night" onclick="setReadingTheme('night')">Night</button>
         </div>
       </div>
+
+      <button type="button" id="mobile-reading-customize" aria-expanded="false" onclick="toggleMobileReadingCustomize()">Customize reading <span aria-hidden="true">⌄</span></button>
 
       <div class="setting-group">
         <span class="setting-label">Typeface</span>
@@ -8554,8 +8600,8 @@ Size: 46,437 bytes · SHA-256: `c648cf791945a33f7405cafe754540bfa68ab463c0d9f655
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.5-20260923"></script>
-<script src="/mobile.js?v=v15.0.5-20260923"></script>
+<script src="/app.js?v=v15.0.6-20260923"></script>
+<script src="/mobile.js?v=v15.0.6-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -8621,7 +8667,7 @@ Size: 689 bytes · SHA-256: `5d80f5a029e9b1cc1e3506940eac8e1c350a6503a8faa2f2ab9
 
 ### `public/mobile.js`
 
-Size: 41,903 bytes · SHA-256: `f39205e616ebea4b12c206f1405e50c05408518f4ccedb6103f0586e814ac06d`
+Size: 42,205 bytes · SHA-256: `f5102407e352168b7de5f19656bfc1c7bd279b904fccb1690b0da15d191600f5`
 
 `````javascript
 /* Mobile presentation over the same library, API, and reader used on desktop. */
@@ -9285,6 +9331,12 @@ function closeMobileReaderTools() {
   document.getElementById('mobile-reader-tools-button')?.setAttribute('aria-expanded', 'false');
 }
 window.closeMobileReaderTools = closeMobileReaderTools;
+function toggleMobileReadingCustomize() {
+  const drawer = document.getElementById('settings-drawer');
+  const button = document.getElementById('mobile-reading-customize');
+  const expanded = drawer.classList.toggle('mobile-customize-open');
+  button.setAttribute('aria-expanded', String(expanded));
+}
 document.getElementById('mobile-reader-tools-button')?.addEventListener('click', () => {
   const menu = document.getElementById('mobile-reader-tools-menu');
   menu.hidden = !menu.hidden;
@@ -9313,10 +9365,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `199bab5bf1a3c84908fbb44e4d0eacd51557a2848d8d7fc7d5fa89fe9bd4c7c0`
+Size: 8,356 bytes · SHA-256: `31ad087c5b20ee14e7f7287fa128d121b79c569328360ad1990a16af5a0bac68`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.5-20260923';
+const BUILD_VERSION = 'v15.0.6-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16633,7 +16685,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 27,754 bytes · SHA-256: `1667678db6ae164f396119f093898ba2aa46fcbdbea8791f26234e0884649f1a`
+Size: 29,383 bytes · SHA-256: `ec56ca61024f2269d0bc4dd04c4172f4661ca26c8ceba4ed82b6fd2ef4c24cb6`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16894,6 +16946,13 @@ test('scrolling hides reader controls and a tap fades them back in', async ({ pa
   await page.evaluate(() => setLayout('scrolled'));
   await expect(page.locator('#reader-view')).toHaveClass(/scrolled/);
   await expect(page.locator('#epub-scroll-container')).toBeVisible();
+  const scrolledBounds = await page.locator('#viewer-wrap').evaluate(element => ({
+    top: element.getBoundingClientRect().top,
+    bottom: element.getBoundingClientRect().bottom,
+    viewportHeight: window.innerHeight,
+  }));
+  expect(scrolledBounds.top).toBe(0);
+  expect(scrolledBounds.bottom).toBe(scrolledBounds.viewportHeight);
   await page.evaluate(() => {
     const scroller = document.getElementById('epub-scroll-container');
     const spacer = document.createElement('div');
@@ -16934,29 +16993,45 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await page.evaluate(() => setLayout('paginated'));
   await expect(page.locator('#reader-view')).not.toHaveClass(/scrolled/);
   const readerLayout = await page.evaluate(() => ({
-    headerBottom: document.getElementById('mobile-reader-back').getBoundingClientRect().bottom,
     viewerTop: document.getElementById('viewer-wrap').getBoundingClientRect().top,
     viewerBottom: document.getElementById('viewer-wrap').getBoundingClientRect().bottom,
-    progressTop: document.getElementById('progress-bar').getBoundingClientRect().top,
+    viewportHeight: window.innerHeight,
     sliderHeight: document.getElementById('progress-slider').getBoundingClientRect().height,
   }));
-  expect(readerLayout.viewerTop).toBeGreaterThan(readerLayout.headerBottom);
-  expect(readerLayout.viewerBottom).toBeLessThanOrEqual(readerLayout.progressTop);
+  expect(readerLayout.viewerTop).toBe(0);
+  expect(readerLayout.viewerBottom).toBe(readerLayout.viewportHeight);
   expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
   await page.evaluate(() => setReadingTheme('dark'));
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
-  await expect(page.getByRole('button', { name: 'Reading menu' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reading menu' })).toHaveCSS('opacity', '0');
   await expect(page.locator('#reader-immersive-progress')).toContainText('% read');
+  await expect(page.locator('#reader-immersive-progress')).toBeHidden();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
   await page.screenshot({ path: 'test-results/mobile-reader-immersive.png' });
   await page.getByRole('button', { name: 'Reading menu' }).click();
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
   await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
-  await page.getByRole('button', { name: 'Appearance' }).click();
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await expect(page.locator('[data-reader-tool="fullscreen"] svg')).toBeVisible();
+  await page.screenshot({ path: 'test-results/mobile-reader-tools.png' });
+  await page.getByRole('button', { name: 'Themes & settings' }).click();
   await expect(page.locator('#settings-drawer')).toHaveClass(/open/);
+  await expect.poll(() => page.locator('#settings-drawer').evaluate(element => Math.round(element.getBoundingClientRect().bottom))).toBeLessThanOrEqual(852);
+  await page.screenshot({ path: 'test-results/mobile-reader-settings.png' });
+  await expect(page.locator('#settings-drawer .mobile-reading-quick')).toBeVisible();
+  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(4);
+  await expect(page.locator('#settings-drawer .layout-options')).toBeHidden();
+  const initialFontSize = await page.evaluate(() => settings.fontSize);
+  await page.locator('.mobile-reading-quick').getByRole('button', { name: 'Increase font size' }).click();
+  expect(await page.evaluate(() => settings.fontSize)).toBeGreaterThan(initialFontSize);
+  await page.locator('#settings-drawer .theme-swatch.sepia').click();
+  await expect(page.locator('#settings-drawer .theme-swatch.sepia')).toHaveAttribute('aria-checked', 'true');
+  await page.locator('#settings-drawer .theme-swatch.dark').click();
+  await page.getByRole('button', { name: 'Customize reading' }).click();
+  await expect(page.locator('#settings-drawer .layout-options')).toBeVisible();
   await page.evaluate(() => {
     closeDrawers();
     const app = document.getElementById('app');
@@ -17047,8 +17122,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.5-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.5-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.6-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.6-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

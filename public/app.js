@@ -1316,7 +1316,11 @@ function updateFullscreenControlUI(){
   const fullscreen = Boolean(readerFullscreenElement());
   const immersive = isImmersiveReading();
   if (exitControl) exitControl.hidden = !fullscreen;
-  if (mobileBtn) mobileBtn.textContent = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
+  if (mobileBtn) {
+    const label = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
+    mobileBtn.setAttribute('aria-label', label);
+    mobileBtn.title = label;
+  }
   if (desktopBtn) {
     desktopBtn.setAttribute('aria-pressed', String(fullscreen || immersive));
     desktopBtn.setAttribute('aria-label', fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen');
@@ -2925,7 +2929,8 @@ function applyTheme(){
   if (window.matchMedia && window.matchMedia('(hover: hover)').matches) {
     paddingVal = `max(${paddingVal}, 44px, 8%)`;
   }
-  const vPad = settings.layout === 'scrolled' ? '0' : '12px';
+  const mobileReader = window.matchMedia?.('(max-width:700px), (max-width:900px) and (pointer:coarse)').matches;
+  const vPad = settings.layout === 'scrolled' ? '0' : mobileReader ? '8px' : '12px';
   rendition.themes.override('padding', `${vPad} ${paddingVal}`, true);
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
