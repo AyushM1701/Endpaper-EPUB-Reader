@@ -4,8 +4,8 @@
   "description": "A self-hosted EPUB library and reader",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F6F1E7",
-  "theme_color": "#F6F1E7",
+  "background_color": "#171714",
+  "theme_color": "#171714",
   "orientation": "any",
   "icons": [
     {

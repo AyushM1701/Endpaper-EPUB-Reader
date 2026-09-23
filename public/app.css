@@ -1212,7 +1212,7 @@ input.shelf-select:focus{ width:220px; }
   }
   body.reader-active #viewer-wrap {
     position: absolute;
-    inset: min(env(safe-area-inset-top), 60px) 0 min(env(safe-area-inset-bottom), 34px);
+    inset: calc(min(env(safe-area-inset-top), 60px) + 62px) 0 calc(min(env(safe-area-inset-bottom), 34px) + 72px);
     width: auto;
     height: auto;
     min-height: 0;
@@ -1813,19 +1813,21 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #topbar{display:none!important}
   body.reader-active #mobile-reader-controls{display:block;position:fixed;inset:0;z-index:75;pointer-events:none;transition:opacity .2s ease}
   body.reader-active #app.chrome-hidden #mobile-reader-controls{opacity:0;pointer-events:none}
-  body.reader-active #app.chrome-hidden #reader-reveal-controls{display:flex;position:fixed;z-index:78;top:calc(10px + min(env(safe-area-inset-top), 60px));right:14px;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid var(--line);border-radius:999px;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:600 12px var(--font-ui)}
-  #mobile-reader-back,#mobile-reader-tools-button{display:flex;align-items:center;justify-content:center;position:absolute;min-width:48px;min-height:48px;border:1px solid var(--line);border-radius:50%;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:28px Georgia,serif;pointer-events:auto}
+  body.reader-active #mobile-reader-controls::before{content:"";position:absolute;top:0;left:0;right:0;height:calc(min(env(safe-area-inset-top), 60px) + 62px);background:var(--reader-page-bg);border-bottom:1px solid color-mix(in srgb,var(--reader-ink) 20%,transparent);pointer-events:none}
+  body.reader-active #app.chrome-hidden #reader-reveal-controls{display:flex;position:fixed;z-index:78;top:calc(10px + min(env(safe-area-inset-top), 60px));right:14px;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid color-mix(in srgb,var(--reader-ink) 25%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 90%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:600 12px var(--font-ui)}
+  #mobile-reader-back,#mobile-reader-tools-button{display:flex;align-items:center;justify-content:center;position:absolute;min-width:48px;min-height:48px;border:1px solid color-mix(in srgb,var(--reader-ink) 25%,transparent);border-radius:50%;background:color-mix(in srgb,var(--reader-page-bg) 90%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:28px Georgia,serif;pointer-events:auto}
   #mobile-reader-back{top:auto;bottom:calc(85px + min(env(safe-area-inset-bottom), 34px));left:14px}
   #mobile-reader-title{display:none}
-  #mobile-reader-tools-button{right:14px;bottom:calc(85px + min(env(safe-area-inset-bottom), 34px));font-size:23px}
-  #mobile-reader-tools-menu{position:absolute;right:14px;bottom:calc(143px + min(env(safe-area-inset-bottom), 34px));width:min(240px,calc(100vw - 30px));padding:7px;border:1px solid var(--line);border-radius:15px;background:var(--paper-card);color:var(--ink);box-shadow:0 15px 40px var(--shadow);pointer-events:auto}
+  #mobile-reader-tools-button{right:14px;top:calc(12px + min(env(safe-area-inset-top), 60px));bottom:auto;font-size:23px}
+  #mobile-reader-tools-menu{position:absolute;right:14px;top:calc(68px + min(env(safe-area-inset-top), 60px));bottom:auto;width:min(240px,calc(100vw - 30px));max-height:calc(100dvh - 90px - min(env(safe-area-inset-top), 60px));overflow-y:auto;padding:7px;border:1px solid color-mix(in srgb,var(--reader-ink) 25%,transparent);border-radius:15px;background:color-mix(in srgb,var(--reader-page-bg) 92%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 15px 40px var(--shadow);pointer-events:auto}
   #mobile-reader-tools-menu[hidden]{display:none}
-  #mobile-reader-tools-menu button{display:block;width:100%;min-height:44px;padding:8px 13px;border:0;border-radius:8px;background:none;color:var(--ink);text-align:left;font:14px var(--font-ui)}
-  body.reader-active #progress-bar{box-sizing:border-box;display:flex;gap:9px;min-height:62px;padding:9px 16px calc(9px + min(env(safe-area-inset-bottom), 34px));font-size:11px}
-  body.reader-active #progress-chapter{display:block!important;min-width:0;max-width:27%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  body.reader-active #progress-track{display:block!important;flex:1;min-width:70px}
-  body.reader-active #progress-slider{min-height:44px;width:100%}
-  body.reader-active #progress-pct{display:block!important;white-space:nowrap}
+  #mobile-reader-tools-menu button{display:block;width:100%;min-height:44px;padding:8px 13px;border:0;border-radius:8px;background:none;color:var(--reader-ink);text-align:left;font:14px var(--font-ui)}
+  body.reader-active #progress-bar{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 36px;gap:2px 12px;min-height:72px;padding:8px 18px calc(8px + min(env(safe-area-inset-bottom), 34px));border-top:1px solid color-mix(in srgb,var(--reader-ink) 20%,transparent);background:var(--reader-page-bg);font-size:11px}
+  body.reader-active #progress-chapter{display:block!important;grid-column:1;grid-row:1;min-width:0;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:normal;color:color-mix(in srgb,var(--reader-ink) 75%,transparent)}
+  body.reader-active #progress-track{display:flex!important;grid-column:1/-1;grid-row:2;min-width:0;min-height:36px}
+  body.reader-active #progress-slider{width:100%;height:36px;min-height:36px;margin:0;background-image:linear-gradient(to right,var(--gold) var(--progress,0%),color-mix(in srgb,var(--reader-ink) 25%,transparent) var(--progress,0%));background-size:100% 4px;background-position:center;background-repeat:no-repeat}
+  body.reader-active #progress-slider::-webkit-slider-thumb{width:18px;height:18px;margin-top:0;box-shadow:0 0 0 3px var(--reader-page-bg)}
+  body.reader-active #progress-pct{display:block!important;grid-column:2;grid-row:1;white-space:nowrap;color:color-mix(in srgb,var(--reader-ink) 75%,transparent)}
   body.reader-active #progress-remaining{display:none!important}
   body.reader-active #reader-bottom-actions{display:none!important}
   body.reader-active #reader-view:not(.scrolled) .nav-zone{background:transparent;opacity:.22}
@@ -1834,7 +1836,7 @@ html.dark-shell .admin-btn-sm:hover {
   #mobile-tabbar button svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   #mobile-reader-tools-button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
   #mobile-reader-back{top:calc(12px + min(env(safe-area-inset-top), 60px));bottom:auto}
-  #mobile-reader-title{display:block;position:absolute;top:calc(22px + min(env(safe-area-inset-top), 60px));left:76px;right:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:var(--ink);font:600 13px var(--font-ui)}
+  #mobile-reader-title{display:block;position:absolute;top:calc(22px + min(env(safe-area-inset-top), 60px));left:76px;right:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:var(--reader-ink);font:600 13px var(--font-ui)}
   .mobile-star{min-width:44px}
   .mobile-series-link{min-height:44px;padding:8px 0}
   .mobile-selected .mobile-cover{outline:3px solid #d4af68;outline-offset:2px}
@@ -1858,9 +1860,11 @@ html.dark-shell .admin-btn-sm:hover {
   .mobile-series-stack .mobile-cover:nth-child(3){left:30px;top:4px;transform:rotate(8deg)}
 }
 
-/* Installed iOS windows can report a shorter dynamic viewport than the full
-   standalone canvas. Fill that canvas and keep the floating tabs near its edge. */
+/* Installed WebKit can subtract the safe area from dvh even though vh covers
+   the full Home Screen window. Keep controls inside that window. */
 @media (display-mode:standalone) and (max-width:900px){
+  html,body{height:100vh;min-height:100vh}
   #app{height:100vh}
-  #mobile-tabbar{bottom:calc(8px + min(env(safe-area-inset-bottom), 34px) - max(0px, calc(100vh - 100dvh)))}
+  body.reader-active #app{height:100vh;bottom:auto}
+  #shelf-view,#mobile-shell,.mobile-page{min-height:100vh}
 }

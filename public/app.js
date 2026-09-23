@@ -1004,7 +1004,7 @@ function applyReaderContentStyles(contents) {
     @font-face { font-family: 'Work Sans'; src: url('/fonts/WorkSans-Regular.woff2') format('woff2'); font-style: normal; font-weight: 400; }
     @font-face { font-family: 'Work Sans'; src: url('/fonts/WorkSans-Bold.woff2') format('woff2'); font-style: normal; font-weight: 700; }
     @media (max-width: 699px) {
-      p, li, blockquote { text-align: start !important; hyphens: auto; -webkit-hyphens: auto; }
+      p, li, blockquote { text-align: start !important; hyphens: manual; -webkit-hyphens: manual; overflow-wrap: break-word; }
     }
     html, body {
       background-color: ${theme.body} !important;
@@ -2813,14 +2813,18 @@ function registerThemes(){
 function syncReaderPalette(){
   const readerTheme = THEMES[settings.theme] || THEMES.light;
   const app = document.getElementById('app');
-  if (app) app.style.setProperty('--reader-page-bg', readerTheme.body);
+  if (app) {
+    app.style.setProperty('--reader-page-bg', readerTheme.body);
+    app.style.setProperty('--reader-ink', readerTheme.text);
+  }
   const viewerWrap = document.getElementById('viewer-wrap');
   if (viewerWrap) viewerWrap.style.backgroundColor = readerTheme.body;
   const readerView = document.getElementById('reader-view');
   if (readerView) readerView.style.backgroundColor = readerTheme.body;
 
   const isReaderActive = document.body.classList.contains('reader-active');
-  const shellColor = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7';
+  const mobileShell = window.matchMedia?.('(max-width:700px), (max-width:900px) and (pointer:coarse)').matches;
+  const shellColor = mobileShell ? '#171714' : (getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7');
   const effectiveBg = isReaderActive ? readerTheme.body : shellColor;
   
   document.documentElement.style.backgroundColor = effectiveBg;
@@ -2856,8 +2860,7 @@ function applyTheme(){
   rendition.themes.override('padding', `${vPad} ${paddingVal}`, true);
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
-  // Page appearance belongs inside the EPUB iframe; never tint the library shell.
-  document.body.style.removeProperty('background');
+  // Keep the installed app's exposed safe area in the same reading palette.
   if (rendition && typeof rendition.views === 'function') {
     rendition.views().forEach(v => {
       if (v && v.contents) applyReaderContentStyles(v.contents);

@@ -205,14 +205,28 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
 });
 
 test('immersive reading always exposes a route back to settings', async ({ page }) => {
+  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black');
   const tabbar = page.locator('#mobile-tabbar');
   const bottomGap = await tabbar.evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom);
   expect(bottomGap).toBeLessThanOrEqual(50);
-  expect(await page.evaluate(() => CSS.supports('bottom', 'calc(8px + min(env(safe-area-inset-bottom), 34px) - max(0px, calc(100vh - 100dvh))'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(23, 23, 20)');
 
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  const readerLayout = await page.evaluate(() => ({
+    headerBottom: document.getElementById('mobile-reader-back').getBoundingClientRect().bottom,
+    viewerTop: document.getElementById('viewer-wrap').getBoundingClientRect().top,
+    viewerBottom: document.getElementById('viewer-wrap').getBoundingClientRect().bottom,
+    progressTop: document.getElementById('progress-bar').getBoundingClientRect().top,
+    sliderHeight: document.getElementById('progress-slider').getBoundingClientRect().height,
+  }));
+  expect(readerLayout.viewerTop).toBeGreaterThan(readerLayout.headerBottom);
+  expect(readerLayout.viewerBottom).toBeLessThanOrEqual(readerLayout.progressTop);
+  expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
+  await page.evaluate(() => setReadingTheme('dark'));
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
   await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
@@ -271,8 +285,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.1-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.1-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.2-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.2-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

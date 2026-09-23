@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T02:48:41.298Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T03:06:57.604Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 80,329 bytes · SHA-256: `5b3d5b46dfbb0afc6382cf86cf3a36404920599dfe411a7c50a6252b3aa57aa1`
+Size: 81,794 bytes · SHA-256: `3df73567aab23c9d5428a326d27ce1494a80847718f448234bffd32723764c33`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -1520,7 +1520,7 @@ input.shelf-select:focus{ width:220px; }
   }
   body.reader-active #viewer-wrap {
     position: absolute;
-    inset: min(env(safe-area-inset-top), 60px) 0 min(env(safe-area-inset-bottom), 34px);
+    inset: calc(min(env(safe-area-inset-top), 60px) + 62px) 0 calc(min(env(safe-area-inset-bottom), 34px) + 72px);
     width: auto;
     height: auto;
     min-height: 0;
@@ -2121,19 +2121,21 @@ html.dark-shell .admin-btn-sm:hover {
   body.reader-active #topbar{display:none!important}
   body.reader-active #mobile-reader-controls{display:block;position:fixed;inset:0;z-index:75;pointer-events:none;transition:opacity .2s ease}
   body.reader-active #app.chrome-hidden #mobile-reader-controls{opacity:0;pointer-events:none}
-  body.reader-active #app.chrome-hidden #reader-reveal-controls{display:flex;position:fixed;z-index:78;top:calc(10px + min(env(safe-area-inset-top), 60px));right:14px;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid var(--line);border-radius:999px;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:600 12px var(--font-ui)}
-  #mobile-reader-back,#mobile-reader-tools-button{display:flex;align-items:center;justify-content:center;position:absolute;min-width:48px;min-height:48px;border:1px solid var(--line);border-radius:50%;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:28px Georgia,serif;pointer-events:auto}
+  body.reader-active #mobile-reader-controls::before{content:"";position:absolute;top:0;left:0;right:0;height:calc(min(env(safe-area-inset-top), 60px) + 62px);background:var(--reader-page-bg);border-bottom:1px solid color-mix(in srgb,var(--reader-ink) 20%,transparent);pointer-events:none}
+  body.reader-active #app.chrome-hidden #reader-reveal-controls{display:flex;position:fixed;z-index:78;top:calc(10px + min(env(safe-area-inset-top), 60px));right:14px;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid color-mix(in srgb,var(--reader-ink) 25%,transparent);border-radius:999px;background:color-mix(in srgb,var(--reader-page-bg) 90%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:600 12px var(--font-ui)}
+  #mobile-reader-back,#mobile-reader-tools-button{display:flex;align-items:center;justify-content:center;position:absolute;min-width:48px;min-height:48px;border:1px solid color-mix(in srgb,var(--reader-ink) 25%,transparent);border-radius:50%;background:color-mix(in srgb,var(--reader-page-bg) 90%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:28px Georgia,serif;pointer-events:auto}
   #mobile-reader-back{top:auto;bottom:calc(85px + min(env(safe-area-inset-bottom), 34px));left:14px}
   #mobile-reader-title{display:none}
-  #mobile-reader-tools-button{right:14px;bottom:calc(85px + min(env(safe-area-inset-bottom), 34px));font-size:23px}
-  #mobile-reader-tools-menu{position:absolute;right:14px;bottom:calc(143px + min(env(safe-area-inset-bottom), 34px));width:min(240px,calc(100vw - 30px));padding:7px;border:1px solid var(--line);border-radius:15px;background:var(--paper-card);color:var(--ink);box-shadow:0 15px 40px var(--shadow);pointer-events:auto}
+  #mobile-reader-tools-button{right:14px;top:calc(12px + min(env(safe-area-inset-top), 60px));bottom:auto;font-size:23px}
+  #mobile-reader-tools-menu{position:absolute;right:14px;top:calc(68px + min(env(safe-area-inset-top), 60px));bottom:auto;width:min(240px,calc(100vw - 30px));max-height:calc(100dvh - 90px - min(env(safe-area-inset-top), 60px));overflow-y:auto;padding:7px;border:1px solid color-mix(in srgb,var(--reader-ink) 25%,transparent);border-radius:15px;background:color-mix(in srgb,var(--reader-page-bg) 92%,var(--reader-ink));color:var(--reader-ink);box-shadow:0 15px 40px var(--shadow);pointer-events:auto}
   #mobile-reader-tools-menu[hidden]{display:none}
-  #mobile-reader-tools-menu button{display:block;width:100%;min-height:44px;padding:8px 13px;border:0;border-radius:8px;background:none;color:var(--ink);text-align:left;font:14px var(--font-ui)}
-  body.reader-active #progress-bar{box-sizing:border-box;display:flex;gap:9px;min-height:62px;padding:9px 16px calc(9px + min(env(safe-area-inset-bottom), 34px));font-size:11px}
-  body.reader-active #progress-chapter{display:block!important;min-width:0;max-width:27%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  body.reader-active #progress-track{display:block!important;flex:1;min-width:70px}
-  body.reader-active #progress-slider{min-height:44px;width:100%}
-  body.reader-active #progress-pct{display:block!important;white-space:nowrap}
+  #mobile-reader-tools-menu button{display:block;width:100%;min-height:44px;padding:8px 13px;border:0;border-radius:8px;background:none;color:var(--reader-ink);text-align:left;font:14px var(--font-ui)}
+  body.reader-active #progress-bar{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 36px;gap:2px 12px;min-height:72px;padding:8px 18px calc(8px + min(env(safe-area-inset-bottom), 34px));border-top:1px solid color-mix(in srgb,var(--reader-ink) 20%,transparent);background:var(--reader-page-bg);font-size:11px}
+  body.reader-active #progress-chapter{display:block!important;grid-column:1;grid-row:1;min-width:0;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:normal;color:color-mix(in srgb,var(--reader-ink) 75%,transparent)}
+  body.reader-active #progress-track{display:flex!important;grid-column:1/-1;grid-row:2;min-width:0;min-height:36px}
+  body.reader-active #progress-slider{width:100%;height:36px;min-height:36px;margin:0;background-image:linear-gradient(to right,var(--gold) var(--progress,0%),color-mix(in srgb,var(--reader-ink) 25%,transparent) var(--progress,0%));background-size:100% 4px;background-position:center;background-repeat:no-repeat}
+  body.reader-active #progress-slider::-webkit-slider-thumb{width:18px;height:18px;margin-top:0;box-shadow:0 0 0 3px var(--reader-page-bg)}
+  body.reader-active #progress-pct{display:block!important;grid-column:2;grid-row:1;white-space:nowrap;color:color-mix(in srgb,var(--reader-ink) 75%,transparent)}
   body.reader-active #progress-remaining{display:none!important}
   body.reader-active #reader-bottom-actions{display:none!important}
   body.reader-active #reader-view:not(.scrolled) .nav-zone{background:transparent;opacity:.22}
@@ -2142,7 +2144,7 @@ html.dark-shell .admin-btn-sm:hover {
   #mobile-tabbar button svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   #mobile-reader-tools-button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
   #mobile-reader-back{top:calc(12px + min(env(safe-area-inset-top), 60px));bottom:auto}
-  #mobile-reader-title{display:block;position:absolute;top:calc(22px + min(env(safe-area-inset-top), 60px));left:76px;right:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:var(--ink);font:600 13px var(--font-ui)}
+  #mobile-reader-title{display:block;position:absolute;top:calc(22px + min(env(safe-area-inset-top), 60px));left:76px;right:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:var(--reader-ink);font:600 13px var(--font-ui)}
   .mobile-star{min-width:44px}
   .mobile-series-link{min-height:44px;padding:8px 0}
   .mobile-selected .mobile-cover{outline:3px solid #d4af68;outline-offset:2px}
@@ -2166,17 +2168,19 @@ html.dark-shell .admin-btn-sm:hover {
   .mobile-series-stack .mobile-cover:nth-child(3){left:30px;top:4px;transform:rotate(8deg)}
 }
 
-/* Installed iOS windows can report a shorter dynamic viewport than the full
-   standalone canvas. Fill that canvas and keep the floating tabs near its edge. */
+/* Installed WebKit can subtract the safe area from dvh even though vh covers
+   the full Home Screen window. Keep controls inside that window. */
 @media (display-mode:standalone) and (max-width:900px){
+  html,body{height:100vh;min-height:100vh}
   #app{height:100vh}
-  #mobile-tabbar{bottom:calc(8px + min(env(safe-area-inset-bottom), 34px) - max(0px, calc(100vh - 100dvh)))}
+  body.reader-active #app{height:100vh;bottom:auto}
+  #shelf-view,#mobile-shell,.mobile-page{min-height:100vh}
 }
 `````
 
 ### `public/app.js`
 
-Size: 2,24,026 bytes · SHA-256: `ecf3fbb261d3a85629ff8dde3d872a41a2779b545f31951a926bc967dde5160b`
+Size: 2,24,205 bytes · SHA-256: `da8d93bb0a1504331b16be122dee24aff5731a1762e48aecf3fbb04542740548`
 
 `````javascript
 /* ================================================================
@@ -3185,7 +3189,7 @@ function applyReaderContentStyles(contents) {
     @font-face { font-family: 'Work Sans'; src: url('/fonts/WorkSans-Regular.woff2') format('woff2'); font-style: normal; font-weight: 400; }
     @font-face { font-family: 'Work Sans'; src: url('/fonts/WorkSans-Bold.woff2') format('woff2'); font-style: normal; font-weight: 700; }
     @media (max-width: 699px) {
-      p, li, blockquote { text-align: start !important; hyphens: auto; -webkit-hyphens: auto; }
+      p, li, blockquote { text-align: start !important; hyphens: manual; -webkit-hyphens: manual; overflow-wrap: break-word; }
     }
     html, body {
       background-color: ${theme.body} !important;
@@ -4994,14 +4998,18 @@ function registerThemes(){
 function syncReaderPalette(){
   const readerTheme = THEMES[settings.theme] || THEMES.light;
   const app = document.getElementById('app');
-  if (app) app.style.setProperty('--reader-page-bg', readerTheme.body);
+  if (app) {
+    app.style.setProperty('--reader-page-bg', readerTheme.body);
+    app.style.setProperty('--reader-ink', readerTheme.text);
+  }
   const viewerWrap = document.getElementById('viewer-wrap');
   if (viewerWrap) viewerWrap.style.backgroundColor = readerTheme.body;
   const readerView = document.getElementById('reader-view');
   if (readerView) readerView.style.backgroundColor = readerTheme.body;
 
   const isReaderActive = document.body.classList.contains('reader-active');
-  const shellColor = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7';
+  const mobileShell = window.matchMedia?.('(max-width:700px), (max-width:900px) and (pointer:coarse)').matches;
+  const shellColor = mobileShell ? '#171714' : (getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7');
   const effectiveBg = isReaderActive ? readerTheme.body : shellColor;
   
   document.documentElement.style.backgroundColor = effectiveBg;
@@ -5037,8 +5045,7 @@ function applyTheme(){
   rendition.themes.override('padding', `${vPad} ${paddingVal}`, true);
   rendition.themes.override('line-height', (settings.lineHeight / 100).toString(), true);
   rendition.themes.override('letter-spacing', SPACING_VALUES[settings.letterSpacingIdx], true);
-  // Page appearance belongs inside the EPUB iframe; never tint the library shell.
-  document.body.style.removeProperty('background');
+  // Keep the installed app's exposed safe area in the same reading palette.
   if (rendition && typeof rendition.views === 'function') {
     rendition.views().forEach(v => {
       if (v && v.contents) applyReaderContentStyles(v.contents);
@@ -7678,7 +7685,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 46,031 bytes · SHA-256: `e44fa8f692e1fc66ef6f6e44fdfcb9ecb99eaa26188f67dd382504ba6fe499c4`
+Size: 46,019 bytes · SHA-256: `8750745215387bad2b59ab97f8fa4e5de3a96a1ab252a3eff94b0f2a4b6d2560`
 
 `````html
 <!DOCTYPE html>
@@ -7687,16 +7694,16 @@ Size: 46,031 bytes · SHA-256: `e44fa8f692e1fc66ef6f6e44fdfcb9ecb99eaa26188f67dd
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="description" content="Endpaper is a shared, self-hosted EPUB library and reader.">
-<meta name="theme-color" content="#F6F1E7">
+<meta name="theme-color" content="#171714">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Endpaper">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.1-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.1-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.1-20260923">
+<script src="/jszip.min.js?v=v15.0.2-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.2-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.2-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -8356,8 +8363,8 @@ Size: 46,031 bytes · SHA-256: `e44fa8f692e1fc66ef6f6e44fdfcb9ecb99eaa26188f67dd
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.1-20260923"></script>
-<script src="/mobile.js?v=v15.0.1-20260923"></script>
+<script src="/app.js?v=v15.0.2-20260923"></script>
+<script src="/mobile.js?v=v15.0.2-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -8385,7 +8392,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
 ### `public/manifest.json`
 
-Size: 689 bytes · SHA-256: `d3178ff6ea7facdf4f23df54f3fa3d03e1b859dc4ee984eb3b450e3049caf6dc`
+Size: 689 bytes · SHA-256: `5d80f5a029e9b1cc1e3506940eac8e1c350a6503a8faa2f2ab9b1023d0eda7e5`
 
 `````json
 {
@@ -8394,8 +8401,8 @@ Size: 689 bytes · SHA-256: `d3178ff6ea7facdf4f23df54f3fa3d03e1b859dc4ee984eb3b4
   "description": "A self-hosted EPUB library and reader",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F6F1E7",
-  "theme_color": "#F6F1E7",
+  "background_color": "#171714",
+  "theme_color": "#171714",
   "orientation": "any",
   "icons": [
     {
@@ -9077,10 +9084,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `53c87dfa72dd6f24a7b34131d2f7d4aa68af475e54f7a7aedcb7287f38cd5b6e`
+Size: 8,356 bytes · SHA-256: `ac9ad917ca06b1c559a4a3866dbbf45585f7412a1094484dba970d1d5098a80a`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.1-20260923';
+const BUILD_VERSION = 'v15.0.2-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16367,7 +16374,7 @@ require('../src/index.js');
 
 ### `server/test/e2e/desktop.spec.js`
 
-Size: 1,154 bytes · SHA-256: `ea3e1b25fbc50d4a99bc51024f9374ec9e069be55de9234c49fd83fa6b63f109`
+Size: 1,212 bytes · SHA-256: `36658804aab3cea861ba3a92e63c7c45f5b03b3be6b1b395a20b505cc89cbee9`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16380,6 +16387,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
   await page.locator('#username-input').fill('admin');
   await page.locator('#passphrase-input').fill('correct horse battery');
   await page.locator('#login-btn').click();
+  await expect(page.locator('#login-gate')).toBeHidden();
   await expect(page.locator('#topbar')).toBeVisible();
   await expect(page.locator('#mobile-shell')).toBeHidden();
   if (!(await page.locator('#shelf .book-card').count())) {
@@ -16396,7 +16404,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 19,116 bytes · SHA-256: `2dc1e91be2b15d2ccfdef268c3a1c5f96004dd0e14574f0a8734e0ff0b5a4c7d`
+Size: 20,152 bytes · SHA-256: `8af848c9c1794a1097a8080a107a47e5cab7c7ff8b5cf122cdfcabdf66c8d7a6`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16606,14 +16614,28 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
 });
 
 test('immersive reading always exposes a route back to settings', async ({ page }) => {
+  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black');
   const tabbar = page.locator('#mobile-tabbar');
   const bottomGap = await tabbar.evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom);
   expect(bottomGap).toBeLessThanOrEqual(50);
-  expect(await page.evaluate(() => CSS.supports('bottom', 'calc(8px + min(env(safe-area-inset-bottom), 34px) - max(0px, calc(100vh - 100dvh))'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(23, 23, 20)');
 
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  const readerLayout = await page.evaluate(() => ({
+    headerBottom: document.getElementById('mobile-reader-back').getBoundingClientRect().bottom,
+    viewerTop: document.getElementById('viewer-wrap').getBoundingClientRect().top,
+    viewerBottom: document.getElementById('viewer-wrap').getBoundingClientRect().bottom,
+    progressTop: document.getElementById('progress-bar').getBoundingClientRect().top,
+    sliderHeight: document.getElementById('progress-slider').getBoundingClientRect().height,
+  }));
+  expect(readerLayout.viewerTop).toBeGreaterThan(readerLayout.headerBottom);
+  expect(readerLayout.viewerBottom).toBeLessThanOrEqual(readerLayout.progressTop);
+  expect(readerLayout.sliderHeight).toBeLessThanOrEqual(44);
+  await page.evaluate(() => setReadingTheme('dark'));
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
   await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
@@ -16672,8 +16694,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.1-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.1-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.2-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.2-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);

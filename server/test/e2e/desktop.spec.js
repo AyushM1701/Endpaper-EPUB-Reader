@@ -8,6 +8,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
   await page.locator('#username-input').fill('admin');
   await page.locator('#passphrase-input').fill('correct horse battery');
   await page.locator('#login-btn').click();
+  await expect(page.locator('#login-gate')).toBeHidden();
   await expect(page.locator('#topbar')).toBeVisible();
   await expect(page.locator('#mobile-shell')).toBeHidden();
   if (!(await page.locator('#shelf .book-card').count())) {
