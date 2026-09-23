@@ -1307,14 +1307,17 @@ function syncReaderChromeAccessibility(){
 function updateFullscreenControlUI(){
   const desktopBtn = document.getElementById('fullscreen-btn');
   const exitControl = document.getElementById('fullscreen-exit-control');
+  const mobileBtn = document.querySelector('[data-reader-tool="fullscreen"]');
   const app = document.getElementById('app');
   if (!app) return;
   const fullscreen = Boolean(readerFullscreenElement());
+  const immersive = isImmersiveReading();
   if (exitControl) exitControl.hidden = !fullscreen;
+  if (mobileBtn) mobileBtn.textContent = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
   if (desktopBtn) {
-    desktopBtn.setAttribute('aria-pressed', String(fullscreen));
-    desktopBtn.setAttribute('aria-label', fullscreen ? 'Exit fullscreen' : 'Fullscreen');
-    desktopBtn.title = fullscreen ? 'Exit fullscreen' : 'Fullscreen';
+    desktopBtn.setAttribute('aria-pressed', String(fullscreen || immersive));
+    desktopBtn.setAttribute('aria-label', fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen');
+    desktopBtn.title = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
   }
 }
 
@@ -2653,8 +2656,9 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
 function toggleFullscreen(){
   const app = document.getElementById('app');
   if (!app) return;
-  if (readerFullscreenElement()) exitReaderFullscreen();
-  else requestReaderFullscreen();
+  if (readerFullscreenElement() || isImmersiveReading()) exitImmersiveReading();
+  else if (app.requestFullscreen || app.webkitRequestFullscreen) requestReaderFullscreen();
+  else enterImmersiveReading();
   updateFullscreenControlUI();
 }
 

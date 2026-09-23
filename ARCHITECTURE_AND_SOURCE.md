@@ -1,6 +1,6 @@
 # Endpaper — Architecture and Complete Current Source
 
-> Generated from the working tree on 2026-09-23T02:05:37.168Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
+> Generated from the working tree on 2026-09-23T02:48:41.298Z. Run `node scripts/generate-architecture-source.js` after any source change. This document is an auditable snapshot; the files in the checkout remain authoritative.
 
 ## Architecture
 
@@ -303,7 +303,7 @@ volumes:
 
 ### `public/app.css`
 
-Size: 79,242 bytes · SHA-256: `af1d1d6b87fd9f3de966f5182d0ce20705c0a56150032cb906bc8c11f5058255`
+Size: 80,329 bytes · SHA-256: `5b3d5b46dfbb0afc6382cf86cf3a36404920599dfe411a7c50a6252b3aa57aa1`
 
 `````css
 @font-face{font-family:'Atkinson Hyperlegible';src:url('/fonts/AtkinsonHyperlegible-Regular.woff2') format('woff2');font-style:normal;font-weight:400;font-display:swap}
@@ -1520,7 +1520,7 @@ input.shelf-select:focus{ width:220px; }
   }
   body.reader-active #viewer-wrap {
     position: absolute;
-    inset: 0;
+    inset: min(env(safe-area-inset-top), 60px) 0 min(env(safe-area-inset-bottom), 34px);
     width: auto;
     height: auto;
     min-height: 0;
@@ -2084,12 +2084,13 @@ html.dark-shell .admin-btn-sm:hover {
 /* Dedicated narrow-screen library presentation. Desktop keeps the original shelf. */
 #mobile-shell{display:none}
 #mobile-reader-controls{display:none}
+#reader-reveal-controls{display:none}
 @media (max-width:700px), (max-width:900px) and (pointer:coarse){
   #mobile-shell{display:block;min-height:100dvh;color:#f5efe5;font-family:var(--font-ui);background:#171714}
   body:not(.reader-active) #topbar{display:none}
   #shelf-view{padding:0!important;margin:0!important;max-width:none!important;background:#171714;min-height:100dvh}
   #shelf-view>:not(#mobile-shell){display:none!important}
-  .mobile-page{box-sizing:border-box;min-height:100dvh;padding:calc(env(safe-area-inset-top) + 30px) 20px calc(env(safe-area-inset-bottom) + 116px);overflow-x:hidden}
+  .mobile-page{box-sizing:border-box;min-height:100dvh;padding:calc(min(env(safe-area-inset-top), 60px) + 30px) 20px calc(min(env(safe-area-inset-bottom), 34px) + 116px);overflow-x:hidden}
   .mobile-heading{margin:0 0 23px}.mobile-heading h1{font:600 clamp(32px,10vw,44px)/1.08 Georgia,serif;letter-spacing:-.04em;margin:7px 0 0;color:#f6f0e5}.mobile-kicker{margin:0;color:#c4a66c;font-size:11px;font-weight:700;letter-spacing:.18em}.mobile-back{display:block;min-height:44px;margin:-12px 0 13px -8px;padding:0 8px;color:#d8bb83;background:none;border:0;font:600 15px var(--font-ui)}
   .mobile-section{margin:0 0 28px}.mobile-section h2{font:600 23px/1.2 Georgia,serif;margin:0 0 13px;color:#f6f0e5}.mobile-rail{display:flex;gap:14px;width:calc(100% + 20px)!important;max-width:none!important;padding:2px 20px 14px 0;scroll-snap-type:x proximity}
   .mobile-book,.mobile-continue,.mobile-wide-action,.mobile-pill,.mobile-more-list button,.mobile-detail-actions button,.mobile-note{appearance:none;-webkit-appearance:none;font:inherit;color:inherit;cursor:pointer}
@@ -2097,7 +2098,7 @@ html.dark-shell .admin-btn-sm:hover {
   .mobile-book.mobile-grid{display:block;width:132px;min-width:132px}.mobile-cover{position:relative;display:flex;align-items:center;justify-content:center;flex-shrink:0;aspect-ratio:2/3;overflow:hidden;border-radius:7px;background:#554a3b;box-shadow:0 8px 22px #0007}.mobile-cover img{width:100%;height:100%;object-fit:cover}.mobile-cover-title{padding:12px;color:#f4e6cb;text-align:center;font:600 15px/1.2 Georgia,serif;overflow-wrap:anywhere}
   .mobile-grid .mobile-cover{width:132px}.mobile-book-info{display:block;min-width:0;padding-top:8px}.mobile-book-info strong,.mobile-book-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mobile-book-info strong{font:600 14px/1.25 Georgia,serif}.mobile-book-info small{color:#a9a59b;font-size:11px;margin-top:4px}
   .mobile-continue{display:flex;align-items:center;text-align:left;gap:17px;width:100%;min-height:190px;padding:16px;background:#292821;border:1px solid #4a4335;border-radius:18px;box-shadow:0 10px 30px #0005}.mobile-continue .mobile-cover{width:105px}.mobile-continue-info{display:grid;gap:9px;min-width:0;flex:1}.mobile-continue-info strong{font:600 22px/1.12 Georgia,serif}.mobile-continue-info small{color:#b7afa1;font-size:12px}.mobile-progress-track{height:4px;border-radius:4px;background:#4b463e;overflow:hidden;margin-top:4px}.mobile-progress-track span{display:block;height:100%;background:#caa863;border-radius:4px}
-  #mobile-tabbar{position:fixed;z-index:80;bottom:calc(12px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:space-around;width:min(calc(100vw - 28px),430px);min-height:66px;padding:4px 8px;border:1px solid #77706499;border-radius:26px;background:#33332eea;box-shadow:0 12px 36px #0009;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}
+  #mobile-tabbar{position:fixed;z-index:80;bottom:calc(8px + min(env(safe-area-inset-bottom), 34px));left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:space-around;width:min(calc(100vw - 28px),430px);min-height:66px;padding:4px 8px;border:1px solid #77706499;border-radius:26px;background:#33332eea;box-shadow:0 12px 36px #0009;backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}
   #mobile-tabbar button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;min-width:62px;min-height:54px;border:0;border-radius:16px;background:none;color:#b2aea5;font:400 26px/1 Georgia,serif}#mobile-tabbar button span{font:600 10px var(--font-ui)}#mobile-tabbar button.active{color:#f3d394;background:#5c513e}
   .mobile-wide-action{display:block;width:100%;min-height:50px;margin:18px 0;padding:11px 16px;border:1px solid #c7a76b;border-radius:12px;background:#c8a96f;color:#1b1a16;font-weight:700;text-align:center}
   .mobile-library-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:20px;color:#a9a59b;font-size:12px}.mobile-library-tools>span{margin-right:auto}.mobile-pill{min-height:44px;padding:8px 11px;border:1px solid #585349;border-radius:999px;background:#282721;color:#eee6d9;font-size:12px}
@@ -2110,24 +2111,25 @@ html.dark-shell .admin-btn-sm:hover {
   .mobile-status-label{display:grid;gap:9px;margin:22px 0;color:#aaa69d;font-size:12px}.mobile-status-label select{min-height:48px;padding:9px 12px;border:1px solid #5d5546;border-radius:10px;background:#2c2a25;color:#f3eee4;font:15px var(--font-ui)}.mobile-secondary-action{width:100%;min-height:48px;padding:10px 0;border:0;border-bottom:1px solid #403d35;background:none;color:#e6d3b3;text-align:left;font:14px var(--font-ui)}
   .mobile-offline-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:8px;border-bottom:1px solid #3d3b34}.mobile-offline-row .mobile-list{grid-row:1/3;border:0}.mobile-offline-size{color:#aaa69d;font-size:11px}.mobile-offline-remove{min-width:64px;min-height:44px;padding:7px;border:1px solid #5d5546;border-radius:8px;background:#2c2a25;color:#eee4d6;font:12px var(--font-ui)}
   .mobile-sheet-backdrop{position:fixed;inset:0;z-index:250;display:flex;align-items:end;background:#0009}.mobile-actions-sheet{box-sizing:border-box;width:100%;padding:22px 20px calc(20px + env(safe-area-inset-bottom));border-radius:22px 22px 0 0;background:#2b2924;color:#f4eee2}.mobile-actions-sheet h2{font:600 24px Georgia,serif}.mobile-select-label{display:grid;gap:8px;margin:16px 0;font-size:13px}.mobile-select-label select{min-height:48px;padding:8px;border:1px solid #625b4d;border-radius:8px;background:#39362e;color:#fff;font:15px var(--font-ui)}
-  body:not(.reader-active) #toast{bottom:calc(94px + env(safe-area-inset-bottom))}
+  body:not(.reader-active) #toast{bottom:calc(94px + min(env(safe-area-inset-bottom), 34px))}
   .book-menu-btn,.file-link-btn,.modal-actions button,.tts-ctrl-btn,.tag-chip{min-width:44px;min-height:44px}
   .modal.show .modal-card{max-width:none;width:100vw;max-height:100dvh;height:100dvh;border-radius:0;padding-top:calc(18px + env(safe-area-inset-top));padding-bottom:calc(18px + env(safe-area-inset-bottom));overflow:auto}
-  #upload-progress.show{position:fixed;inset:auto 12px calc(93px + env(safe-area-inset-bottom));max-width:none;width:calc(100vw - 24px);max-height:min(42dvh,320px);z-index:90;align-items:stretch;justify-content:start;padding:16px;border:1px solid #5a5142;border-radius:18px;background:#25231e;color:#f5efe5;box-shadow:0 12px 36px #0009;overflow:auto}
+  #upload-progress.show{position:fixed;inset:auto 12px calc(93px + min(env(safe-area-inset-bottom), 34px));max-width:none;width:calc(100vw - 24px);max-height:min(42dvh,320px);z-index:90;align-items:stretch;justify-content:start;padding:16px;border:1px solid #5a5142;border-radius:18px;background:#25231e;color:#f5efe5;box-shadow:0 12px 36px #0009;overflow:auto}
   #upload-progress-card{width:100%;display:grid;align-content:start;gap:10px}#upload-progress-card .spinner{margin:0}#upload-progress-text strong{display:block;margin:4px 0 10px;font:600 20px Georgia,serif}.upload-status-row{padding:10px 0;border-bottom:1px solid #403d35;overflow-wrap:anywhere;font-size:13px}
-  body:not(.reader-active) .install-tip,body:not(.reader-active) .update-banner{bottom:calc(92px + env(safe-area-inset-bottom));z-index:85}
+  body:not(.reader-active) .install-tip,body:not(.reader-active) .update-banner{bottom:calc(92px + min(env(safe-area-inset-bottom), 34px));z-index:85}
   .mobile-goals input{min-height:48px;padding:8px 12px;border:1px solid #625b4d;border-radius:8px;background:#39362e;color:#fff;font:16px var(--font-ui)}
   body.reader-active #topbar{display:none!important}
   body.reader-active #mobile-reader-controls{display:block;position:fixed;inset:0;z-index:75;pointer-events:none;transition:opacity .2s ease}
   body.reader-active #app.chrome-hidden #mobile-reader-controls{opacity:0;pointer-events:none}
+  body.reader-active #app.chrome-hidden #reader-reveal-controls{display:flex;position:fixed;z-index:78;top:calc(10px + min(env(safe-area-inset-top), 60px));right:14px;align-items:center;justify-content:center;min-height:44px;padding:0 14px;border:1px solid var(--line);border-radius:999px;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:600 12px var(--font-ui)}
   #mobile-reader-back,#mobile-reader-tools-button{display:flex;align-items:center;justify-content:center;position:absolute;min-width:48px;min-height:48px;border:1px solid var(--line);border-radius:50%;background:color-mix(in srgb,var(--paper) 88%,transparent);color:var(--ink);box-shadow:0 5px 18px var(--shadow);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);font:28px Georgia,serif;pointer-events:auto}
-  #mobile-reader-back{top:auto;bottom:calc(85px + env(safe-area-inset-bottom));left:14px}
+  #mobile-reader-back{top:auto;bottom:calc(85px + min(env(safe-area-inset-bottom), 34px));left:14px}
   #mobile-reader-title{display:none}
-  #mobile-reader-tools-button{right:14px;bottom:calc(85px + env(safe-area-inset-bottom));font-size:23px}
-  #mobile-reader-tools-menu{position:absolute;right:14px;bottom:calc(143px + env(safe-area-inset-bottom));width:min(240px,calc(100vw - 30px));padding:7px;border:1px solid var(--line);border-radius:15px;background:var(--paper-card);color:var(--ink);box-shadow:0 15px 40px var(--shadow);pointer-events:auto}
+  #mobile-reader-tools-button{right:14px;bottom:calc(85px + min(env(safe-area-inset-bottom), 34px));font-size:23px}
+  #mobile-reader-tools-menu{position:absolute;right:14px;bottom:calc(143px + min(env(safe-area-inset-bottom), 34px));width:min(240px,calc(100vw - 30px));padding:7px;border:1px solid var(--line);border-radius:15px;background:var(--paper-card);color:var(--ink);box-shadow:0 15px 40px var(--shadow);pointer-events:auto}
   #mobile-reader-tools-menu[hidden]{display:none}
   #mobile-reader-tools-menu button{display:block;width:100%;min-height:44px;padding:8px 13px;border:0;border-radius:8px;background:none;color:var(--ink);text-align:left;font:14px var(--font-ui)}
-  body.reader-active #progress-bar{box-sizing:border-box;display:flex;gap:9px;min-height:62px;padding:9px 16px calc(9px + env(safe-area-inset-bottom));font-size:11px}
+  body.reader-active #progress-bar{box-sizing:border-box;display:flex;gap:9px;min-height:62px;padding:9px 16px calc(9px + min(env(safe-area-inset-bottom), 34px));font-size:11px}
   body.reader-active #progress-chapter{display:block!important;min-width:0;max-width:27%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   body.reader-active #progress-track{display:block!important;flex:1;min-width:70px}
   body.reader-active #progress-slider{min-height:44px;width:100%}
@@ -2139,8 +2141,8 @@ html.dark-shell .admin-btn-sm:hover {
   #mobile-tabbar button{gap:3px}
   #mobile-tabbar button svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   #mobile-reader-tools-button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
-  #mobile-reader-back{top:calc(12px + env(safe-area-inset-top));bottom:auto}
-  #mobile-reader-title{display:block;position:absolute;top:calc(22px + env(safe-area-inset-top));left:76px;right:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:var(--ink);font:600 13px var(--font-ui)}
+  #mobile-reader-back{top:calc(12px + min(env(safe-area-inset-top), 60px));bottom:auto}
+  #mobile-reader-title{display:block;position:absolute;top:calc(22px + min(env(safe-area-inset-top), 60px));left:76px;right:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;color:var(--ink);font:600 13px var(--font-ui)}
   .mobile-star{min-width:44px}
   .mobile-series-link{min-height:44px;padding:8px 0}
   .mobile-selected .mobile-cover{outline:3px solid #d4af68;outline-offset:2px}
@@ -2163,11 +2165,18 @@ html.dark-shell .admin-btn-sm:hover {
   .mobile-series-stack .mobile-cover:nth-child(2){left:15px;top:8px;transform:rotate(1deg)}
   .mobile-series-stack .mobile-cover:nth-child(3){left:30px;top:4px;transform:rotate(8deg)}
 }
+
+/* Installed iOS windows can report a shorter dynamic viewport than the full
+   standalone canvas. Fill that canvas and keep the floating tabs near its edge. */
+@media (display-mode:standalone) and (max-width:900px){
+  #app{height:100vh}
+  #mobile-tabbar{bottom:calc(8px + min(env(safe-area-inset-bottom), 34px) - max(0px, calc(100vh - 100dvh)))}
+}
 `````
 
 ### `public/app.js`
 
-Size: 2,23,651 bytes · SHA-256: `766d39862d1a86ccc5b500e6e9f2a9a6a7b1bad6bfba08f99e69e6278bd45914`
+Size: 2,24,026 bytes · SHA-256: `ecf3fbb261d3a85629ff8dde3d872a41a2779b545f31951a926bc967dde5160b`
 
 `````javascript
 /* ================================================================
@@ -3479,14 +3488,17 @@ function syncReaderChromeAccessibility(){
 function updateFullscreenControlUI(){
   const desktopBtn = document.getElementById('fullscreen-btn');
   const exitControl = document.getElementById('fullscreen-exit-control');
+  const mobileBtn = document.querySelector('[data-reader-tool="fullscreen"]');
   const app = document.getElementById('app');
   if (!app) return;
   const fullscreen = Boolean(readerFullscreenElement());
+  const immersive = isImmersiveReading();
   if (exitControl) exitControl.hidden = !fullscreen;
+  if (mobileBtn) mobileBtn.textContent = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
   if (desktopBtn) {
-    desktopBtn.setAttribute('aria-pressed', String(fullscreen));
-    desktopBtn.setAttribute('aria-label', fullscreen ? 'Exit fullscreen' : 'Fullscreen');
-    desktopBtn.title = fullscreen ? 'Exit fullscreen' : 'Fullscreen';
+    desktopBtn.setAttribute('aria-pressed', String(fullscreen || immersive));
+    desktopBtn.setAttribute('aria-label', fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen');
+    desktopBtn.title = fullscreen || immersive ? 'Exit fullscreen' : 'Fullscreen';
   }
 }
 
@@ -4825,8 +4837,9 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
 function toggleFullscreen(){
   const app = document.getElementById('app');
   if (!app) return;
-  if (readerFullscreenElement()) exitReaderFullscreen();
-  else requestReaderFullscreen();
+  if (readerFullscreenElement() || isImmersiveReading()) exitImmersiveReading();
+  else if (app.requestFullscreen || app.webkitRequestFullscreen) requestReaderFullscreen();
+  else enterImmersiveReading();
   updateFullscreenControlUI();
 }
 
@@ -7665,7 +7678,7 @@ Size: 611 bytes · SHA-256: `b05810aa4cb2542ee17c171898f6371f31b231ab866c4fdecfd
 
 ### `public/index.html`
 
-Size: 45,878 bytes · SHA-256: `da50ae6dfc0633441eb4602b7f7fd55043d9d8d8e3cf2a49ed5cdf44177134f0`
+Size: 46,031 bytes · SHA-256: `e44fa8f692e1fc66ef6f6e44fdfcb9ecb99eaa26188f67dd382504ba6fe499c4`
 
 `````html
 <!DOCTYPE html>
@@ -7681,9 +7694,9 @@ Size: 45,878 bytes · SHA-256: `da50ae6dfc0633441eb4602b7f7fd55043d9d8d8e3cf2a49
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.0-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.0-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.0-20260923">
+<script src="/jszip.min.js?v=v15.0.1-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.0.1-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.0.1-20260923">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -7900,6 +7913,7 @@ Size: 45,878 bytes · SHA-256: `da50ae6dfc0633441eb4602b7f7fd55043d9d8d8e3cf2a49
 
   <!-- Reader -->
   <div id="reader-view">
+    <button type="button" id="reader-reveal-controls" onclick="exitImmersiveReading()" aria-label="Show reading controls and settings">Controls</button>
     <div id="mobile-reader-controls" aria-label="Reading controls">
       <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Back">‹</button>
       <span id="mobile-reader-title"></span>
@@ -8342,8 +8356,8 @@ Size: 45,878 bytes · SHA-256: `da50ae6dfc0633441eb4602b7f7fd55043d9d8d8e3cf2a49
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.0-20260923"></script>
-<script src="/mobile.js?v=v15.0.0-20260923"></script>
+<script src="/app.js?v=v15.0.1-20260923"></script>
+<script src="/mobile.js?v=v15.0.1-20260923"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>
@@ -9063,10 +9077,10 @@ renderMobileShell();
 
 ### `public/sw.js`
 
-Size: 8,356 bytes · SHA-256: `cf2427a5b5e3abca79f5f08f19b394da61717455958a5fd0af87b48ec15fa51d`
+Size: 8,356 bytes · SHA-256: `53c87dfa72dd6f24a7b34131d2f7d4aa68af475e54f7a7aedcb7287f38cd5b6e`
 
 `````javascript
-const BUILD_VERSION = 'v15.0.0-20260923';
+const BUILD_VERSION = 'v15.0.1-20260923';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -16382,7 +16396,7 @@ test('desktop shelf and reader remain usable', async ({ page }) => {
 
 ### `server/test/e2e/mobile-reader.spec.js`
 
-Size: 17,220 bytes · SHA-256: `1331b6f6030879af7fa86851b24cfa0cb07745bd542e28db10f713eb055dee1b`
+Size: 19,116 bytes · SHA-256: `2dc1e91be2b15d2ccfdef268c3a1c5f96004dd0e14574f0a8734e0ff0b5a4c7d`
 
 `````javascript
 const { test, expect } = require('@playwright/test');
@@ -16591,6 +16605,35 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
   } finally { await page.context().setOffline(false); }
 });
 
+test('immersive reading always exposes a route back to settings', async ({ page }) => {
+  const tabbar = page.locator('#mobile-tabbar');
+  const bottomGap = await tabbar.evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom);
+  expect(bottomGap).toBeLessThanOrEqual(50);
+  expect(await page.evaluate(() => CSS.supports('bottom', 'calc(8px + min(env(safe-area-inset-bottom), 34px) - max(0px, calc(100vh - 100dvh))'))).toBe(true);
+
+  await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
+  await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
+  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await page.evaluate(() => enterImmersiveReading());
+  await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'true');
+  await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
+  await page.getByRole('button', { name: 'Show reading controls and settings' }).click();
+  await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
+  await page.getByRole('button', { name: 'Reading tools' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+  await expect(page.locator('#settings-drawer')).toHaveClass(/open/);
+  await page.evaluate(() => {
+    closeDrawers();
+    const app = document.getElementById('app');
+    app.requestFullscreen = undefined;
+    app.webkitRequestFullscreen = undefined;
+    toggleFullscreen();
+  });
+  await expect(page.getByRole('button', { name: 'Show reading controls and settings' })).toBeVisible();
+  await page.getByRole('button', { name: 'Show reading controls and settings' }).click();
+  await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
+});
+
 test('invalid saved position recovers and layout switching keeps text visible', async ({ page }) => {
   await page.evaluate(() => {
     const entry = library.find(book => book.name === 'Three Chapter Test Book');
@@ -16629,8 +16672,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.0-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.0-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.1-20260923'))).toBe(true);
+  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.1-20260923'))).toBe(true);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);
