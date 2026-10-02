@@ -1,0 +1,5 @@
+<!-- Lucide book-open, retrieved with better-icons. License: LUCIDE-LICENSE.txt. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#3f5d4c"/>
+  <path transform="translate(4 4)" fill="none" stroke="#f6f1e7" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" d="M12 5v16m8.001-2A2 2 0 0 0 22 17V5a2 2 0 0 0-1.999-2L16 3.002A5 5 0 0 0 12 5a5 5 0 0 0-4-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 1.999 2H8a5 5 0 0 1 4 2a5 5 0 0 1 4-2z"/>
+</svg>

@@ -1,4 +1,4 @@
-const BUILD_VERSION = 'v15.0.10-20260923';
+const BUILD_VERSION = 'v15.6.3-20261002';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -7,7 +7,11 @@ const STATIC_ASSETS = [
   '/index.html',
   `/app.css?v=${BUILD_VERSION}`,
   `/app.js?v=${BUILD_VERSION}`,
+  `/reader-index-cache.js?v=${BUILD_VERSION}`,
+  `/control-icons.js?v=${BUILD_VERSION}`,
   `/mobile.js?v=${BUILD_VERSION}`,
+  `/ui.js?v=${BUILD_VERSION}`,
+  `/ui.css?v=${BUILD_VERSION}`,
   `/jszip.min.js?v=${BUILD_VERSION}`,
   `/epub.min.js?v=${BUILD_VERSION}`,
   '/fonts/AtkinsonHyperlegible-Regular.woff2',
@@ -16,11 +20,17 @@ const STATIC_ASSETS = [
   '/fonts/AtkinsonHyperlegible-BoldItalic.woff2',
   '/fonts/WorkSans-Regular.woff2',
   '/fonts/WorkSans-Bold.woff2',
+  '/fonts/InstrumentSerif-Regular.woff2',
+  '/fonts/InstrumentSerif-Italic.woff2',
+  '/fonts/DMSans-Variable.woff2',
+  '/fonts/DMMono-Regular.woff2',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-maskable-512.png',
-  '/icons/apple-touch-icon.png'
+  '/icons/apple-touch-icon.png',
+  `/icons/favicon.svg?v=${BUILD_VERSION}`,
+  `/icons/favicon-32.png?v=${BUILD_VERSION}`
 ];
 
 self.addEventListener('install', (e) => {

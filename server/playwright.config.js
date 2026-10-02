@@ -7,7 +7,7 @@ module.exports = defineConfig({
   workers: 1,
   use: {
     baseURL: 'http://127.0.0.1:39137',
-    browserName: 'webkit',
+    browserName: process.env.ENDPAPER_E2E_BROWSER || 'webkit',
     viewport: { width: 393, height: 852 },
     deviceScaleFactor: 3,
     isMobile: true,

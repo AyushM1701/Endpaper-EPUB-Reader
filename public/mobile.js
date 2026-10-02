@@ -9,6 +9,7 @@ let mobileNotebookQuery = '';
 let mobileNotebookTag = '';
 
 function resetMobileState() {
+  window.resetDesktopState?.();
   mobileRoute = { page: 'home' };
   mobileSearchQuery = '';
   mobilePinnedIds = new Set();
@@ -25,7 +26,7 @@ function isMobileShell() {
 }
 
 function mobileReadingStatus(entry) {
-  return entry.status || (entry.progress >= 98 ? 'finished' : entry.progress > 0 ? 'reading' : 'unread');
+  return readingStatus(entry);
 }
 
 function mobileElement(tag, className = '', text = '') {
@@ -42,7 +43,14 @@ function mobileButton(text, action, className = '') {
   return button;
 }
 
+// Local Lucide SVGs retrieved with better-icons; see icons/LUCIDE-LICENSE.txt.
+// Keep icons decorative: the button's text or aria-label names its action.
+function mobileControlIcon(name) {
+  return controlIcon(name === 'grid' ? 'grid-2x2' : name === 'more' ? 'ellipsis' : name);
+}
+
 function mobileNavigate(page, value = null) {
+  if (!isMobileShell()) { navigateDesktop(page, value); return; }
   mobileRoute = { page, value };
   if (isMobileShell()) history.pushState({ endpaperMobile: mobileRoute }, '', `#/${page}${value ? `/${encodeURIComponent(value)}` : ''}`);
   renderMobileShell();
@@ -102,6 +110,12 @@ function mobileBookCard(entry, layout = 'grid', selectable = false) {
   const info = mobileElement('span', 'mobile-book-info');
   info.appendChild(mobileElement('strong', '', entry.name));
   info.appendChild(mobileElement('small', '', entry.author || 'Unknown author'));
+  if (entry.rating) {
+    const rating = mobileElement('span', 'mobile-book-rating');
+    rating.setAttribute('aria-label', `Your rating: ${entry.rating} out of 5 stars`);
+    rating.append(controlIcon('star'), document.createTextNode(`${entry.rating}/5`));
+    info.appendChild(rating);
+  }
   if (layout === 'list') info.appendChild(mobileElement('small', 'mobile-book-progress', mobileReadingStatus(entry) === 'finished' ? 'Finished' : entry.progress ? `${Math.round(entry.progress)}% read` : mobileReadingStatus(entry) === 'reading' ? 'Reading' : 'Unread'));
   card.appendChild(info);
   return card;
@@ -198,9 +212,11 @@ function mobileLibrary(root) {
   tools.appendChild(mobileButton('Sort & filter', mobileLibraryActions, 'mobile-pill'));
   tools.appendChild(mobileButton('Add books', () => document.getElementById('file-input').click(), 'mobile-pill'));
   tools.appendChild(mobileButton(bulkMode ? 'Cancel selection' : 'Select books', () => toggleBulkMode(!bulkMode), 'mobile-pill'));
-  tools.appendChild(mobileButton(mobileLibraryView === 'list' ? '▦ Grid' : '☰ List', () => {
+  const viewButton = mobileButton(mobileLibraryView === 'list' ? 'Grid' : 'List', () => {
     mobileLibraryView = mobileLibraryView === 'list' ? 'grid' : 'list'; localStorage.setItem('endpaper-mobile-library-view', mobileLibraryView); renderMobileShell();
-  }, 'mobile-pill'));
+  }, 'mobile-pill mobile-icon-label');
+  viewButton.prepend(mobileControlIcon(mobileLibraryView === 'list' ? 'grid' : 'list'));
+  tools.appendChild(viewButton);
   root.appendChild(tools);
   if (bulkMode) {
     const bar = mobileElement('div', 'mobile-bulk-actions');
@@ -221,7 +237,8 @@ function mobileLibrary(root) {
     if (mobileLibraryView === 'list' && !bulkMode) {
       const row = mobileElement('div', 'mobile-library-row');
       row.appendChild(card);
-      const menu = mobileButton('⋯', event => mobileBookActions(entry, event.currentTarget), 'mobile-row-menu');
+      const menu = mobileButton('', event => mobileBookActions(entry, event.currentTarget), 'mobile-row-menu');
+      menu.appendChild(mobileControlIcon('more'));
       menu.setAttribute('aria-label', `Actions for ${entry.name}`);
       row.appendChild(menu); list.appendChild(row);
     } else list.appendChild(card);
@@ -296,13 +313,14 @@ function mobileLibraryActions(event) {
   backdrop.addEventListener('keydown', event => {
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
     if (event.key !== 'Tab') return;
-    const focusable = [...sheet.querySelectorAll('button,select,input')].filter(element => !element.disabled);
+    const focusable = [...sheet.querySelectorAll('button,select,input')].filter(element => !element.disabled && element.getClientRects().length);
     const first = focusable[0], last = focusable.at(-1);
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
   document.body.appendChild(backdrop);
-  sheet.querySelector('select')?.focus();
+  window.enhanceSelectControls?.(sheet);
+  (sheet.querySelector('.select-trigger') || sheet.querySelector('select'))?.focus();
 }
 
 function mobileSearchResults(root, query) {
@@ -324,30 +342,52 @@ function mobileSearch(root) {
 }
 
 function mobileMore(root) {
-  root.appendChild(mobileHeading('More', 'YOUR ENDPAPER'));
-  root.appendChild(mobileElement('p', 'mobile-account', currentUser?.username || currentUser?.name || 'Reader'));
+  root.appendChild(mobileHeading('More'));
+  const account = mobileElement('div', 'more-account');
+  const username = currentUser?.username || currentUser?.name || 'Reader';
+  const avatar = mobileElement('span', 'more-account-avatar', username.slice(0, 1).toLocaleUpperCase());
+  avatar.setAttribute('aria-hidden', 'true');
+  const identity = mobileElement('div', 'more-account-identity');
+  identity.append(mobileElement('strong', '', username), mobileElement('span', '', isCurrentUserAdmin() ? 'Administrator' : 'Reader'));
+  account.append(avatar, identity); root.appendChild(account);
   const options = mobileElement('div', 'mobile-more-list');
-  const items = [
-    ['Add books', () => document.getElementById('file-input').click()],
-    ['Offline downloads', () => mobileNavigate('offline')],
-    ['Notebook', () => mobileNavigate('notebook')],
-    ['Reading stats', () => mobileNavigate('stats')],
-    ['Reading goals', () => mobileNavigate('goals')],
-    ['Appearance & reader defaults', () => mobileNavigate('preferences')],
-    ['Check for updates', async () => {
+  const reading = [
+    ['Offline downloads', 'download', () => mobileNavigate('offline')],
+    ['Notebook', 'notebook-pen', () => mobileNavigate('notebook')],
+    ['Reading stats', 'chart-no-axes-column', () => mobileNavigate('stats')],
+    ['Reading goals', 'goal', () => mobileNavigate('goals')],
+  ];
+  const libraryActions = [['Add books', 'book-open', () => document.getElementById('file-input').click()]];
+  const preferences = [
+    ['Appearance & reader defaults', 'sliders-horizontal', () => mobileNavigate('preferences')],
+    ['Check for updates', 'refresh-cw', async () => {
       try {
         const registration = await navigator.serviceWorker?.getRegistration();
         await registration?.update();
         showToast(window.__pendingServiceWorker ? 'An update is ready.' : 'You have the latest version.');
       } catch (error) { showToast(error.message || 'Could not check for updates.'); }
     }],
-    ['Help', () => openShortcutsModal()],
+    ['Help', 'circle-help', () => openShortcutsModal()],
   ];
-  if (isCurrentUserAdmin()) items.push(['Collections', () => openCollectionsManager()], ['People & permissions', () => openAdminModal()], ['Import backup', () => document.getElementById('import-input').click()], ['Export backup', () => exportLibrary()]);
-  root.appendChild(mobileElement('p', 'mobile-detail-meta', `Role: ${isCurrentUserAdmin() ? 'Admin' : 'Reader'} · Endpaper ${mobileBuildVersion}`));
-  items.push(['Log out', () => logout()]);
-  items.forEach(([label, action]) => options.appendChild(mobileButton(`${label}  ›`, action)));
+  const accountActions = [];
+  if (isCurrentUserAdmin()) {
+    libraryActions.push(['Collections', 'folder', () => openCollectionsManager()], ['Import backup', 'upload', () => document.getElementById('import-input').click()], ['Export backup', 'download', () => exportLibrary()]);
+    accountActions.push(['People & permissions', 'users', () => openAdminModal()]);
+  }
+  accountActions.push(['Log out', 'log-out', () => logout()]);
+  for (const [heading, items] of [['Reading', reading], ['Library', libraryActions], ['Preferences & help', preferences], ['Account', accountActions]]) {
+    const section = mobileElement('section', 'more-section');
+    section.appendChild(mobileElement('h2', '', heading));
+    const actions = mobileElement('div', 'more-section-actions');
+    items.forEach(([label, icon, action]) => {
+      const button = mobileButton('', action);
+      button.append(controlIcon(icon), mobileElement('span', 'more-action-label', label), controlIcon('chevron-right'));
+      actions.appendChild(button);
+    });
+    section.appendChild(actions); options.appendChild(section);
+  }
   root.appendChild(options);
+  root.appendChild(mobileElement('p', 'more-version', `Endpaper ${mobileBuildVersion}`));
 }
 
 function mobileSeries(root, name) {
@@ -369,15 +409,18 @@ function mobileSeries(root, name) {
 }
 
 async function mobileRefreshPins() {
+  const expectedAccountVersion = accountVersion;
   try {
     const result = await serviceWorkerMessage('GET_PINNED_BOOKS');
     if (!result?.ok || !Array.isArray(result.bookIds)) throw new Error('Offline download list is unavailable.');
+    if (!isActiveAccount(expectedAccountVersion)) return false;
     mobilePinnedIds = new Set(result?.bookIds || []);
     return true;
   } catch (error) { console.warn('Could not check offline downloads:', error); return false; }
 }
 
 function mobileBookDetail(root, id) {
+  const expectedAccountVersion = accountVersion;
   const entry = library.find(item => item.id === id);
   if (!entry) return mobileNavigate('library');
   root.appendChild(mobileHeading('Book details', '', true));
@@ -416,10 +459,13 @@ function mobileBookDetail(root, id) {
     statusSelect.appendChild(option);
   }
   statusSelect.addEventListener('change', async () => {
+    if (!isActiveAccount(expectedAccountVersion)) return;
     const previous = entry.status;
+    statusSelect.disabled = true;
     entry.status = statusSelect.value;
-    try { const updated = await api.updateBook(id, { status: entry.status }); entry.status = updated.status; statusSelect.value = updated.status; renderShelf(); }
-    catch (error) { entry.status = previous; statusSelect.value = previous; showToast(error.message || 'Could not save reading status.'); }
+    try { const updated = await api.updateBook(id, { status: entry.status }, { expectedAccountVersion }); if (isActiveAccount(expectedAccountVersion)) { entry.status = updated.status; statusSelect.value = updated.status; renderShelf(); } }
+    catch (error) { if (isActiveAccount(expectedAccountVersion)) { entry.status = previous; statusSelect.value = previous; showToast(error.message || 'Could not save reading status.'); } }
+    finally { statusSelect.disabled = false; }
   });
   statusLabel.appendChild(statusSelect); root.appendChild(statusLabel);
   root.appendChild(mobileButton('Highlights & notes  ›', () => mobileNavigate('notebook', id), 'mobile-secondary-action'));
@@ -428,7 +474,10 @@ function mobileBookDetail(root, id) {
   const rating = mobileElement('div', 'mobile-rating');
   rating.appendChild(mobileElement('span', '', 'Your rating'));
   for (let number = 1; number <= 5; number++) {
-    rating.appendChild(mobileButton(number <= (entry.rating || 0) ? '★' : '☆', () => setBookRating(id, number === entry.rating ? null : number), 'mobile-star'));
+    const star = mobileButton('', () => setBookRating(id, number === entry.rating ? null : number), `mobile-star${number <= (entry.rating || 0) ? ' filled' : ''}`);
+    star.setAttribute('aria-label', `Rate ${number} star${number === 1 ? '' : 's'}`);
+    star.setAttribute('aria-pressed', String(number <= (entry.rating || 0)));
+    star.appendChild(controlIcon('star')); rating.appendChild(star);
   }
   root.appendChild(rating);
   root.appendChild(mobileElement('p', 'mobile-detail-meta', `${entry.progress ? `${Math.round(entry.progress)}% read` : 'Unread'}${entry.wordCount ? ` · about ${formatMinutes(estimatedBookMinutes(entry))}` : ''}${entry.fileSize ? ` · ${(entry.fileSize / 1048576).toFixed(1)} MB` : ''}`));
@@ -521,23 +570,7 @@ async function mobileNotebook(root, version) {
       const filtered = highlights.filter(item => (!mobileNotebookTag || (item.tags || []).includes(mobileNotebookTag)) && (!needle || `${item.excerpt || ''} ${item.note || ''} ${item.book_title || ''} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(needle)));
       if (!filtered.length) list.appendChild(mobileElement('p', 'mobile-empty', highlights.length ? 'No matching highlights.' : 'No highlights or notes yet.'));
       filtered.forEach(item => {
-        const card = mobileElement('article', 'mobile-note');
-        const open = mobileButton('', async () => {
-          await openBook(item.book_id);
-          if (item.cfi && currentBookId === item.book_id) navigateReader(item.cfi);
-        }, 'mobile-note-open');
-        open.setAttribute('aria-label', `Open highlight in ${item.book_title || 'book'}`);
-        open.appendChild(mobileElement('small', '', item.book_title || 'Book'));
-        open.appendChild(mobileElement('blockquote', '', item.excerpt || ''));
-        if (item.note) open.appendChild(mobileElement('p', '', item.note));
-        card.appendChild(open);
-        const edit = mobileButton('Edit tags', async () => {
-          const value = prompt('Comma-separated tags', (item.tags || []).join(', '));
-          if (value == null) return;
-          try { const updated = await api.updateHighlight(item.id, { tags: value.split(',') }); item.tags = updated.tags || []; render(); }
-          catch (error) { showToast(error.message || 'Could not save tags.'); }
-        }, 'mobile-note-edit');
-        card.appendChild(edit); list.appendChild(card);
+        list.appendChild(annotationRow(item, render));
       });
     };
     search.addEventListener('input', () => { mobileNotebookQuery = search.value; render(); });
@@ -628,6 +661,7 @@ function mobilePreferences(root) {
 }
 
 function renderMobileShell() {
+  if (!isMobileShell()) { window.renderDesktopShell?.(); return; }
   const shell = document.getElementById('mobile-shell');
   const root = document.getElementById('mobile-content');
   if (!shell || !root || !isMobileShell() || !currentUser) return;
@@ -650,6 +684,7 @@ function renderMobileShell() {
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-current', active ? 'page' : 'false');
   });
+  window.animateShellDestination?.('mobile', `${page}:${value || ''}`);
 }
 
 document.querySelectorAll('[data-mobile-tab]').forEach(tab => tab.addEventListener('click', () => mobileNavigate(tab.dataset.mobileTab)));
@@ -676,6 +711,7 @@ document.querySelectorAll('[data-reader-tool]').forEach(button => button.addEven
   if (['toc', 'search', 'settings', 'bookmarks'].includes(tool)) toggleDrawer(tool);
   else if (tool === 'bookmark') toggleBookmark();
   else if (tool === 'tts') document.getElementById('tts-btn')?.click();
+  else if (tool === 'audio') openAudioOptions();
   else if (tool === 'fullscreen') toggleFullscreen();
   else if (tool === 'share') {
     const entry = getCurrentEntry();

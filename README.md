@@ -14,8 +14,10 @@ Use an admin account for yourself and add friends and family as readers from **A
 ## Features
 
 - **Shared library shelf** - One EPUB catalogue with cover art and shared collections for everyone.
+- **Consistent desktop and mobile UI** - A desktop sidebar and cover shelves, the familiar phone layout, shared light/dark colors, accessible dropdowns, visible ratings, and motion that respects reduced-motion preferences. Uploaded cover art is preserved.
 - **Private reading state** - Per-user progress, status, ratings, bookmarks, highlights, reading time, and settings.
 - **Full EPUB reader** - Paginated and scrolled layouts, customizable fonts, themes, spacing, gestures, text-to-speech controls, and in-book search.
+- **Reusable page indexes** - Background calculation keeps reading available, and an account-scoped cache speeds up reopening a book without moving the saved reading position.
 - **Library discovery** - Smart shelves, multi-book continue reading, metadata search, sorting, filters, bulk actions, and a global highlights notebook.
 - **Offline-capable PWA** - Explicit per-book downloads, range-aware offline reading, queued reading-state sync, and safe deferred updates. After an online sign-in on a device, a fresh offline launch can restore that account's encrypted library snapshot with the same passphrase and open downloaded books.
 - **Reading insights** - Goals, streaks, comparisons, monthly trends, favorite books, and personalized time estimates.
@@ -80,7 +82,9 @@ Personalized reading pace uses progress gained during completed reading sessions
 
 ### Tests
 
-From `server/`, run `npm test` for backend and source checks. For browser regressions, run `npx playwright install webkit` once, then `npm run test:e2e`. The WebKit suite starts an isolated server and covers the mobile shell in portrait and landscape, EPUB rendering, rapid touch swipes, failed seek recovery, image-only pages, offline pinning and deletion cleanup, Reader uploads, hostile metadata, mobile sheet focus, status normalization, and the desktop shelf. The cold offline restart regression runs in Chromium with `npx playwright test --browser chromium -g "cold offline restart"` because Playwright's WebKit offline reload currently fails inside its browser harness.
+From `server/`, run `npm test` for backend and source checks. For browser regressions, run `npx playwright install webkit chromium` once, then `npm run test:e2e`. The suite starts an isolated server with temporary data and covers desktop/mobile navigation, dropdowns and keyboard focus, EPUB scrolling and pagination, annotations, audio timing, page-index caching, account isolation, offline downloads, and updates. Run the complete suite again with `npx playwright test --browser chromium`; run browsers sequentially because they share the isolated test port. The cold offline restart check is skipped in Windows WebKit and exercised in Chromium because Playwright's WebKit offline reload currently fails inside its browser harness. Physical iPhone Safari and Home Screen behavior still needs device verification.
+
+See the [2 October 2026 release verification](docs/final-verification-2026-10-02.md) for the final review findings and results.
 
 When changing the app shell, bump the shared build version in `public/sw.js` and the asset query strings in `public/index.html` so a waiting worker keeps one coherent version of the shell.
 

@@ -4,16 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="description" content="Endpaper is a shared, self-hosted EPUB library and reader.">
-<meta name="theme-color" content="#171714">
+<meta name="theme-color" content="#171d19">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Endpaper">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=v15.6.3-20261002">
+<link rel="icon" type="image/svg+xml" sizes="any" href="/icons/favicon.svg?v=v15.6.3-20261002">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.0.10-20260923"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.0.10-20260923"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.0.10-20260923">
+<script src="/jszip.min.js?v=v15.6.3-20261002"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.6.3-20261002"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.6.3-20261002">
+<link rel="stylesheet" href="/ui.css?v=v15.6.3-20261002">
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -42,9 +45,12 @@
             if (!document.body.classList.contains('reader-active')) document.getElementById('update-banner')?.removeAttribute('hidden');
           };
           announce();
-          reg.addEventListener('updatefound', () => reg.installing?.addEventListener('statechange', () => {
-            if (reg.installing?.state === 'installed' && navigator.serviceWorker.controller) announce();
-          }));
+          reg.addEventListener('updatefound', () => {
+            const installing = reg.installing;
+            installing?.addEventListener('statechange', () => {
+              if (installing.state === 'installed' && navigator.serviceWorker.controller) announce();
+            });
+          });
           reg.update().catch(() => {});
         }).catch(err => console.error('SW registration failed:', err));
       });
@@ -80,6 +86,7 @@
         <span id="current-user-role" class="role-badge"></span>
       </span>
     </button>
+    <span id="desktop-topbar-title">Your library</span>
     <div id="topbar-actions" role="group" aria-label="Reader and library actions">
       <button class="icon-btn" id="toc-toggle" title="Contents" aria-label="Table of contents" aria-controls="toc-drawer" aria-expanded="false" data-drawer-toggle="toc" style="display:none;" onclick="toggleDrawer('toc')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
@@ -131,16 +138,31 @@
     </div>
     <span id="sync-status" class="sync-status" data-state="saved" hidden aria-live="polite"></span>
     <div id="reader-more-menu" class="reader-more-menu" hidden>
-      <button type="button" onclick="toggleDrawer('search'); toggleReaderMoreMenu()">Search book</button>
-      <button type="button" onclick="toggleDrawer('bookmarks'); toggleReaderMoreMenu()">Notebook</button>
-      <button type="button" onclick="document.getElementById('tts-btn').click(); toggleReaderMoreMenu()">Read aloud</button>
-      <button type="button" onclick="toggleFullscreen(); toggleReaderMoreMenu()">Fullscreen</button>
-      <button type="button" onclick="openShortcutsModal(); toggleReaderMoreMenu()">Help</button>
+      <button type="button" onclick="toggleDrawer('search'); closeReaderMoreMenu()">Search book</button>
+      <button type="button" onclick="toggleDrawer('bookmarks'); closeReaderMoreMenu()">Notebook</button>
+      <button type="button" onclick="document.getElementById('tts-btn').click(); closeReaderMoreMenu()">Read aloud</button>
+      <button type="button" onclick="openAudioOptions(); closeReaderMoreMenu()">Audio options</button>
+      <button type="button" onclick="toggleFullscreen(); closeReaderMoreMenu()">Fullscreen</button>
+      <button type="button" onclick="openShortcutsModal(); closeReaderMoreMenu()">Help</button>
     </div>
   </div>
 
   <!-- Library -->
   <div id="shelf-view">
+    <nav id="desktop-nav" aria-label="Library navigation">
+      <button type="button" id="desktop-brand" aria-label="Endpaper home" onclick="navigateDesktop('home')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h13v18H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 0v18M8 7h6M8 10h4"/></svg><span>Endpaper</span></button>
+      <button type="button" data-desktop-page="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8v9h-6v-6H9v6H3z"/></svg>Home</button>
+      <button type="button" data-desktop-page="library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h7a3 3 0 0 1 3 3v13a3 3 0 0 0-3-3H3zM21 4h-5a3 3 0 0 0-3 3v13a3 3 0 0 1 3-3h5z"/></svg>Library</button>
+      <button type="button" data-desktop-page="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>Search</button>
+      <div class="desktop-nav-secondary">
+        <button type="button" data-desktop-page="notebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18H6zM3 7h6M3 12h6M3 17h6M12 7h3M12 11h3"/></svg>Notebook</button>
+        <button type="button" data-desktop-page="offline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 17v4h16v-4"/></svg>Downloads</button>
+        <button type="button" data-desktop-page="more"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>More</button>
+      </div>
+      <span id="desktop-account-name"></span>
+    </nav>
+    <header id="desktop-page-header"><h1 id="desktop-heading">Your reading</h1><p id="desktop-description"></p><button type="button" id="desktop-browse-library" class="file-link-btn" onclick="navigateDesktop('library')">Browse library <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button></header>
+    <div id="desktop-content"></div>
     <section id="mobile-shell" aria-label="Endpaper mobile library">
       <main id="mobile-content" class="mobile-page"></main>
       <nav id="mobile-tabbar" aria-label="Main navigation">
@@ -170,13 +192,14 @@
       </div>
       <div class="shelf-controls">
         <input id="shelf-search" class="shelf-select" type="search" placeholder="Search books…" aria-label="Search library" oninput="scheduleShelfRender()">
-        <select id="shelf-filter" class="shelf-select" onchange="renderShelf()">
+        <select id="shelf-filter" class="shelf-select" aria-label="Filter books" onchange="renderShelf()">
           <option value="all">All Books</option>
           <option value="unread">Unread</option>
+          <option value="reading">Reading</option>
           <option value="finished">Finished</option>
           <optgroup label="Collections" id="shelf-filter-collections"></optgroup>
         </select>
-        <select id="shelf-sort" class="shelf-select" onchange="renderShelf()">
+        <select id="shelf-sort" class="shelf-select" aria-label="Sort books" onchange="renderShelf()">
           <option value="recent">Recently Added</option>
           <option value="opened">Recently Read</option>
           <option value="series">Series</option>
@@ -243,6 +266,7 @@
         <button type="button" class="mobile-reader-tool-main" data-reader-tool="toc"><span>Contents</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <button type="button" class="mobile-reader-tool-main" data-reader-tool="search"><span>Search book</span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
         <button type="button" class="mobile-reader-tool-main" data-reader-tool="settings"><span>Themes &amp; settings</span><span class="mobile-reader-aa" aria-hidden="true">Aa</span></button>
+        <button type="button" class="mobile-reader-tool-main" data-reader-tool="audio"><span>Audio options</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></button>
         <div class="mobile-reader-tool-shortcuts">
           <button type="button" data-reader-tool="share" aria-label="Share book" title="Share book"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4M5 13v7h14v-7"/></svg></button>
           <button type="button" data-reader-tool="bookmarks" aria-label="Bookmarks &amp; highlights" title="Bookmarks &amp; highlights"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
@@ -264,14 +288,13 @@
       <span id="progress-remaining" aria-live="polite"></span>
       <div id="reader-bottom-actions">
         <button type="button" onclick="toggleDrawer('settings')" aria-label="Reading appearance">Aa</button>
-        <button type="button" onclick="toggleBookmark()" aria-label="Bookmark this page">♧</button>
-        <button type="button" onclick="toggleDrawer('toc')" aria-label="Contents">☰</button>
-        <button type="button" onclick="toggleReaderMoreMenu(event)" aria-label="More">•••</button>
+        <button type="button" onclick="toggleBookmark()" aria-label="Bookmark this page"><svg class="endpaper-icon" data-icon="lucide:bookmark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/></svg></button>
+        <button type="button" onclick="toggleDrawer('toc')" aria-label="Contents"><svg class="endpaper-icon" data-icon="lucide:list" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13"/></svg></button>
+        <button type="button" onclick="toggleReaderMoreMenu(event)" aria-label="More"><svg class="endpaper-icon" data-icon="lucide:ellipsis" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
       </div>
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
-      <div id="reader-tap-layer" aria-hidden="true"></div>
       <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" onclick="turnPage('prev')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
@@ -392,7 +415,7 @@
         </div>
       </div>
 
-      <button type="button" id="mobile-reading-customize" aria-expanded="false" onclick="toggleMobileReadingCustomize()">Customize reading <span aria-hidden="true">⌄</span></button>
+      <button type="button" id="mobile-reading-customize" aria-expanded="false" onclick="toggleMobileReadingCustomize()">Customize reading <svg class="endpaper-icon" data-icon="lucide:chevron-down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9l6 6l6-6"/></svg></button>
 
       <div class="setting-group">
         <span class="setting-label">Typeface</span>
@@ -450,7 +473,7 @@
 </div>
 
 <!-- Floating Read Aloud Player Bar -->
-<div id="tts-player-bar" class="hidden" role="region" aria-label="Read Aloud controls">
+<div id="tts-player-bar" class="hidden" hidden inert aria-hidden="true" role="region" aria-label="Read Aloud controls">
   <div class="tts-bar-content">
     <div class="tts-info">
       <span class="tts-indicator">
@@ -473,17 +496,22 @@
       <button type="button" class="tts-ctrl-btn rate-btn" id="tts-rate-btn" title="Change speech rate" aria-label="Change speech rate" onclick="cycleTtsRate()">
         <span id="tts-rate-label">1.0×</span>
       </button>
-      <select id="tts-voice-select" class="tts-select" aria-label="Voice"></select>
-      <label class="tts-compact-label">Pitch <input id="tts-pitch" type="range" min="0.5" max="2" value="1" step="0.1"></label>
-      <select id="tts-sleep" class="tts-select" aria-label="Sleep timer">
-        <option value="0">No timer</option><option value="10">10 min</option><option value="20">20 min</option><option value="30">30 min</option>
-      </select>
+      <button type="button" class="tts-ctrl-btn" onclick="openAudioOptions()" aria-label="Audio options" title="Audio options"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></button>
       <button type="button" class="tts-ctrl-btn stop-btn" id="tts-stop-btn" title="Stop reading aloud" aria-label="Stop reading aloud" onclick="stopTts()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
   </div>
 </div>
+
+<dialog id="audio-options" class="form-editor" aria-label="Audio options">
+  <h2>Audio options</h2>
+  <p>Read this EPUB aloud using your device’s available voices.</p>
+  <label class="editor-field">Voice<select id="tts-voice-select" aria-label="Voice"></select></label>
+  <label class="editor-field">Pitch<input id="tts-pitch" type="range" min="0.5" max="2" value="1" step="0.1"></label>
+  <label class="editor-field">Sleep timer<select id="tts-sleep" aria-label="Sleep timer"><option value="0">No timer</option><option value="10">10 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option></select></label>
+  <div class="editor-actions"><button type="button" id="audio-options-close">Done</button></div>
+</dialog>
 
 <div id="stats-modal" class="modal" role="dialog" aria-modal="true" aria-label="Reading statistics" aria-hidden="true" onclick="if(event.target===this) closeStatsModal()">
   <div id="stats-card" class="modal-card">
@@ -629,7 +657,7 @@
 
 <div id="book-details-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="book-details-title" aria-hidden="true">
   <div class="modal-card book-details-card">
-    <div class="modal-title"><h3 id="book-details-title">Book details</h3><button type="button" class="modal-close" onclick="closeBookDetails()" aria-label="Close">×</button></div>
+    <div class="modal-title"><h3 id="book-details-title">Book details</h3><button type="button" class="modal-close" onclick="closeBookDetails()" aria-label="Close"><svg class="endpaper-icon" data-icon="lucide:x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
     <div id="book-details-content"></div>
     <div id="book-details-actions" class="modal-actions"></div>
   </div>
@@ -637,7 +665,7 @@
 
 <div id="notebook-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="notebook-title" aria-hidden="true">
   <div class="modal-card notebook-card">
-    <div class="modal-title"><h3 id="notebook-title">Notebook</h3><button type="button" class="modal-close" onclick="closeNotebookModal()" aria-label="Close">×</button></div>
+    <div class="modal-title"><h3 id="notebook-title">Notebook</h3><button type="button" class="modal-close" onclick="closeNotebookModal()" aria-label="Close"><svg class="endpaper-icon" data-icon="lucide:x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
     <input id="notebook-search" type="search" placeholder="Search highlights, notes, books, or tags…" oninput="renderNotebook()">
     <div id="notebook-tags"></div>
     <div id="notebook-list"></div>
@@ -691,8 +719,11 @@
   </div>
 </div>
 
-<script src="/app.js?v=v15.0.10-20260923"></script>
-<script src="/mobile.js?v=v15.0.10-20260923"></script>
+<script src="/reader-index-cache.js?v=v15.6.3-20261002"></script>
+<script src="/control-icons.js?v=v15.6.3-20261002"></script>
+<script src="/app.js?v=v15.6.3-20261002"></script>
+<script src="/mobile.js?v=v15.6.3-20261002"></script>
+<script src="/ui.js?v=v15.6.3-20261002"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

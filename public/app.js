@@ -400,7 +400,10 @@ function updateRoleAwareControls() {
 
   const uploadButton = document.getElementById('upload-btn');
   const readerActive = document.getElementById('reader-view').classList.contains('active');
-  if (uploadButton) uploadButton.style.display = !readerActive ? 'flex' : 'none';
+  if (uploadButton) {
+    uploadButton.hidden = !currentUser || readerActive;
+    uploadButton.style.display = !readerActive ? 'flex' : 'none';
+  }
 
   const dropzoneEl = document.getElementById('dropzone');
   if (dropzoneEl) dropzoneEl.classList.remove('drag-over');
@@ -846,30 +849,58 @@ function renderRatingHtml(bookId, currentRating) {
   let stars = '';
   for (let i = 1; i <= 5; i++) {
     const filled = i <= r ? ' filled' : '';
-    const glyph = i <= r ? '★' : '☆';
-    stars += `<button type="button" class="star-btn${filled}" title="Rate ${i} star${i > 1 ? 's' : ''}" onclick="event.stopPropagation(); setBookRating('${bookId}', ${i === r ? 'null' : i})">${glyph}</button>`;
+    const label = `Rate ${i} star${i > 1 ? 's' : ''}`;
+    stars += `<button type="button" class="star-btn${filled}" title="${label}" aria-label="${label}" aria-pressed="${i <= r}" onclick="event.stopPropagation(); setBookRating('${bookId}', ${i === r ? 'null' : i})">${controlIconMarkup('star')}</button>`;
   }
   return `<div class="rating-stars" role="group" aria-label="Book rating">${stars}</div>`;
 }
 
-async function setBookRating(bookId, rating) {
-  const entry = library.find(b => b.id === bookId);
-  const previousRating = entry?.rating;
-  if (entry) entry.rating = rating;
+const ratingWrites = new Map();
+
+function refreshRatingUI(bookId) {
+  const focused = document.activeElement;
+  const focusLabel = focused?.matches('.star-btn,.mobile-star') ? focused.getAttribute('aria-label') : null;
+  const focusedBook = focused?.closest('[data-book-id]')?.dataset.bookId;
+  const focusSurface = focused?.closest('#collection-list') ? 'collection-list' : 'mobile-content';
   renderShelf();
   if (activeOrganizeBookId === bookId) {
-    const ratingContainer = document.querySelector('#collection-list .rating-stars');
-    if (ratingContainer) {
-      ratingContainer.outerHTML = renderRatingHtml(bookId, rating);
-    }
+    const container = document.querySelector('#collection-list .rating-stars');
+    if (container) container.outerHTML = renderRatingHtml(bookId, library.find(item => item.id === bookId)?.rating);
   }
+  if (focusLabel) {
+    const scope = focusedBook ? document.querySelector(`[data-book-id="${CSS.escape(focusedBook)}"]`) : document.getElementById(focusSurface);
+    [...(scope?.querySelectorAll('.star-btn,.mobile-star') || [])].find(star => star.getAttribute('aria-label') === focusLabel)?.focus({ preventScroll: true });
+  }
+}
+
+async function setBookRating(bookId, rating) {
+  const entry = library.find(b => b.id === bookId);
+  const expectedAccountVersion = accountVersion;
+  if (!entry || !isActiveAccount(expectedAccountVersion)) return;
+  const key = `${expectedAccountVersion}:${bookId}`;
+  const state = ratingWrites.get(key) || { confirmed: entry.rating, sequence: 0, tail: Promise.resolve() };
+  ratingWrites.set(key, state);
+  const sequence = ++state.sequence;
+  entry.rating = rating;
+  refreshRatingUI(bookId);
   try {
-    await api.updateBook(bookId, { rating });
-    showToast(rating ? `Rated ${rating} star${rating > 1 ? 's' : ''}.` : 'Rating cleared.');
+    // Send rapid edits in order; a rejected earlier write must not undo the latest one.
+    const write = state.tail.catch(() => {}).then(async () => {
+      if (!isActiveAccount(expectedAccountVersion)) return;
+      await api.updateBook(bookId, { rating }, { expectedAccountVersion });
+      state.confirmed = rating;
+    });
+    state.tail = write;
+    await write;
+    if (isActiveAccount(expectedAccountVersion) && sequence === state.sequence) showToast(rating ? `Rated ${rating} star${rating > 1 ? 's' : ''}.` : 'Rating cleared.');
   } catch (err) {
-    if (entry) { entry.rating = previousRating; renderShelf(); }
-    console.error('Rating update failed:', err);
-    showToast(`Could not update rating: ${err.message}`);
+    if (isActiveAccount(expectedAccountVersion) && sequence === state.sequence) {
+      entry.rating = state.confirmed;
+      refreshRatingUI(bookId);
+      showToast(`Could not update rating: ${err.message}`);
+    }
+  } finally {
+    if (sequence === state.sequence && ratingWrites.get(key) === state) ratingWrites.delete(key);
   }
 }
 
@@ -932,16 +963,64 @@ async function showShelf(){
 }
 
 /* ---------------- Layout (paginated vs scrolled) ---------------- */
+// EPUB.js needs same-origin access for layout/selection. WebKit also requires
+// script permission for parent-owned event callbacks. Book code is still denied
+// by a CSP installed before any content, plus removal of active EPUB markup.
+function protectEpubDocument(doc) {
+  for (const element of Array.from(doc.querySelectorAll('*'))) {
+    const tag = element.localName.toLowerCase();
+    if (['script', 'iframe', 'frame', 'frameset', 'object', 'embed'].includes(tag) ||
+        (tag === 'meta' && element.hasAttribute('http-equiv'))) {
+      // CFIs count element siblings. Keep an inert slot in body/SVG content so
+      // previously saved locations and annotations still address the same text.
+      const inContent = element.closest('body') || element.namespaceURI === 'http://www.w3.org/2000/svg';
+      if (inContent) {
+        const placeholder = doc.createElementNS(element.namespaceURI, element.namespaceURI === 'http://www.w3.org/2000/svg' ? 'g' : 'span');
+        if (element.id) placeholder.setAttribute('id', element.id);
+        placeholder.setAttribute('style', 'display:none !important');
+        element.replaceWith(placeholder);
+      } else element.remove();
+      continue;
+    }
+    for (const attribute of Array.from(element.attributes)) {
+      const name = attribute.localName.toLowerCase();
+      if (name.startsWith('on') || name === 'srcdoc' || name === 'autofocus' ||
+          (['href', 'src', 'action', 'formaction'].includes(name) && /^\s*(javascript|vbscript):/i.test(attribute.value))) {
+        element.removeAttributeNode(attribute);
+      }
+    }
+    if (element.hasAttribute('target')) element.removeAttribute('target');
+  }
+  const head = doc.head || doc.querySelector('head');
+  // SVG spine documents gain an HTML head in the serialization hook below.
+  if (!head) return;
+  const policy = doc.createElementNS('http://www.w3.org/1999/xhtml', 'meta');
+  policy.setAttribute('http-equiv', 'Content-Security-Policy');
+  policy.setAttribute('content', "default-src 'none'; script-src 'none'; style-src 'self' blob: 'unsafe-inline'; img-src blob: data:; font-src 'self' blob: data:; media-src blob: data:; connect-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'self'");
+  head.insertBefore(policy, head.firstChild);
+}
+
+function registerEpubProtection(targetBook) {
+  targetBook.spine.hooks.content.register(protectEpubDocument);
+  // Apply the policy to the actual HTML parser output too, after resource URL
+  // replacement. This also covers namespace/parser differences in EPUB XHTML.
+  targetBook.spine.hooks.serialize.register((output, section) => {
+    const doc = new DOMParser().parseFromString(section.output || output, 'text/html');
+    protectEpubDocument(doc);
+    section.output = '<!DOCTYPE html>' + doc.documentElement.outerHTML;
+  });
+}
+
 function renditionOptions(){
   if (settings.layout === 'scrolled'){
     return {
       width: '100%', height: '100%',
       flow: 'scrolled', manager: 'continuous',
       snap: false,
-      sandbox: 'allow-same-origin',
+      allowScriptedContent: true,
     };
   }
-  return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto', sandbox: 'allow-same-origin' };
+  return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto', allowScriptedContent: true };
 }
 
 function setLayout(mode){
@@ -954,6 +1033,7 @@ function setLayout(mode){
   const resumeCfi = getSafeCfi() || entry.lastLocationCfi;
   if (resumeCfi) entry.lastLocationCfi = resumeCfi;
 
+  stopTts();
   hideHighlightPopup();
   pageTurnGeneration++;
   pageTurnLock = false;
@@ -1022,7 +1102,7 @@ function applyReaderContentStyles(contents) {
       -webkit-user-select: auto;
       overflow-anchor: none !important;
       touch-action: pan-y !important;
-      overscroll-behavior: none !important;
+      overscroll-behavior: auto !important;
       -webkit-overflow-scrolling: touch;
     }
     body {
@@ -1059,7 +1139,7 @@ function isInteractiveReaderTarget(target) {
 }
 
 function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel) {
-  if (!rendition) return false;
+  if (!rendition || isCancel) return false;
   lastReaderInteractionAt = Date.now();
   const dx = ex - sx;
   const dy = ey - sy;
@@ -1077,12 +1157,8 @@ function handleReaderSwipeOrTap(sx, sy, ex, ey, dt, moved, width, win, isCancel)
     }
   }
 
-  // 2. Any clean tap reveals hidden controls; edge turns apply while visible.
+  // Side taps turn pages in either chrome state; center taps reveal controls.
   if (!isCancel && !moved && Math.abs(dx) < 12 && Math.abs(dy) < 12 && dt < 450) {
-    if (isImmersiveReading()) {
-      showReaderChromeTemporarily();
-      return true;
-    }
     if (settings.layout === 'paginated' && settings.gestures.edge) {
       if (ex < width * 0.25) {
         turnPage('prev');
@@ -1104,78 +1180,6 @@ function initViewerWrapGestures() {
   const wrap = document.getElementById('viewer-wrap');
   if (!wrap || wrap.__gestureBound) return;
   wrap.__gestureBound = true;
-  const tapLayer = document.getElementById('reader-tap-layer');
-  if (tapLayer) {
-    let lastTouchY = 0;
-    let startTouchX = 0;
-    let startTouchY = 0;
-    let touchMoved = false;
-    let scrollVelocity = 0;
-    let lastMoveAt = 0;
-    let momentumFrame = null;
-    tapLayer.addEventListener('touchstart', e => {
-      if (momentumFrame != null) cancelAnimationFrame(momentumFrame);
-      momentumFrame = null;
-      startTouchX = e.touches[0]?.clientX || 0;
-      startTouchY = e.touches[0]?.clientY || 0;
-      lastTouchY = startTouchY;
-      touchMoved = false;
-      scrollVelocity = 0;
-      lastMoveAt = performance.now();
-    }, { passive: true });
-    tapLayer.addEventListener('touchmove', e => {
-      if (e.touches.length !== 1) return;
-      const nextX = e.touches[0].clientX;
-      const nextY = e.touches[0].clientY;
-      if (Math.abs(nextX - startTouchX) > 10 || Math.abs(nextY - startTouchY) > 10) touchMoved = true;
-      if (settings.layout !== 'scrolled') return;
-      const scroller = document.getElementById('epub-scroll-container');
-      if (!scroller) return;
-      const delta = lastTouchY - nextY;
-      if (Math.abs(delta) > 1) {
-        scroller.scrollTop += delta;
-        const now = performance.now();
-        const velocity = delta / Math.max(8, now - lastMoveAt);
-        scrollVelocity = Math.max(-1, Math.min(1, scrollVelocity * 0.6 + velocity * 0.4));
-        lastMoveAt = now;
-        e.preventDefault();
-      }
-      lastTouchY = nextY;
-    }, { passive: false });
-    tapLayer.addEventListener('touchend', e => {
-      if (!touchMoved && isImmersiveReading()) {
-        e.stopPropagation();
-        showReaderChromeTemporarily();
-      } else if (touchMoved && settings.layout === 'scrolled' && Math.abs(scrollVelocity) > 0.05) {
-        let previousFrame = performance.now();
-        const coast = now => {
-          const scroller = document.getElementById('epub-scroll-container');
-          if (!scroller || !isImmersiveReading() || Math.abs(scrollVelocity) < 0.05) {
-            momentumFrame = null;
-            return;
-          }
-          const elapsed = Math.min(32, now - previousFrame);
-          previousFrame = now;
-          scroller.scrollTop += scrollVelocity * elapsed;
-          scrollVelocity *= Math.pow(0.72, elapsed / 16);
-          momentumFrame = requestAnimationFrame(coast);
-        };
-        momentumFrame = requestAnimationFrame(coast);
-      }
-    }, { passive: true });
-    tapLayer.addEventListener('click', () => {
-      if (!touchMoved && isImmersiveReading()) showReaderChromeTemporarily();
-      touchMoved = false;
-    });
-    tapLayer.addEventListener('wheel', e => {
-      if (settings.layout !== 'scrolled') return;
-      const scroller = document.getElementById('epub-scroll-container');
-      if (!scroller) return;
-      scroller.scrollTop += e.deltaY;
-      e.preventDefault();
-    }, { passive: false });
-  }
-
   let sx = 0, sy = 0, st = 0, moved = false, handled = false;
 
   wrap.addEventListener('touchstart', (e) => {
@@ -1240,14 +1244,23 @@ function registerSwipeGestures(){
       if (handled || !rendition || !e.changedTouches || !e.changedTouches.length) return;
       if (isInteractiveReaderTarget(e.target)) return;
       const t = e.changedTouches[0];
-      const width = win ? win.innerWidth : (doc.documentElement ? doc.documentElement.clientWidth : window.innerWidth);
-      const res = handleReaderSwipeOrTap(sx, sy, t.clientX, t.clientY, Date.now() - st, moved, width, win, isCancel);
+      const viewport = document.getElementById('viewer-wrap').getBoundingClientRect();
+      const frame = win.frameElement.getBoundingClientRect();
+      const res = handleReaderSwipeOrTap(sx + frame.left - viewport.left, sy, t.clientX + frame.left - viewport.left, t.clientY, Date.now() - st, moved, viewport.width, win, isCancel);
       if (res) handled = true;
     };
     doc.addEventListener('touchstart', onTouchStart, { passive: true });
     doc.addEventListener('touchmove', onTouchMove, { passive: true });
     doc.addEventListener('touchend', (e) => onTouchEndOrCancel(e, false), { passive: true });
     doc.addEventListener('touchcancel', (e) => onTouchEndOrCancel(e, true), { passive: true });
+    doc.addEventListener('click', e => {
+      // Touchend already handled taps. Ignore the compatibility mouse event.
+      if (Date.now() - st < 800 || isInteractiveReaderTarget(e.target) || !win.getSelection().isCollapsed) return;
+      const viewport = document.getElementById('viewer-wrap').getBoundingClientRect();
+      const frame = win.frameElement.getBoundingClientRect();
+      const x = e.clientX + frame.left - viewport.left;
+      handleReaderSwipeOrTap(x, e.clientY, x, e.clientY, 0, false, viewport.width, win, false);
+    });
   });
 }
 
@@ -1475,6 +1488,9 @@ function isReaderInteractionOpen() {
     document.getElementById('highlight-popup')?.classList.contains('show') ||
     !document.getElementById('dict-tooltip')?.classList.contains('hidden') ||
     !document.getElementById('tts-player-bar')?.classList.contains('hidden') ||
+    document.querySelector('dialog[open]') ||
+    document.querySelector('.modal.show') ||
+    document.activeElement?.closest('#topbar, #mobile-reader-controls, #progress-bar') ||
     pendingHighlightContext
   );
 }
@@ -1584,13 +1600,17 @@ function readerRequestOptions(request) {
   return { signal: request.controller.signal, expectedAccountVersion: request.accountVersion };
 }
 
-function isReaderRequestCurrent(request, targetBook = book, targetRendition = rendition) {
+function isReaderBookCurrent(request, targetBook = book) {
   return Boolean(
     request && activeReaderRequest === request && readerRequestVersion === request.version &&
     accountVersion === request.accountVersion && currentBookId === request.bookId &&
     readerAbortController === request.controller && !request.controller.signal.aborted &&
-    targetBook === book && targetRendition === rendition
+    targetBook === book
   );
+}
+
+function isReaderRequestCurrent(request, targetBook = book, targetRendition = rendition) {
+  return isReaderBookCurrent(request, targetBook) && targetRendition === rendition;
 }
 
 function isAbortError(error) {
@@ -1711,12 +1731,15 @@ function bindRenditionInteractions(entry, targetRendition, request) {
   targetRendition.on('touchstart', () => { if (active()) hideHighlightPopup(); });
 }
 
-function getLocationsKey(bookId) {
-  return `endpaper_locations_${bookId}`;
+function validCachedLocations(serialized, targetBook) {
+  if (typeof serialized !== 'string' || serialized.length > 2_000_000) return false;
+  try {
+    const locations = JSON.parse(serialized);
+    return Array.isArray(locations) && locations.length > 0 &&
+      locations.every(cfi => typeof cfi === 'string' && cfi.startsWith('epubcfi(') && cfi.endsWith(')')) &&
+      Boolean(targetBook.spine.get(locations[0])) && Boolean(targetBook.spine.get(locations.at(-1)));
+  } catch (_) { return false; }
 }
-
-// NOTE (R-20): ensureLocations() was removed — it was dead code never called anywhere.
-// The live location cache/generate pipeline lives in openBook() below.
 
 /* ---------------- Opening a book ---------------- */
 async function openBook(id){
@@ -1792,14 +1815,21 @@ async function openBook(id){
 
   // Fetch the EPUB file from the server
   let targetBook;
+  const indexAccount = currentUser.username;
+  let indexFingerprint = Promise.resolve(null);
   try {
     const blob = await api.getBookFile(id, requestOptions);
     if (!isReaderRequestCurrent(request, null, null)) return;
     // Explicit archive input avoids EPUB.js interpreting an extension-less blob
     // URL as an unpacked EPUB directory.
     const buffer = await blob.arrayBuffer();
+    // Hash in parallel with opening/rendering, without delaying the first page.
+    // A restored or replaced EPUB cannot accidentally reuse another file's CFIs.
+    if (window.crypto?.subtle) indexFingerprint = crypto.subtle.digest('SHA-256', buffer)
+      .then(bytes => Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, '0')).join('')).catch(() => null);
     targetBook = ePub();
     await targetBook.open(buffer, 'binary');
+    registerEpubProtection(targetBook);
   } catch(err) {
     clearTimeout(slowLoadTimer);
     if (isReaderRequestCurrent(request, null, null) && !isAbortError(err)) {
@@ -1852,13 +1882,12 @@ async function openBook(id){
 
   // Annotation loading is non-critical: text must be readable first.
   Promise.all([api.getBookmarks(id, requestOptions), api.getHighlights(id, requestOptions)]).then(([bookmarks, highlights]) => {
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+    if (!isReaderBookCurrent(request, targetBook)) return;
     entry.annotationLoadFailed = false;
     entry.bookmarks = bookmarks.map(bm => ({ id: bm.id, cfi: bm.cfi, chapter: bm.chapter || bm.label || 'Untitled section', pct: bm.progress_percent || 0, addedAt: bm.created_at ? new Date(bm.created_at).getTime() : Date.now() }));
-    entry.highlights = highlights.map(hl => ({ id: hl.id, cfi: hl.cfi_range, color: hl.color || 'gold', excerpt: hl.excerpt || '', chapter: hl.chapter || 'Untitled section', addedAt: hl.created_at ? new Date(hl.created_at).getTime() : Date.now() }));
-    window.currentHighlights = entry.highlights;
-    renderBookmarks(); renderBookmarkTicks(); renderHighlights(); applySavedHighlights(entry, targetRendition);
-  }).catch(error => { if (!isAbortError(error)) { entry.annotationLoadFailed = true; console.error('Failed to load annotations:', error); } });
+    entry.highlights = highlights.map(hl => ({ id: hl.id, cfi: hl.cfi_range, color: hl.color || 'gold', excerpt: hl.excerpt || '', note: hl.note || '', tags: hl.tags || [], chapter: hl.chapter || 'Untitled section', addedAt: hl.created_at ? new Date(hl.created_at).getTime() : Date.now() }));
+    renderBookmarks(); renderBookmarkTicks(); renderHighlights(); applySavedHighlights(entry, rendition); updateBookmarkIcon();
+  }).catch(error => { if (isReaderBookCurrent(request, targetBook) && !isAbortError(error)) { entry.annotationLoadFailed = true; console.error('Failed to load annotations:', error); } });
 
 
   targetBook.loaded.navigation.then(nav => {
@@ -1868,44 +1897,54 @@ async function openBook(id){
   if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
 
   // Generate locations in background for accurate % and progress bar
-  targetBook.ready.then(() => {
-    if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-    const cachedLocations = epubLocationCache.get(readerAssetCacheKey(id));
-    if (cachedLocations) {
+  targetBook.ready.then(async () => {
+    // The text index belongs to the book, so a layout change must not discard it.
+    if (!isReaderBookCurrent(request, targetBook)) return;
+    const fingerprint = await indexFingerprint;
+    const indexKey = `${readerAssetCacheKey(id, request.accountVersion)}:${fingerprint || 'session'}`;
+    const cachedLocations = epubLocationCache.get(indexKey) || (fingerprint && await window.readerIndexStore?.get(indexAccount, id, fingerprint));
+    if (!isReaderBookCurrent(request, targetBook)) return;
+    if (validCachedLocations(cachedLocations, targetBook)) {
       targetBook.locations.load(cachedLocations);
       locationsReady = true;
-      syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
+      syncProgressFromCurrentLocation(entry, targetBook, rendition, request);
       return;
     }
 
     const scheduleLocations = window.requestIdleCallback
-      ? (cb) => window.requestIdleCallback(cb, { timeout: 4000 })
-      : (cb) => setTimeout(cb, 100);
+      ? (cb) => window.requestIdleCallback(cb, { timeout: 300 })
+      : (cb) => setTimeout(cb, 0);
 
-    const generateWhenQuiet = () => scheduleLocations(async () => {
-      if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
-      if (Date.now() - lastReaderInteractionAt < 2500) {
-        generateWhenQuiet();
-        return;
-      }
+    scheduleLocations(async () => {
+      if (!isReaderBookCurrent(request, targetBook)) return;
       try {
+        // Location processing unloads each section. Use independent sections so
+        // a concurrent page render or search never loses its document/output.
+        const processIndexSection = targetBook.locations.process.bind(targetBook.locations);
+        targetBook.locations.process = section => {
+          const isolated = new section.constructor({ ...section, linear: section.linear ? 'yes' : 'no' }, section.hooks);
+          return processIndexSection(isolated).finally(() => isolated.unload());
+        };
+        // EPUB.js already yields to an animation frame between chapters. Its
+        // additional default 100 ms pause adds minutes to very long books.
+        targetBook.locations.pause = 1;
         await targetBook.locations.generate(1024);
-        if (!isReaderRequestCurrent(request, targetBook, targetRendition)) return;
+        if (!isReaderBookCurrent(request, targetBook)) return;
         locationsReady = true;
         try {
           const savedLocations = targetBook.locations.save();
           if (typeof savedLocations === 'string' && savedLocations.length <= 2_000_000) {
-            epubLocationCache.set(readerAssetCacheKey(id), savedLocations);
+            epubLocationCache.set(indexKey, savedLocations);
             while (epubLocationCache.size > 3) epubLocationCache.delete(epubLocationCache.keys().next().value);
+            if (fingerprint && validCachedLocations(savedLocations, targetBook)) window.readerIndexStore?.put(indexAccount, id, fingerprint, savedLocations);
           }
         } catch (_) {}
-        syncProgressFromCurrentLocation(entry, targetBook, targetRendition, request);
+        syncProgressFromCurrentLocation(entry, targetBook, rendition, request);
       } catch(e) {
-        if (isReaderRequestCurrent(request, targetBook, targetRendition) && !isAbortError(e)) console.debug('Location generation skipped:', e);
+        if (isReaderBookCurrent(request, targetBook) && !isAbortError(e)) console.debug('Location generation skipped:', e);
       }
     });
-    generateWhenQuiet();
-  });
+  }).catch(error => { if (isReaderBookCurrent(request, targetBook) && !isAbortError(error)) console.debug('Location cache skipped:', error); });
 
   // Start reading session for analytics
   try {
@@ -2330,6 +2369,28 @@ function isReaderMutationCurrent(context){
   );
 }
 
+async function removeSavedBookmark(entry, bookmark) {
+  const context = createReaderMutationContext(entry);
+  if (!context || bookmark.saving) return false;
+  bookmark.saving = true;
+  try {
+    if (String(bookmark.id).startsWith('temp_')) throw new Error('Bookmark is waiting to sync');
+    if (bookmark.id) await api.removeBookmark(bookmark.id, context.requestOptions);
+    if (!isReaderBookCurrent(context.request, context.targetBook)) return false;
+    entry.bookmarks = entry.bookmarks.filter(value => value !== bookmark);
+    renderBookmarks(); renderBookmarkTicks(); updateBookmarkIcon();
+    return true;
+  } catch (error) {
+    if (isReaderBookCurrent(context.request, context.targetBook) && !isAbortError(error)) showToast('Could not remove bookmark. It is still saved. Try again when connected.', 'error');
+    return false;
+  } finally { bookmark.saving = false; }
+}
+
+function isReaderMutationBookCurrent(context){
+  return Boolean(context && getCurrentEntry() === context.entry &&
+    isReaderBookCurrent(context.request, context.targetBook));
+}
+
 async function toggleBookmark(){
   const entry = getCurrentEntry();
   const context = createReaderMutationContext(entry);
@@ -2341,12 +2402,7 @@ async function toggleBookmark(){
 
   const existingIdx = entry.bookmarks.findIndex(bm => bm.cfi === cfi);
   if (existingIdx > -1){
-    const removed = entry.bookmarks.splice(existingIdx, 1)[0];
-    if (removed.id) {
-      api.removeBookmark(removed.id, requestOptions).catch(e => {
-        if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Remove bookmark failed:', e);
-      });
-    }
+    await removeSavedBookmark(entry, entry.bookmarks[existingIdx]);
   } else {
     const pending = entry.__pendingBookmarks || (entry.__pendingBookmarks = new Set());
     if (pending.has(cfi)) return;
@@ -2365,7 +2421,7 @@ async function toggleBookmark(){
         label: chapterLabel,
         progress_percent: pct,
       }, false, 'POST', requestOptions);
-      if (!isReaderMutationCurrent(context)) return;
+      if (!isReaderMutationBookCurrent(context)) return;
       if (!entry.bookmarks.some(bookmark => bookmark.cfi === cfi)) {
         entry.annotationLoadFailed = false;
         entry.bookmarks.push({
@@ -2378,12 +2434,12 @@ async function toggleBookmark(){
         entry.bookmarks.sort((a, b) => a.pct - b.pct);
       }
     } catch(e) {
-      if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Add bookmark failed:', e);
+      if (isReaderMutationBookCurrent(context) && !isAbortError(e)) console.error('Add bookmark failed:', e);
     } finally {
       pending.delete(cfi);
     }
   }
-  if (!isReaderMutationCurrent(context)) return;
+  if (!isReaderMutationBookCurrent(context)) return;
   updateBookmarkIcon();
   renderBookmarks();
   renderBookmarkTicks();
@@ -2410,39 +2466,26 @@ function renderBookmarks(){
     return;
   }
   if (!entry || entry.bookmarks.length === 0){
-    list.innerHTML = '<div class="bookmark-empty">No bookmarks yet — tap the ribbon icon in the top bar while reading to save your place.</div>';
+    list.innerHTML = '<div class="bookmark-empty">Save your place with “Bookmark this page” in the reading controls. Your saved places will appear here.</div>';
     return;
   }
   entry.bookmarks.forEach(bm => {
     const item = document.createElement('div');
     item.className = 'bookmark-item';
     item.innerHTML = `
-      <div class="bookmark-chapter">${escapeHtml(bm.chapter)}</div>
+      <button type="button" class="bookmark-destination"><span class="bookmark-chapter">${escapeHtml(bm.chapter)}</span><span class="bookmark-pct">${bm.pct}% through the book</span></button>
       <div class="bookmark-meta">
-        <span class="bookmark-pct">${bm.pct}% through the book</span>
-        <button class="bookmark-remove">Remove</button>
+        <button type="button" class="bookmark-remove" aria-label="Remove bookmark in ${escapeHtml(bm.chapter)}">Remove</button>
       </div>
     `;
-    item.querySelector('.bookmark-chapter').onclick =
-      item.querySelector('.bookmark-pct').onclick = () => {
+    item.querySelector('.bookmark-destination').onclick = () => {
         if (getCurrentEntry() !== entry || !rendition) return;
         navigateReader(bm.cfi);
         toggleDrawer('bookmarks', true);
       };
     item.querySelector('.bookmark-remove').onclick = (e) => {
       e.stopPropagation();
-      const context = createReaderMutationContext(entry);
-      if (!context) return;
-      entry.bookmarks = entry.bookmarks.filter(b => b.cfi !== bm.cfi);
-      if (bm.id) {
-        api.removeBookmark(bm.id, context.requestOptions).catch(err => {
-          if (isReaderMutationCurrent(context) && !isAbortError(err)) console.error('Remove bookmark failed:', err);
-        });
-      }
-      if (!isReaderMutationCurrent(context)) return;
-      renderBookmarks();
-      renderBookmarkTicks();
-      updateBookmarkIcon();
+      removeSavedBookmark(entry, bm);
     };
     list.appendChild(item);
   });
@@ -2527,6 +2570,7 @@ function onTextSelected(entry, cfi, contents){
   const text = sel ? sel.toString().trim() : '';
   if (!text) return;
   context.cfi = cfi;
+  context.selectionText = text;
   context.excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
   context.returnFocus = contents.document.defaultView && contents.document.defaultView.frameElement;
   pendingHighlightContext = context;
@@ -2558,12 +2602,11 @@ function onHighlightClicked(entry, cfi){
 
 function showHighlightPopup(x, y, isExisting){
   const popup = document.getElementById('highlight-popup');
-  popup.style.left = Math.max(60, Math.min(window.innerWidth - 60, x)) + 'px';
-  popup.style.top = Math.max(70, y - 46) + 'px';
-  popup.style.transform = 'translateX(-50%)';
+  popup.__anchor = { x, y };
   document.getElementById('highlight-remove-btn').style.display = isExisting ? 'inline' : 'none';
   popup.setAttribute('aria-hidden', 'false');
   popup.classList.add('show');
+  positionHighlightPopup();
   const context = pendingHighlightContext;
   requestAnimationFrame(() => {
     if (popup.classList.contains('show') && pendingHighlightContext === context) {
@@ -2620,13 +2663,18 @@ async function applyHighlight(color){
   const cfi = context.cfi;
   const existing = entry.highlights.find(h => h.cfi === cfi);
   if (existing){
-    try { targetRendition.annotations.remove(existing.cfi, 'highlight'); } catch(e){}
-    existing.color = color;
-    if (existing.id) {
-      api.updateHighlight(existing.id, { color }, requestOptions).catch(e => {
-        if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Update highlight failed:', e);
-      });
-    }
+    try {
+      if (String(existing.id).startsWith('temp_')) throw new Error('Highlight is waiting to sync');
+      if (existing.id) await api.updateHighlight(existing.id, { color }, requestOptions);
+      if (!isReaderBookCurrent(context.request, targetBook)) return;
+      existing.color = color;
+      try { rendition.annotations.remove(existing.cfi, 'highlight'); } catch(e){}
+      try { rendition.annotations.add('highlight', cfi, {}, null, 'epub-highlight', highlightStyle(color)); } catch(e){}
+      renderHighlights(); finishPendingHighlight(context);
+    } catch (error) {
+      if (isReaderBookCurrent(context.request, targetBook) && !isAbortError(error)) showToast('Could not change highlight. Its color is unchanged. Try again when connected.', 'error');
+    } finally { context.saving = false; }
+    return;
   } else {
     const location = await getCurrentLocationSafe(targetRendition);
     const chapter = targetBook.navigation && location && location.start && targetBook.navigation.get(location.start.href);
@@ -2640,7 +2688,7 @@ async function applyHighlight(color){
         excerpt,
         chapter: chapterLabel,
       }, false, 'POST', requestOptions);
-      if (!isReaderMutationCurrent(context)) return;
+      if (!isReaderMutationBookCurrent(context)) return;
       entry.annotationLoadFailed = false;
       entry.highlights.push({
         id: (saved && saved.id) || ('temp_' + Date.now()),
@@ -2651,7 +2699,7 @@ async function applyHighlight(color){
         addedAt: Date.now(),
       });
     } catch(e) {
-      if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Add highlight failed:', e);
+      if (isReaderMutationBookCurrent(context) && !isAbortError(e)) console.error('Add highlight failed:', e);
       finishPendingHighlight(context);
       return;
     } finally {
@@ -2659,10 +2707,10 @@ async function applyHighlight(color){
     }
   }
   context.saving = false;
-  if (!isReaderMutationCurrent(context)) return;
-  targetRendition.annotations.add('highlight', cfi, {}, null, 'epub-highlight', highlightStyle(color));
+  if (!isReaderMutationBookCurrent(context)) return;
+  rendition.annotations.add('highlight', cfi, {}, null, 'epub-highlight', highlightStyle(color));
   try {
-    targetRendition.getContents().forEach(c => {
+    rendition.getContents().forEach(c => {
       const win = c.window || (c.document && c.document.defaultView);
       if (win) win.getSelection().removeAllRanges();
     });
@@ -2674,19 +2722,22 @@ async function applyHighlight(color){
 async function removeCurrentHighlight(){
   const context = pendingHighlightContext;
   if (!context || !pendingHighlightCfi || !isReaderMutationCurrent(context)) { hideHighlightPopup(); return; }
-  const { entry, targetRendition, requestOptions } = context;
+  if (context.saving) return;
+  context.saving = true;
+  const { entry, requestOptions } = context;
   const cfi = context.cfi;
-  try { targetRendition.annotations.remove(cfi, 'highlight'); } catch(e){}
   const removed = entry.highlights.find(h => h.cfi === cfi);
-  entry.highlights = entry.highlights.filter(h => h.cfi !== cfi);
-  if (removed && removed.id) {
-    api.removeHighlight(removed.id, requestOptions).catch(e => {
-      if (isReaderMutationCurrent(context) && !isAbortError(e)) console.error('Remove highlight failed:', e);
-    });
-  }
-  if (!isReaderMutationCurrent(context)) return;
-  finishPendingHighlight(context);
-  renderHighlights();
+  try {
+    if (String(removed?.id).startsWith('temp_')) throw new Error('Highlight is waiting to sync');
+    if (removed?.id) await api.removeHighlight(removed.id, requestOptions);
+    if (!isReaderBookCurrent(context.request, context.targetBook)) return;
+    entry.highlights = entry.highlights.filter(h => h.cfi !== cfi);
+    try { rendition.annotations.remove(cfi, 'highlight'); } catch(e){}
+    finishPendingHighlight(context);
+    renderHighlights();
+  } catch (error) {
+    if (isReaderBookCurrent(context.request, context.targetBook) && !isAbortError(error)) showToast('Could not remove highlight. It is still saved. Try again when connected.', 'error');
+  } finally { context.saving = false; }
 }
 
 function applySavedHighlights(entry, targetRendition = rendition){
@@ -2711,13 +2762,7 @@ function renderHighlights(){
     return;
   }
   entry.highlights.forEach(h => {
-    const item = document.createElement('div');
-    item.className = 'highlight-item';
-    item.innerHTML = `
-      <div class="highlight-excerpt"><span class="highlight-swatch" style="background:${h.color}"></span>"${escapeHtml(h.excerpt)}"</div>
-    `;
-    item.onclick = () => { navigateReader(h.cfi); toggleDrawer('bookmarks', true); };
-    list.appendChild(item);
+    list.appendChild(annotationRow(h, renderHighlights));
   });
 }
 
@@ -2727,7 +2772,7 @@ let searchRequestVersion = 0;
 const bookSearchIndex = new Map();
 const bookTextIndex = new Map();
 
-async function getBookTextIndex(targetBook, bookId, isCurrentSearch) {
+async function getBookTextIndex(targetBook, bookId) {
   if (bookTextIndex.has(bookId)) return bookTextIndex.get(bookId);
   const pending = (async () => {
     const sections = [];
@@ -2736,11 +2781,12 @@ async function getBookTextIndex(targetBook, bookId, isCurrentSearch) {
     }
     const indexed = [];
     for (const section of sections) {
-      if (!isCurrentSearch()) return null;
+      if (targetBook !== book) return null;
       try {
         const documentNode = await section.load(targetBook.load.bind(targetBook));
-        if (!isCurrentSearch()) return null;
-        const textContent = documentNode?.documentElement?.textContent || documentNode?.body?.textContent || '';
+        if (targetBook !== book) return null;
+        // EPUB.js Section.load resolves the document element, not a Document.
+        const textContent = documentNode?.textContent || documentNode?.documentElement?.textContent || documentNode?.body?.textContent || '';
         indexed.push({ href: section.href, text: textContent.normalize('NFKC').toLocaleLowerCase() });
       } catch (_) {
         indexed.push({ href: section.href, text: '' });
@@ -2778,12 +2824,13 @@ document.getElementById('search-input').addEventListener('input', (e) => {
 
 async function runSearch(query, requestVersion = ++searchRequestVersion){
   const targetBook = book;
-  const targetRendition = rendition;
+  const targetAccountVersion = accountVersion;
+  const targetBookId = currentBookId;
   const isCurrentSearch = () => (
     requestVersion === searchRequestVersion &&
     targetBook === book &&
-    targetRendition === rendition &&
-    Boolean(currentBookId)
+    targetAccountVersion === accountVersion &&
+    targetBookId === currentBookId && Boolean(currentBookId)
   );
   if (!targetBook || !isCurrentSearch()) return;
   document.getElementById('search-status').textContent = 'Searching…';
@@ -2796,8 +2843,9 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
     if (cached) {
       results = cached;
     } else {
-      const indexedSections = await getBookTextIndex(targetBook, currentBookId, isCurrentSearch);
-      if (!indexedSections || !isCurrentSearch()) return;
+      const indexedSections = await getBookTextIndex(targetBook, currentBookId);
+      if (!isCurrentSearch()) return;
+      if (!indexedSections) throw new Error('Book indexing was interrupted. Try your search again.');
       const normalizedQuery = query.normalize('NFKC').toLocaleLowerCase();
       const candidates = indexedSections.filter(item => item.text.includes(normalizedQuery));
       for (const { href } of candidates){
@@ -2821,7 +2869,8 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
     const re = new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
     results.forEach(r => {
       const chapter = targetBook.navigation && targetBook.navigation.get(r.href);
-      const item = document.createElement('div');
+      const item = document.createElement('button');
+      item.type = 'button';
       item.className = 'search-result';
       item.innerHTML = `
         <div class="search-chapter">${chapter ? escapeHtml(chapter.label.trim()) : ''}</div>
@@ -2871,6 +2920,8 @@ function handleReaderShortcut(e){
     return;
   }
   if (isEditableShortcutTarget(e.target)) return;
+  // Native chrome controls keep Space/arrow activation; shortcuts belong to the reading page.
+  if (e.target?.ownerDocument === document && (e.target.closest('button, a, summary, [role="button"], [role="tab"]') || document.querySelector('.drawer.open'))) return;
   // Preserve native text selection/caret movement in the EPUB document.
   if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.shiftKey) return;
   if (!rendition) return;
@@ -2962,11 +3013,11 @@ function renderToc(toc){
   list.innerHTML = '';
   function walk(items, depth){
     items.forEach(item => {
-      const a = document.createElement('a');
+      const a = document.createElement('button');
+      a.type = 'button';
       a.className = 'toc-item';
       a.style.paddingLeft = (4 + depth * 14) + 'px';
       a.textContent = item.label.trim();
-      a.href = 'javascript:void(0)';
       a.dataset.href = item.href;
       a.onclick = () => { navigateReader(item.href); toggleDrawer('toc', true); };
       list.appendChild(a);
@@ -3001,6 +3052,8 @@ function registerThemes(){
 
 function syncReaderPalette(){
   const readerTheme = THEMES[settings.theme] || THEMES.paper;
+  document.documentElement.style.setProperty('--reader-page-bg', readerTheme.body);
+  document.documentElement.style.setProperty('--reader-ink', readerTheme.text);
   const app = document.getElementById('app');
   if (app) {
     app.style.setProperty('--reader-page-bg', readerTheme.body);
@@ -3013,7 +3066,7 @@ function syncReaderPalette(){
 
   const isReaderActive = document.body.classList.contains('reader-active');
   const mobileShell = window.matchMedia?.('(max-width:700px), (max-width:900px) and (pointer:coarse)').matches;
-  const shellColor = mobileShell ? '#171714' : (getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#F6F1E7');
+  const shellColor = getComputedStyle(document.body).getPropertyValue('--paper').trim() || '#F6F1E7';
   const effectiveBg = isReaderActive ? readerTheme.body : shellColor;
   
   document.documentElement.style.backgroundColor = effectiveBg;
@@ -3154,13 +3207,8 @@ function updateDrawerBackdrop(){
     const open = drawer.classList.contains('open');
     drawer.setAttribute('aria-hidden', String(!open));
     drawer.toggleAttribute('inert', !open);
-    if (window.isMobileShell?.()) {
-      drawer.setAttribute('role', 'dialog');
-      drawer.setAttribute('aria-modal', String(open));
-    } else {
-      drawer.removeAttribute('role');
-      drawer.removeAttribute('aria-modal');
-    }
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-modal', String(open));
     document.querySelectorAll(`[data-drawer-toggle="${id}"]`).forEach(toggle => {
       toggle.setAttribute('aria-expanded', String(open));
     });
@@ -3197,7 +3245,7 @@ function offlineQueueKey() {
   return currentUser && currentUser.username ? OFFLINE_QUEUE_PREFIX + encodeURIComponent(currentUser.username.toLocaleLowerCase()) : null;
 }
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Tab' || !window.isMobileShell?.()) return;
+  if (event.key !== 'Tab') return;
   const drawer = DRAWER_IDS.map(id => document.getElementById(id + '-drawer')).find(el => el?.classList.contains('open'));
   if (!drawer) return;
   const focusable = [...drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
@@ -3384,7 +3432,7 @@ async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
       Object.assign(settings, serverSettings['reader-settings']);
     }
     normalizeSettings();
-    document.documentElement.classList.toggle('dark-shell', serverSettings['shell-theme'] === 'dark');
+    document.documentElement.classList.toggle('dark-shell', serverSettings['shell-theme'] !== 'light');
     updateShellThemeControl();
   } catch(e){ /* defaults are fine */ }
   return isActiveAccount(expectedAccountVersion);
@@ -3583,6 +3631,12 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   hideHighlightPopup();
   closeShortcutsModal({ returnFocus: false });
   closeStatsModal();
+  closeBookDetails({ returnFocus: false });
+  closeNotebookModal({ returnFocus: false });
+  document.getElementById('book-details-content').replaceChildren();
+  document.getElementById('book-details-actions').replaceChildren();
+  document.getElementById('notebook-list').replaceChildren();
+  notebookItems = [];
   document.getElementById('collections-modal').classList.remove('show');
   closeAdminModal({ returnFocus: false });
   document.getElementById('app').classList.remove('chrome-hidden');
@@ -3602,7 +3656,6 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   const ttsBtn = document.getElementById('tts-btn');
   if (ttsBtn) ttsBtn.setAttribute('aria-pressed', 'false');
   window.currentBookData = null;
-  window.currentHighlights = [];
   const progressSliderEl = document.getElementById('progress-slider');
   if (progressSliderEl) {
     progressSliderEl.onchange = null;
@@ -3620,6 +3673,11 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   document.title = 'Endpaper — an EPUB reader';
 
   if (clearLibrary) {
+    ratingWrites.clear();
+    document.getElementById('book-details-title').textContent = 'Book details';
+    document.getElementById('notebook-tags').replaceChildren();
+    document.getElementById('notebook-search').value = '';
+    notebookTagFilter = '';
     cancelBookWarmup();
     clearReaderAssetCaches();
     library = [];
@@ -4289,6 +4347,15 @@ function trapFocus(event, container) {
 }
 
 document.addEventListener('keydown', (e) => {
+  if (!e.defaultPrevented && !document.querySelector('dialog[open]')) {
+    for (const [id, close] of [['notebook-modal', closeNotebookModal], ['book-details-modal', closeBookDetails]]) {
+      const modal = document.getElementById(id);
+      if (!modal.classList.contains('show') || !modal.contains(e.target)) continue;
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else trapFocus(e, modal);
+      return;
+    }
+  }
   const confirmModal = document.getElementById('confirm-modal');
   if (confirmModal && confirmModal.classList.contains('show')) {
     if (e.key === 'Escape') {
@@ -4368,6 +4435,7 @@ if (document.getElementById('empty-upload-btn')) {
 let ttsQueue = [];           // Array of { text: string, element: HTMLElement, doc: Document }
 let ttsIndex = 0;
 let ttsUtterance = null;
+let ttsPlaybackVersion = 0;
 let ttsIsPaused = false;
 let ttsRate = 1.0;
 let ttsPitch = 1.0;
@@ -4470,6 +4538,9 @@ function updateTtsPlayerUI() {
   if (!bar) return;
 
   if (ttsQueue.length > 0 && ttsIndex < ttsQueue.length) {
+    bar.hidden = false;
+    bar.removeAttribute('inert');
+    bar.setAttribute('aria-hidden', 'false');
     bar.classList.remove('hidden');
     if (ttsBtn) ttsBtn.setAttribute('aria-pressed', 'true');
     const current = ttsQueue[ttsIndex];
@@ -4480,6 +4551,11 @@ function updateTtsPlayerUI() {
     }
     if (rateLabel) rateLabel.textContent = ttsRate + '×';
   } else {
+    const hadFocus = bar.contains(document.activeElement);
+    bar.hidden = true;
+    bar.setAttribute('inert', '');
+    bar.setAttribute('aria-hidden', 'true');
+    if (hadFocus) (window.isMobileShell?.() ? document.getElementById('mobile-reader-tools-button') : document.getElementById('reader-more-btn'))?.focus({ preventScroll: true });
     bar.classList.add('hidden');
     if (ttsBtn) ttsBtn.setAttribute('aria-pressed', 'false');
     clearTtsHighlights();
@@ -4488,6 +4564,7 @@ function updateTtsPlayerUI() {
 
 function speakCurrentTtsItem() {
   if (!('speechSynthesis' in window)) return;
+  const playbackVersion = ++ttsPlaybackVersion;
   window.speechSynthesis.cancel();
 
   if (ttsIndex >= ttsQueue.length || ttsIndex < 0) {
@@ -4512,65 +4589,33 @@ function speakCurrentTtsItem() {
   const selectedVoice = speechSynthesis.getVoices().find(voice => voice.voiceURI === ttsVoiceURI);
   if (selectedVoice) ttsUtterance.voice = selectedVoice;
 
-  ttsUtterance.onend = () => {
-    if (!ttsIsPaused) {
-      ttsIndex++;
-      if (ttsIndex < ttsQueue.length) {
-        speakCurrentTtsItem();
-      } else {
-        // Reached end of current chapter queue. Advance to the next chapter!
-        if (rendition && rendition.next) {
-          // All navigation, including TTS chapter advance, shares turnPage's
-          // awaited serialization guard.
-          turnPage('next').then(turned => {
-            if (!turned) { stopTts(); showToast('Finished reading aloud'); return; }
-            setTimeout(async () => {
-              // Match active section via currentLocation() rather than blindly
-              // taking getContents()[0] which may be a preloaded prior section (R-11)
-              let targetDoc = null;
-              try {
-                const loc = await getCurrentLocationSafe(rendition);
-                const activeHref = loc && loc.start && loc.start.href;
-                const contents = (rendition.getContents && rendition.getContents()) || [];
-                if (activeHref && contents.length > 0) {
-                  const normalizeHref = value => decodeURIComponent(String(value || '').split('#')[0].split('?')[0]).replace(/^\.\//, '');
-                  const activePath = normalizeHref(activeHref);
-                  const exact = contents.filter(c => {
-                    const candidate = normalizeHref(c.href || (c.section && c.section.href));
-                    return candidate === activePath || candidate.endsWith('/' + activePath) || activePath.endsWith('/' + candidate);
-                  });
-                  if (exact.length === 1) targetDoc = exact[0].document;
-                  if (!targetDoc) {
-                    const activeBase = activePath.split('/').pop();
-                    const basenameMatches = contents.filter(c => normalizeHref(c.href || (c.section && c.section.href)).split('/').pop() === activeBase);
-                    if (basenameMatches.length === 1) targetDoc = basenameMatches[0].document;
-                  }
-                }
-              } catch (_) {}
-              if (!targetDoc) {
-                const iframes = document.querySelectorAll('#viewer iframe');
-                if (iframes.length === 1) targetDoc = iframes[0].contentDocument || (iframes[0].contentWindow && iframes[0].contentWindow.document);
-              }
-              if (targetDoc) {
-                const nextQueue = collectReadableItemsFromNode(null, targetDoc);
-                if (nextQueue.length > 0) { startTtsWithQueue(nextQueue, 0); return; }
-              }
-              stopTts();
-              showToast('Finished reading aloud');
-            }, 350);
-          }).catch(() => {
-            stopTts();
-            showToast('Finished reading aloud');
-          });
-        } else {
-          stopTts();
-          showToast('Finished reading aloud');
-        }
-      }
+  const utterance = ttsUtterance;
+  const targetBook = book, targetRendition = rendition, request = activeReaderRequest;
+  const isCurrentPlayback = () => playbackVersion === ttsPlaybackVersion && ttsUtterance === utterance &&
+    isReaderRequestCurrent(request, targetBook, targetRendition) && !ttsIsPaused;
+  ttsUtterance.onend = async () => {
+    if (!isCurrentPlayback()) return;
+    ttsIndex++;
+    if (ttsIndex < ttsQueue.length) { speakCurrentTtsItem(); return; }
+    try {
+      const finishedContent = targetRendition.getContents().find(content => content.document === item.doc);
+      const section = targetBook.spine.get(item.sectionIndex ?? finishedContent?.sectionIndex);
+      const nextSection = section && section.next();
+      if (!nextSection) { stopTts(); showToast('Finished reading aloud'); return; }
+      const turned = await navigateReader(nextSection.href);
+      if (!isCurrentPlayback()) return;
+      if (!turned) { stopTts(); showToast('Finished reading aloud'); return; }
+      const nextContent = targetRendition.getContents().find(content => content.sectionIndex === nextSection.index);
+      const queue = collectReadableItemsFromNode(null, nextContent?.document);
+      if (queue.length) startTtsWithQueue(queue, 0);
+      else { stopTts(); showToast('Finished reading aloud'); }
+    } catch (error) {
+      if (isCurrentPlayback()) { stopTts(); showToast('Could not continue reading aloud. Start again from this page.', 'error'); }
     }
   };
 
   ttsUtterance.onerror = (e) => {
+    if (!isCurrentPlayback()) return;
     if (e.error !== 'interrupted' && e.error !== 'canceled') {
       console.error('TTS error:', e);
       stopTts();
@@ -4597,6 +4642,7 @@ function startTtsWithQueue(items, startIndex = 0) {
 }
 
 function stopTts() {
+  ttsPlaybackVersion++;
   if ('speechSynthesis' in window) {
     window.speechSynthesis.cancel();
   }
@@ -4617,6 +4663,7 @@ function toggleTtsPause() {
     speakCurrentTtsItem();
   } else {
     ttsIsPaused = true;
+    ttsPlaybackVersion++;
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -4667,7 +4714,7 @@ function cycleTtsRate() {
   }
 }
 
-function collectReadableItemsFromNode(startNode, doc) {
+function collectReadableItemsFromNode(startNode, doc, startOffset = 0) {
   if (!doc) return [];
   const isScrolled = settings.layout === 'scrolled';
   const allDocs = [];
@@ -4701,12 +4748,21 @@ function collectReadableItemsFromNode(startNode, doc) {
 
     for (let i = startIndex; i < allBlocks.length; i++) {
       const block = allBlocks[i];
-      const text = block.innerText || block.textContent || '';
+      let text = block.innerText || block.textContent || '';
+      if (docIndex === 0 && i === startIndex && startNode && block.contains(startNode)) {
+        try {
+          const remainder = d.createRange();
+          remainder.selectNodeContents(block);
+          remainder.setStart(startNode, startOffset);
+          text = remainder.toString();
+        } catch (_) {}
+      }
       const cleanText = text.replace(/\s+/g, ' ').trim();
       if (cleanText) {
         const sentences = splitIntoSentences(cleanText);
         sentences.forEach(s => {
-          items.push({ text: s, element: block, doc: d });
+          const content = rendition?.getContents().find(content => content.document === d);
+          items.push({ text: s, element: block, doc: d, sectionIndex: content?.sectionIndex });
         });
       }
     }
@@ -4720,6 +4776,7 @@ function readAloudFromSelection() {
   hideHighlightPopup();
 
   let startNode = null;
+  let startOffset = 0;
   let doc = null;
 
   const contents = (rendition.getContents && rendition.getContents()) || [];
@@ -4730,6 +4787,7 @@ function readAloudFromSelection() {
       if (sel && sel.rangeCount > 0 && sel.toString().trim()) {
         const range = sel.getRangeAt(0);
         startNode = range.startContainer;
+        startOffset = range.startOffset;
         doc = content.document || win.document;
         break;
       }
@@ -4745,7 +4803,7 @@ function readAloudFromSelection() {
   }
 
   if (doc) {
-    const queue = collectReadableItemsFromNode(startNode, doc);
+    const queue = collectReadableItemsFromNode(startNode, doc, startOffset);
     if (queue.length > 0) {
       startTtsWithQueue(queue, 0);
       return;
@@ -4774,6 +4832,7 @@ function startTtsFromVisible() {
 
   const contents = (rendition.getContents && rendition.getContents()) || [];
   let startNode = null;
+  let startOffset = 0;
   let targetDoc = null;
 
   // 1. Check user text selection first
@@ -4784,22 +4843,37 @@ function startTtsFromVisible() {
       if (sel && sel.rangeCount > 0 && sel.toString().trim()) {
         const range = sel.getRangeAt(0);
         startNode = range.startContainer;
+        startOffset = range.startOffset;
         targetDoc = content.document || win.document;
         break;
       }
     }
   }
 
-  // 2. If no selection, find the topmost visible paragraph in viewport
+  // 2. Prefer the current CFI; it identifies text within the visible column.
   if (!startNode) {
+    const cfi = getSafeCfi();
+    const section = cfi && book.spine.get(cfi);
+    const content = section && contents.find(content => content.sectionIndex === section.index);
+    if (content) {
+      try { const range = content.range(cfi); startNode = range.startContainer; startOffset = range.startOffset; targetDoc = content.document; } catch (_) {}
+    }
+  }
+
+  // Fallback to actual visible block fragments, including iframe position.
+  if (!startNode) {
+    const viewport = document.getElementById('viewer-wrap').getBoundingClientRect();
     for (const content of contents) {
       const doc = content.document || (content.content && content.content.document);
       const win = content.window || (doc && doc.defaultView);
       if (doc) {
         const blocks = Array.from(doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, blockquote, li, dt, dd'));
         for (const block of blocks) {
-          const rect = block.getBoundingClientRect();
-          if (rect.bottom > 20 && rect.top < (win ? win.innerHeight : window.innerHeight) * 0.6) {
+          const frame = win.frameElement.getBoundingClientRect();
+          const visible = Array.from(block.getClientRects()).some(rect =>
+            rect.bottom + frame.top > viewport.top + 20 && rect.top + frame.top < viewport.bottom &&
+            rect.right + frame.left > viewport.left && rect.left + frame.left < viewport.right);
+          if (visible) {
             startNode = block;
             targetDoc = doc;
             break;
@@ -4819,7 +4893,7 @@ function startTtsFromVisible() {
   }
 
   if (targetDoc) {
-    const queue = collectReadableItemsFromNode(startNode, targetDoc);
+    const queue = collectReadableItemsFromNode(startNode, targetDoc, startOffset);
     if (queue.length > 0) {
       startTtsWithQueue(queue, 0);
       return;
@@ -4901,10 +4975,11 @@ document.addEventListener('click', (e) => {
 
 if (document.getElementById('export-highlights-btn')) {
   document.getElementById('export-highlights-btn').addEventListener('click', () => {
-    if (!window.currentHighlights || window.currentHighlights.length === 0) return;
-    const bookTitle = window.currentBookData?.name || 'Untitled book';
+    const entry = getCurrentEntry();
+    if (!entry?.highlights?.length) return;
+    const bookTitle = entry.name || 'Untitled book';
     let md = '# Highlights for ' + bookTitle + '\n\n';
-    window.currentHighlights.forEach(h => {
+    entry.highlights.forEach(h => {
       md += '> ' + h.excerpt + '\n\n';
       if (h.note) md += '**Note:** ' + h.note + '\n\n';
       md += '---\n\n';
@@ -4979,7 +5054,7 @@ function coverMarkup(entry, className = 'cover-img') {
 
 function renderContinueCard(){
   const rail = document.getElementById('continue-card');
-  const candidates = library.filter(entry => entry.lastOpenedAt && entry.progress > 0 && entry.progress < 98)
+  const candidates = library.filter(entry => entry.lastOpenedAt && readingStatus(entry) === 'reading')
     .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt).slice(0, 4);
   rail.replaceChildren();
   if (!candidates.length) { rail.style.display = 'none'; return; }
@@ -4987,15 +5062,17 @@ function renderContinueCard(){
   candidates.forEach(entry => {
     const item = document.createElement('article');
     item.className = 'continue-item';
+    item.setAttribute('role', 'button');
+    item.setAttribute('aria-label', `Continue reading ${entry.name}`);
     item.tabIndex = 0;
     const remaining = formatMinutes(estimatedBookMinutes(entry, true));
-    item.innerHTML = `<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}</div><div><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div><div class="progress-text">${Math.round(entry.progress)}%${remaining ? ` · about ${remaining} left` : ''}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div></div>`;
+    item.innerHTML = `<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}</div><div class="continue-info"><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div>${entry.description ? `<p class="continue-description">${escapeHtml(entry.description)}</p>` : ''}<div class="progress-text">${Math.round(entry.progress)}%${remaining ? ` · about ${remaining} left` : ''}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div><span class="continue-reading-action"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h7a3 3 0 0 1 2 1 3 3 0 0 1 2-1h7v15h-7a3 3 0 0 0-2 1 3 3 0 0 0-2-1H3zM12 5v15"/></svg>Continue reading</span></div>`;
     item.onclick = () => openBook(entry.id);
     item.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBook(entry.id); } };
     fragment.appendChild(item);
   });
   rail.appendChild(fragment);
-  rail.style.display = 'flex';
+  rail.style.display = 'grid';
   scheduleBookWarmup(candidates[0]);
 }
 
@@ -5003,20 +5080,23 @@ function smartBook(entry, subtitle) {
   const item = document.createElement('button');
   item.type = 'button';
   item.className = 'smart-book';
-  item.innerHTML = `<strong>${escapeHtml(entry.name)}</strong><span>${escapeHtml(subtitle || entry.author || 'Unknown author')}</span>`;
-  item.onclick = () => openBook(entry.id);
+  item.setAttribute('aria-label', entry.__series ? `Open series ${entry.name}` : `Details for ${entry.name}`);
+  item.innerHTML = `<div class="smart-cover" style="background:${/^#[0-9a-f]{3,8}$/i.test(entry.coverColor || '') ? entry.coverColor : '#554a3b'}">${coverMarkup(entry)}</div><strong>${escapeHtml(entry.name)}</strong><span>${escapeHtml(subtitle || entry.author || 'Unknown author')}</span>`;
+  item.onclick = () => entry.__series ? navigateDesktop('series', entry.name) : openBookDetails(entry.id);
   return item;
 }
 
 function renderSmartSections(searchQuery, filterValue) {
+  if (!window.isMobileShell?.() && typeof desktopPage !== 'undefined' && desktopPage === 'home') { searchQuery = ''; filterValue = 'all'; }
   const root = document.getElementById('smart-sections');
   root.replaceChildren();
   if (searchQuery || filterValue !== 'all' || !library.length) { root.style.display = 'none'; return; }
   const sections = [];
-  sections.push(['Recently added', [...library].sort((a,b) => b.addedAt - a.addedAt).slice(0,8), entry => entry.author]);
-  const unread = library.filter(entry => entry.progress === 0).slice(0,8);
+  const resume = library.filter(entry => entry.lastOpenedAt && readingStatus(entry) === 'reading').sort((a,b) => b.lastOpenedAt - a.lastOpenedAt)[0];
+  sections.push(['Recently added', [...library].sort((a,b) => b.addedAt - a.addedAt).filter(entry => entry.id !== resume?.id).slice(0,8), entry => entry.author]);
+  const unread = library.filter(entry => readingStatus(entry) === 'unread').slice(0,8);
   if (unread.length) sections.push(['Unread', unread, entry => entry.author]);
-  const finished = library.filter(entry => entry.progress >= 98).slice(0,8);
+  const finished = library.filter(entry => readingStatus(entry) === 'finished').slice(0,8);
   if (finished.length) sections.push(['Finished', finished, entry => entry.author]);
   const series = new Map();
   library.filter(entry => entry.series).forEach(entry => {
@@ -5024,17 +5104,22 @@ function renderSmartSections(searchQuery, filterValue) {
     series.get(entry.series).push(entry);
   });
   if (series.size) {
-    const seriesEntries = [...series.entries()].slice(0,8).map(([name, entries]) => ({ ...entries[0], name, __subtitle: `${entries.length} book${entries.length === 1 ? '' : 's'}` }));
+    const seriesEntries = [...series.entries()].slice(0,8).map(([name, entries]) => ({ ...entries[0], name, __series: true, __subtitle: `${entries.length} book${entries.length === 1 ? '' : 's'}` }));
     sections.splice(1, 0, ['Your series', seriesEntries, entry => entry.__subtitle]);
   }
   for (const [title, entries, subtitle] of sections) {
     if (!entries.length) continue;
     const section = document.createElement('section');
     section.className = 'smart-section';
-    const heading = document.createElement('h3'); heading.textContent = title;
+    const sectionHeader = document.createElement('div'); sectionHeader.className = 'section-heading';
+    const heading = document.createElement('h2'); heading.textContent = title;
+    const seeAll = document.createElement('button'); seeAll.type = 'button'; seeAll.className = 'file-link-btn'; seeAll.textContent = 'See all';
+    seeAll.setAttribute('aria-label', `See all ${title.toLocaleLowerCase()} books`);
+    seeAll.onclick = () => { document.getElementById('shelf-search').value = ''; document.getElementById('shelf-filter').value = title === 'Unread' ? 'unread' : title === 'Finished' ? 'finished' : 'all'; if (title === 'Your series') document.getElementById('shelf-sort').value = 'series'; navigateDesktop('library'); };
+    sectionHeader.append(heading, seeAll);
     const rail = document.createElement('div'); rail.className = 'smart-rail';
     entries.forEach(entry => rail.appendChild(smartBook(entry, subtitle(entry))));
-    section.append(heading, rail); root.appendChild(section);
+    section.append(sectionHeader, rail); root.appendChild(section);
   }
   root.style.display = root.childElementCount ? 'grid' : 'none';
 }
@@ -5042,6 +5127,8 @@ function renderSmartSections(searchQuery, filterValue) {
 function createShelfCard(entry) {
   const card = document.createElement('article');
   card.className = `book-card${bulkMode ? ' bulk-mode' : ''}${bulkSelection.has(entry.id) ? ' selected' : ''}`;
+  card.dataset.bookId = entry.id;
+  card.setAttribute('role', 'group');
   card.tabIndex = 0;
   card.setAttribute('aria-label', `${entry.name} by ${entry.author || 'Unknown author'}`);
   if (bulkMode) {
@@ -5068,7 +5155,7 @@ function createShelfCard(entry) {
     badge.textContent = `${Math.round(progress)}%`; spine.appendChild(badge);
   }
   const menu = document.createElement('button'); menu.type = 'button'; menu.className = 'book-menu-btn';
-  menu.setAttribute('aria-label', `Details and actions for ${entry.name}`); menu.textContent = '⋯'; spine.appendChild(menu);
+  menu.setAttribute('aria-label', `Details and actions for ${entry.name}`); menu.appendChild(controlIcon('ellipsis')); spine.appendChild(menu);
   const meta = document.createElement('div'); meta.className = 'book-meta-under';
   if (entry.series) {
     const series = document.createElement('div'); series.className = 'series-tag';
@@ -5083,7 +5170,9 @@ function createShelfCard(entry) {
     const star = document.createElement('button'); star.type = 'button';
     star.className = `star-btn${number <= currentRating ? ' filled' : ''}`;
     star.title = `Rate ${number} star${number === 1 ? '' : 's'}`;
-    star.textContent = number <= currentRating ? '★' : '☆';
+    star.setAttribute('aria-label', star.title);
+    star.setAttribute('aria-pressed', String(number <= currentRating));
+    star.appendChild(controlIcon('star'));
     star.onclick = event => { event.stopPropagation(); setBookRating(entry.id, number === currentRating ? null : number); };
     stars.appendChild(star);
   }
@@ -5096,10 +5185,10 @@ function createShelfCard(entry) {
     if (bulkMode) {
       bulkSelection.has(entry.id) ? bulkSelection.delete(entry.id) : bulkSelection.add(entry.id);
       updateBulkToolbar(); renderShelf();
-    } else openBook(entry.id);
+    } else openBookDetails(entry.id);
   };
   card.onclick = activate;
-  card.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); activate(event); } };
+  card.onkeydown = event => { if (event.target === card && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); activate(event); } };
   menu.onclick = event => { event.stopPropagation(); openBookDetails(entry.id); };
   return card;
 }
@@ -5119,9 +5208,9 @@ function renderShelf(){
   const filterValue = document.getElementById('shelf-filter').value;
   const searchable = entry => `${entry.name || ''} ${entry.author || ''} ${entry.series || ''} ${entry.description || ''} ${entry.tags || ''} ${entry.isbn || ''}`.toLocaleLowerCase();
   let filtered = searchQuery ? library.filter(entry => searchable(entry).includes(searchQuery)) : [...library];
-  if (filterValue === 'unread') filtered = filtered.filter(entry => entry.status === 'unread');
-  else if (filterValue === 'reading') filtered = filtered.filter(entry => entry.status === 'reading');
-  else if (filterValue === 'finished') filtered = filtered.filter(entry => entry.status === 'finished');
+  if (filterValue === 'unread') filtered = filtered.filter(entry => readingStatus(entry) === 'unread');
+  else if (filterValue === 'reading') filtered = filtered.filter(entry => readingStatus(entry) === 'reading');
+  else if (filterValue === 'finished') filtered = filtered.filter(entry => readingStatus(entry) === 'finished');
   else if (filterValue === 'downloaded') filtered = filtered.filter(entry => typeof mobilePinnedIds !== 'undefined' && mobilePinnedIds.has(entry.id));
   else if (filterValue.startsWith('col_')) {
     const collection = allCollections.find(item => item.id === filterValue.slice(4));
@@ -5152,6 +5241,11 @@ function toggleReaderMoreMenu(event) {
   const button = document.getElementById('reader-more-btn');
   menu.hidden = !menu.hidden;
   button?.setAttribute('aria-expanded', String(!menu.hidden));
+}
+
+function closeReaderMoreMenu() {
+  document.getElementById('reader-more-menu').hidden = true;
+  document.getElementById('reader-more-btn')?.setAttribute('aria-expanded', 'false');
 }
 
 function toggleBulkMode(force) {
@@ -5219,6 +5313,8 @@ async function removeOfflineBook(id) {
 async function purgeOfflineBook(id) {
   // Server deletion has already succeeded. Remove all local copies even if the
   // worker has not taken control of this tab yet.
+  await window.readerIndexStore?.deleteBook(id);
+  for (const key of epubLocationCache.keys()) if (key.includes(`:${id}:`)) epubLocationCache.delete(key);
   const cacheNames = await caches.keys();
   await Promise.all(cacheNames.map(async name => {
     const cache = await caches.open(name);
@@ -5318,11 +5414,19 @@ async function bulkDeleteBooks() {
   if (deleted.size) showToast(`${deleted.size} book${deleted.size === 1 ? '' : 's'} removed.`);
 }
 
+let bookDetailsReturnFocus = null;
+let bookDetailsReturnId = null;
+let notebookReturnFocus = null;
+
 async function openBookDetails(id) {
   const entry = library.find(item => item.id === id);
   if (!entry) return;
   if (window.isMobileShell?.()) { window.mobileNavigate('book', id); return; }
+  const expectedAccountVersion = accountVersion;
+  if (!isActiveAccount(expectedAccountVersion)) return;
   const modal = document.getElementById('book-details-modal');
+  if (!modal.classList.contains('show')) bookDetailsReturnFocus = document.activeElement;
+  bookDetailsReturnId = id;
   document.getElementById('book-details-title').textContent = entry.name;
   const totalTime = formatMinutes(estimatedBookMinutes(entry));
   const remaining = formatMinutes(estimatedBookMinutes(entry, true));
@@ -5331,22 +5435,35 @@ async function openBookDetails(id) {
   actions.replaceChildren();
   const addAction = (label, handler) => {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
-    button.addEventListener('click', handler); actions.appendChild(button); return button;
+    button.addEventListener('click', event => { if (isActiveAccount(expectedAccountVersion)) handler(event); }); actions.appendChild(button); return button;
   };
-  addAction(entry.progress ? 'Continue reading' : 'Read', () => { closeBookDetails(); openBook(id); });
+  addAction(entry.progress ? 'Continue reading' : 'Read', () => { closeBookDetails(); openBook(id); }).classList.add('primary-action');
+  const statusLabel = document.createElement('label'); statusLabel.className = 'detail-status'; statusLabel.textContent = 'Reading status';
+  const status = document.createElement('select');
+  for (const value of ['unread', 'reading', 'finished']) status.appendChild(new Option(value.charAt(0).toUpperCase() + value.slice(1), value));
+  status.value = readingStatus(entry);
+  status.addEventListener('change', async () => {
+    if (!isActiveAccount(expectedAccountVersion)) return;
+    status.disabled = true;
+    try { const updated = await api.updateBook(id, { status: status.value }, { expectedAccountVersion }); if (isActiveAccount(expectedAccountVersion)) { entry.status = updated.status; renderShelf(); } }
+    catch (error) { if (isActiveAccount(expectedAccountVersion)) { status.value = readingStatus(entry); showToast(error.message || 'Could not save reading status.'); } }
+    finally { status.disabled = false; }
+  });
+  statusLabel.appendChild(status); actions.appendChild(statusLabel);
   const offline = addAction('Checking download…', async () => {
     offline.disabled = true;
     try {
       if (offline.dataset.pinned === 'true') await removeOfflineBook(id);
       else { await downloadBookOffline(id); showToast('Book is available offline.'); }
+      if (!isActiveAccount(expectedAccountVersion)) return;
       offline.dataset.pinned = String(offline.dataset.pinned !== 'true');
       offline.textContent = offline.dataset.pinned === 'true' ? 'Remove download' : 'Download for offline';
-    } catch (error) { showToast(error.message || 'Offline action failed.'); }
+    } catch (error) { if (isActiveAccount(expectedAccountVersion)) showToast(error.message || 'Offline action failed.'); }
     finally { offline.disabled = false; }
   });
   offline.disabled = true;
   serviceWorkerMessage('GET_PINNED_BOOKS').then(result => {
-    if (!actions.isConnected || !result?.ok) return;
+    if (!isActiveAccount(expectedAccountVersion) || !offline.isConnected || !result?.ok) return;
     const pinned = result.bookIds?.includes(id) || false;
     offline.dataset.pinned = String(pinned);
     offline.textContent = pinned ? 'Remove download' : 'Download for offline'; offline.disabled = false;
@@ -5354,35 +5471,62 @@ async function openBookDetails(id) {
   if (isCurrentUserAdmin()) {
     addAction('Collections', () => openBookCollectionsModal(id));
     addAction('Edit details', () => editBookMetadata(id));
-    addAction('Remove book', () => { closeBookDetails(); removeBook(id); });
+    addAction('Remove book', () => { closeBookDetails(); removeBook(id); }).classList.add('destructive-action');
   }
   modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false'); modal.querySelector('button')?.focus();
 }
 
-function closeBookDetails() { const modal = document.getElementById('book-details-modal'); modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); }
+function closeBookDetails({ returnFocus = true } = {}) {
+  const modal = document.getElementById('book-details-modal');
+  const wasOpen = modal.classList.contains('show');
+  modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true');
+  if (returnFocus && wasOpen) {
+    const target = bookDetailsReturnFocus?.isConnected ? bookDetailsReturnFocus : document.querySelector(`[data-book-id="${CSS.escape(bookDetailsReturnId || '')}"]`);
+    if (target?.getClientRects().length) target.focus({ preventScroll: true });
+  }
+  bookDetailsReturnFocus = null; bookDetailsReturnId = null;
+}
 
 async function editBookMetadata(id) {
   const entry = library.find(item => item.id === id); if (!entry) return;
-  const title = prompt('Title', entry.name); if (title == null) return;
-  const author = prompt('Author', entry.author || ''); if (author == null) return;
-  const description = prompt('Description', entry.description || ''); if (description == null) return;
-  const tags = prompt('Tags', entry.tags || ''); if (tags == null) return;
-  const series = prompt('Series', entry.series || ''); if (series == null) return;
-  const seriesIndexText = prompt('Series number (optional)', entry.seriesIndex == null ? '' : String(entry.seriesIndex)); if (seriesIndexText == null) return;
-  const seriesIndex = seriesIndexText.trim() === '' ? null : Number(seriesIndexText);
-  if (seriesIndex != null && !Number.isFinite(seriesIndex)) { showToast('Series number must be numeric.'); return; }
-  const isbn = prompt('ISBN', entry.isbn || ''); if (isbn == null) return;
-  const updated = await api.updateBook(id, { title, author, description, tags, series, series_index: seriesIndex, isbn });
-  Object.assign(entry, { name: updated.title, author: updated.author, description: updated.description || '', tags: updated.tags || '', series: updated.series || '', seriesIndex: updated.series_index, isbn: updated.isbn || '' });
-  closeBookDetails(); renderShelf(); showToast('Book details updated.');
+  const expectedAccountVersion = accountVersion;
+  await openFormEditor({ title: 'Edit book details', fields: [
+    { name: 'title', label: 'Title', value: entry.name, required: true },
+    { name: 'author', label: 'Author', value: entry.author },
+    { name: 'description', label: 'Description', value: entry.description, multiline: true },
+    { name: 'tags', label: 'Tags (comma-separated)', value: entry.tags },
+    { name: 'series', label: 'Series', value: entry.series },
+    { name: 'seriesIndex', label: 'Series number (optional)', type: 'number', value: entry.seriesIndex == null ? '' : String(entry.seriesIndex) },
+    { name: 'isbn', label: 'ISBN', value: entry.isbn },
+  ], onSave: async values => {
+    if (accountVersion !== expectedAccountVersion) throw new Error('Your account changed. Reopen book details.');
+    const seriesIndex = values.seriesIndex.trim() === '' ? null : Number(values.seriesIndex);
+    if (seriesIndex != null && !Number.isFinite(seriesIndex)) throw new Error('Series number must be numeric.');
+    const updated = await api.updateBook(id, { title: values.title.trim(), author: values.author, description: values.description, tags: values.tags, series: values.series, series_index: seriesIndex, isbn: values.isbn }, { expectedAccountVersion });
+    if (accountVersion !== expectedAccountVersion) return;
+    Object.assign(entry, { name: updated.title, author: updated.author, description: updated.description || '', tags: updated.tags || '', series: updated.series || '', seriesIndex: updated.series_index, isbn: updated.isbn || '' });
+    renderShelf(); openBookDetails(id); showToast('Book details updated.');
+  }});
 }
 
 async function openNotebookModal() {
+  notebookReturnFocus = document.activeElement;
   const modal = document.getElementById('notebook-modal'); modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false');
-  notebookItems = await api.getAllHighlights(); notebookTagFilter = ''; renderNotebook(); document.getElementById('notebook-search').focus();
+  document.getElementById('notebook-list').textContent = 'Loading highlights…';
+  const expectedAccountVersion = accountVersion;
+  try {
+    const items = await api.getAllHighlights();
+    if (accountVersion !== expectedAccountVersion || !modal.classList.contains('show')) return;
+    notebookItems = items; notebookTagFilter = ''; renderNotebook(); document.getElementById('notebook-search').focus();
+  } catch (error) { if (isActiveAccount(expectedAccountVersion) && modal.classList.contains('show')) document.getElementById('notebook-list').textContent = 'Could not load the notebook. Close it and try again.'; }
 }
 
-function closeNotebookModal() { const modal = document.getElementById('notebook-modal'); modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true'); }
+function closeNotebookModal({ returnFocus = true } = {}) {
+  const modal = document.getElementById('notebook-modal'), wasOpen = modal.classList.contains('show');
+  modal.classList.remove('show'); modal.setAttribute('aria-hidden', 'true');
+  if (returnFocus && wasOpen && notebookReturnFocus?.isConnected && notebookReturnFocus.getClientRects().length) notebookReturnFocus.focus({ preventScroll: true });
+  notebookReturnFocus = null;
+}
 
 function renderNotebook() {
   const query = (document.getElementById('notebook-search')?.value || '').trim().toLocaleLowerCase();
@@ -5393,31 +5537,61 @@ function renderNotebook() {
     button.className = 'tag-chip';
     button.type = 'button';
     button.textContent = `#${tag}`;
-    button.addEventListener('click', () => { notebookTagFilter = tag; renderNotebook(); });
+    button.setAttribute('aria-pressed', String(notebookTagFilter === tag));
+    button.addEventListener('click', () => { notebookTagFilter = notebookTagFilter === tag ? '' : tag; renderNotebook(); });
     return button;
   }));
   const filtered = notebookItems.filter(item => (!query || `${item.excerpt || ''} ${item.note || ''} ${item.book_title || ''} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(query)) && (!notebookTagFilter || (item.tags || []).includes(notebookTagFilter)));
-  document.getElementById('notebook-list').innerHTML = filtered.length ? filtered.map(item => `<article class="notebook-item"><small>${escapeHtml(item.book_title)} · ${escapeHtml(item.chapter || '')}</small><blockquote>${escapeHtml(item.excerpt || '')}</blockquote>${item.note ? `<p>${escapeHtml(item.note)}</p>` : ''}<div>${(item.tags || []).map(tag => `<span class="tag-chip">#${escapeHtml(tag)}</span>`).join(' ')} <button class="file-link-btn" onclick="editHighlightTags('${item.id}')">Edit tags</button> <button class="file-link-btn" onclick="closeNotebookModal(); openBook('${item.book_id}')">Open</button></div></article>`).join('') : '<p class="bookmark-empty">No matching highlights.</p>';
+  const list = document.getElementById('notebook-list');
+  list.replaceChildren(...filtered.map(item => annotationRow(item, renderNotebook)));
+  if (!filtered.length) list.appendChild(mobileElement('p', 'bookmark-empty', notebookItems.length ? 'No matching highlights.' : 'No highlights or notes yet. Select a passage while reading to save one.'));
 }
 
 async function editHighlightTags(id) {
   const item = notebookItems.find(value => value.id === id); if (!item) return;
-  const value = prompt('Comma-separated tags', (item.tags || []).join(', ')); if (value == null) return;
-  const updated = await api.updateHighlight(id, { tags: value.split(',') }); item.tags = updated.tags || []; renderNotebook();
+  await editAnnotation(item, renderNotebook);
 }
 
-function selectionText() { return pendingHighlightContext?.excerpt || ''; }
+function selectionText() { return pendingHighlightContext?.selectionText || pendingHighlightContext?.excerpt || ''; }
 async function copySelectionText() { const text = selectionText(); if (text) await navigator.clipboard.writeText(text); hideHighlightPopup(); showToast('Copied selection.'); }
 async function shareSelectionText() { const text = selectionText(); if (!text) return; if (navigator.share) await navigator.share({ text }); else await navigator.clipboard.writeText(text); hideHighlightPopup(); }
 function lookupSelectedWord() { const word = selectionText().trim().split(/\s+/)[0]?.replace(/[^\p{L}'-]/gu, ''); hideHighlightPopup(); if (word) lookupDictionary(word, window.innerWidth / 2, 100); }
 async function addNoteToSelection() {
   const context = pendingHighlightContext; if (!context) return;
-  const note = prompt('Add a note'); if (note == null) return;
-  const saved = await resilientApiPost(`/api/books/${context.entry.id}/highlights`, { cfi_range: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, chapter: '' }, false, 'POST', context.requestOptions);
-  context.entry.highlights.push({ id: saved.id, cfi: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, tags: [] });
-  try { context.targetRendition.annotations.add('highlight', context.cfi, {}, null, 'epub-highlight', highlightStyle('#F2D94E')); } catch (_) {}
-  finishPendingHighlight(context); renderHighlights();
+  hideHighlightPopup();
+  await openFormEditor({ title: 'Add a note', fields: [{ name: 'note', label: 'Note', multiline: true, required: true }], onSave: async ({ note }) => {
+    if (!isReaderMutationCurrent(context)) throw new Error('This book changed. Select the passage again.');
+    const chapter = document.getElementById('progress-chapter').textContent || '';
+    const existing = context.entry.highlights.find(item => item.cfi === context.cfi);
+    if (existing?.id) {
+      const updated = await api.updateHighlight(existing.id, { note }, context.requestOptions);
+      if (!isReaderMutationBookCurrent(context)) return;
+      existing.note = updated.note || note;
+    } else {
+      const saved = await resilientApiPost(`/api/books/${context.entry.id}/highlights`, { cfi_range: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, chapter }, false, 'POST', context.requestOptions);
+      if (!isReaderMutationBookCurrent(context)) return;
+      context.entry.highlights.push({ id: saved.id, cfi: context.cfi, color: '#F2D94E', excerpt: context.excerpt, note, chapter, tags: [] });
+      try { rendition.annotations.add('highlight', context.cfi, {}, null, 'epub-highlight', highlightStyle('#F2D94E')); } catch (_) {}
+    }
+    finishPendingHighlight(context); renderHighlights();
+  }});
 }
+function positionHighlightPopup() {
+  const popup = document.getElementById('highlight-popup');
+  if (!popup.classList.contains('show') || !popup.__anchor) return;
+  const viewport = window.visualViewport;
+  const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+  const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
+  popup.style.maxWidth = Math.max(0, width - 24) + 'px';
+  popup.style.maxHeight = Math.max(0, height - 24) + 'px';
+  const bounds = popup.getBoundingClientRect();
+  popup.style.transform = 'none';
+  popup.style.left = Math.max(left + 12, Math.min(left + width - bounds.width - 12, popup.__anchor.x - bounds.width / 2)) + 'px';
+  popup.style.top = Math.max(top + 12, Math.min(top + height - bounds.height - 12, popup.__anchor.y - bounds.height - 12)) + 'px';
+}
+window.addEventListener('resize', positionHighlightPopup);
+window.visualViewport?.addEventListener('resize', positionHighlightPopup);
+window.visualViewport?.addEventListener('scroll', positionHighlightPopup);
 
 function updateGestureSettings() {
   settings.gestures = { swipe: document.getElementById('gesture-swipe').checked, edge: document.getElementById('gesture-edge').checked, center: document.getElementById('gesture-center').checked };
@@ -5458,11 +5632,11 @@ async function saveReadingGoals() {
 document.getElementById('shelf-search')?.setAttribute('oninput', 'scheduleShelfRender()');
 document.getElementById('shelf-filter')?.setAttribute('onchange', 'renderShelf()');
 document.getElementById('shelf-sort')?.setAttribute('onchange', 'renderShelf()');
-document.addEventListener('click', event => { if (!event.target.closest('#reader-more-menu,#reader-more-btn,#reader-bottom-actions')) { document.getElementById('reader-more-menu').hidden = true; document.getElementById('reader-more-btn')?.setAttribute('aria-expanded','false'); } });
+document.addEventListener('click', event => { if (!event.target.closest('#reader-more-menu,#reader-more-btn,#reader-bottom-actions')) closeReaderMoreMenu(); });
 document.addEventListener('keydown', event => {
   if (event.key !== 'Tab') return;
   const modal = document.querySelector('.modal.show[aria-modal="true"]'); if (!modal) return;
-  const focusable = [...modal.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item => !item.hidden);
+  const focusable = [...modal.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(item => !item.hidden && item.getClientRects().length);
   if (!focusable.length) return;
   if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1).focus(); }
   else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }

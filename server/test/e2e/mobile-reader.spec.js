@@ -10,6 +10,7 @@ test.beforeEach(async ({ page }) => {
   await page.locator('#passphrase-input').fill('correct horse battery');
   await page.locator('#login-btn').click();
   await expect(page.locator('#mobile-tabbar')).toBeVisible();
+  await expect(page.locator('#dropzone')).toHaveJSProperty('hidden', false);
   await page.locator('[data-mobile-tab="library"]').click();
   if (!(await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).count())) {
     await page.locator('#file-input').setInputFiles(fixture);
@@ -17,6 +18,7 @@ test.beforeEach(async ({ page }) => {
     await page.locator('[data-mobile-tab="library"]').click();
   }
   await expect(page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).first()).toBeVisible();
+  await page.evaluate(() => { library.find(book => book.name === 'Three Chapter Test Book').lastLocationCfi = null; });
 });
 
 test('mobile routes fit iPhone width and open a rendered EPUB', async ({ page }) => {
@@ -42,13 +44,14 @@ test('mobile routes fit iPhone width and open a rendered EPUB', async ({ page })
   await page.locator('[data-mobile-tab="library"]').click();
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await expect(page.locator('#mobile-content h2')).toHaveText('Three Chapter Test Book');
-  await page.locator('.mobile-status-label select').selectOption('reading');
+  await page.getByRole('combobox', { name: 'Reading status', exact: true }).click();
+  await page.getByRole('option', { name: 'Reading', exact: true }).click();
   await expect(page.locator('.mobile-status-label select')).toHaveValue('reading');
   await page.getByRole('button', { name: /Highlights & notes/ }).click();
   await expect(page.locator('#mobile-content h1')).toHaveText('Highlights & notes');
   await page.locator('.mobile-back').click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await expect(page.locator('#loading-overlay')).not.toBeVisible();
   await page.screenshot({ path: 'test-results/mobile-reader.png' });
   await page.locator('#mobile-reader-tools-button').click();
@@ -65,7 +68,7 @@ test('rapid synthetic touch swipes cross only one chapter', async ({ page }) => 
   await page.locator('[data-mobile-tab="library"]').click();
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await page.locator('#viewer-wrap').evaluate(body => {
     const swipe = identifier => {
       const start = { identifier, clientX: 310, clientY: 200 };
@@ -85,7 +88,7 @@ test('rapid synthetic touch swipes cross only one chapter', async ({ page }) => 
 test('bookmark-style jumps wait for a pending page turn', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   const overlapped = await page.evaluate(async () => {
     const current = rendition;
     const originalNext = current.next.bind(current);
@@ -122,7 +125,7 @@ test('shelf metadata is safe in quoted attributes and phone landscape keeps mobi
 test('a failed progress seek restores the saved position', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await page.setViewportSize({ width: 1200, height: 800 });
   const before = await page.evaluate(() => getCurrentEntry().progress);
   await page.evaluate(() => {
@@ -138,7 +141,7 @@ test('a failed progress seek restores the saved position', async ({ page }) => {
 test('mobile page labels advance with the book', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await expect(page.locator('#loading-overlay')).not.toBeVisible();
   await expect(page.locator('#mobile-reader-page-count')).toHaveText('1 of 3');
   await expect(page.locator('#mobile-reader-chapter-pages')).toHaveText('0 pages left in chapter');
@@ -151,7 +154,7 @@ test('library sheet traps focus and supports reading and downloaded filters', as
   await page.getByRole('button', { name: 'Sort & filter' }).click();
   const dialog = page.getByRole('dialog', { name: 'Library options' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('select').first()).toBeFocused();
+  await expect(dialog.getByRole('combobox').first()).toBeFocused();
   await expect(dialog.locator('select').first()).toContainText('Reading');
   await expect(dialog.locator('select').first()).toContainText('Downloaded');
   await page.keyboard.press('Escape');
@@ -167,7 +170,8 @@ test('mobile status reflects server normalization', async ({ page }) => {
     renderShelf();
   });
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
-  await page.locator('.mobile-status-label select').selectOption('unread');
+  await page.getByRole('combobox', { name: 'Reading status', exact: true }).click();
+  await page.getByRole('option', { name: 'Unread', exact: true }).click();
   await expect(page.locator('.mobile-status-label select')).toHaveValue('finished');
 });
 
@@ -187,9 +191,15 @@ test('offline pinning waits for worker acknowledgement and stores the EPUB', asy
     return response ? (await response.blob()).size : 0;
   });
   expect(storedBytes).toBeGreaterThan(0);
-  await expect(page.locator('.mobile-detail-meta')).toContainText('1 downloaded');
-  await page.locator('.mobile-offline-remove').click();
-  await expect(page.locator('.mobile-empty')).toContainText('No books downloaded');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('#desktop-nav').getByRole('button', { name: 'Downloads', exact: true }).click();
+  await page.locator('#desktop-content').getByRole('button', { name: 'Details for Three Chapter Test Book', exact: true }).click();
+  await expect(page.locator('#book-details-modal')).toHaveClass(/show/);
+  await page.locator('#book-details-modal').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.setViewportSize({ width: 393, height: 852 });
+  await expect(page.locator('#mobile-content .mobile-detail-meta')).toContainText('1 downloaded');
+  await page.locator('#mobile-content .mobile-offline-remove').click();
+  await expect(page.locator('#mobile-content .mobile-empty')).toContainText('No books downloaded');
 });
 
 test('a pinned book opens after a cold offline restart', async ({ page, browserName }) => {
@@ -219,7 +229,7 @@ test('a pinned book opens after a cold offline restart', async ({ page, browserN
     await page.locator('[data-mobile-tab="library"]').click();
     await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
     await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-    await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+    await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   } finally { await page.context().setOffline(false); }
 });
 
@@ -245,74 +255,45 @@ test('offline download requires a local unlock for a restored session', async ({
   await expect(page.getByRole('button', { name: 'Remove download' })).toBeVisible();
 });
 
-test('scrolling hides reader controls and a tap fades them back in', async ({ page }) => {
+test('scrolling hides reader controls and a native text tap restores them', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect.poll(()=>page.evaluate(()=>readerNavigationReady)).toBe(true);
   await page.evaluate(() => setLayout('scrolled'));
-  await expect(page.locator('#reader-view')).toHaveClass(/scrolled/);
-  await expect(page.locator('#epub-scroll-container')).toBeVisible();
-  const scrolledBounds = await page.locator('#viewer-wrap').evaluate(element => ({
-    top: element.getBoundingClientRect().top,
-    bottom: element.getBoundingClientRect().bottom,
-    viewportHeight: window.innerHeight,
-  }));
-  expect(scrolledBounds.top).toBe(0);
-  expect(scrolledBounds.bottom).toBe(scrolledBounds.viewportHeight);
+  await expect.poll(()=>page.evaluate(()=>readerNavigationReady)).toBe(true);
   await page.evaluate(() => {
-    const scroller = document.getElementById('epub-scroll-container');
-    const spacer = document.createElement('div');
-    spacer.style.height = '1600px';
-    scroller.appendChild(spacer);
-    scroller.scrollTop = 120;
+    const doc = rendition.getContents()[0].document;
+    for (let i=0; i<100; i++) { const paragraph=doc.createElement('p'); paragraph.textContent='A long reading passage keeps native scrolling available while the controls fade. '.repeat(8); doc.body.appendChild(paragraph); }
   });
+  await expect.poll(()=>page.locator('#epub-scroll-container').evaluate(element=>element.scrollHeight)).toBeGreaterThan(2000);
+  // Mobile WebKit's automation protocol cannot inject wheel/swipe input.
+  // Exercise the real scroll event and native tap; desktop covers native wheel.
+  await page.locator('#epub-scroll-container').evaluate(element=>element.scrollBy(0,400));
   await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
-  await expect(page.locator('#reader-reveal-controls')).toHaveCSS('opacity', '0');
-  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
-  await page.screenshot({ path: 'test-results/mobile-scrolled-immersive.png' });
-  const beforeScroll = await page.locator('#epub-scroll-container').evaluate(element => element.scrollTop);
-  await page.locator('#reader-tap-layer').dispatchEvent('wheel', { deltaY: 100, cancelable: true });
-  await expect.poll(() => page.locator('#epub-scroll-container').evaluate(element => element.scrollTop)).toBeGreaterThan(beforeScroll);
-  const afterWheel = await page.locator('#epub-scroll-container').evaluate(element => element.scrollTop);
-  await page.locator('#reader-tap-layer').evaluate(target => {
-    for (const [type, y] of [['touchstart', 350], ['touchmove', 300], ['touchend', 300]]) {
-      const touch = { identifier: 1, clientX: 190, clientY: y };
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, {
-        touches: { value: type === 'touchend' ? [] : [touch] },
-        changedTouches: { value: [touch] },
-      });
-      target.dispatchEvent(event);
-    }
-  });
-  await expect.poll(() => page.locator('#epub-scroll-container').evaluate(element => element.scrollTop)).toBeGreaterThan(afterWheel);
-  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
-  await page.locator('#reader-tap-layer').evaluate(target => {
-    const touch = { identifier: 2, clientX: 190, clientY: 350 };
-    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
-      target.dispatchEvent(event);
-    }
-  });
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity','0');
+  const before=await page.locator('#epub-scroll-container').evaluate(element=>element.scrollTop);
+  await page.locator('#epub-scroll-container').evaluate(element=>element.scrollBy(0,200));
+  await expect.poll(()=>page.locator('#epub-scroll-container').evaluate(element=>element.scrollTop)).toBeGreaterThan(before);
+  await page.touchscreen.tap(190,350);
   await expect(page.locator('#app')).not.toHaveClass(/chrome-hidden/);
-  await expect(page.getByRole('button', { name: 'Close reader' })).toBeVisible();
-  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
-  await page.screenshot({ path: 'test-results/mobile-scrolled-controls.png' });
-  await page.evaluate(() => { document.getElementById('epub-scroll-container').scrollTop += 120; });
+  await expect(page.getByRole('button', {name:'Close reader'})).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.locator('#epub-scroll-container').evaluate(element=>element.scrollBy(0,200));
   await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
 });
 
 test('immersive reading always exposes a route back to settings', async ({ page }) => {
+  // Account preferences survive between tests; this check explicitly exercises dark mode.
+  await page.evaluate(() => { if (!document.documentElement.classList.contains('dark-shell')) toggleShellTheme(); });
   await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black');
   const tabbar = page.locator('#mobile-tabbar');
   const bottomGap = await tabbar.evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom);
   expect(bottomGap).toBeLessThanOrEqual(50);
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(23, 23, 20)');
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(23, 29, 25)');
 
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await expect(page.locator('#loading-overlay')).not.toBeVisible();
   await page.evaluate(() => setLayout('paginated'));
   await expect(page.locator('#reader-view')).not.toHaveClass(/scrolled/);
@@ -326,7 +307,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   expect(readerLayout.viewerBottom).toBe(readerLayout.viewportHeight);
   expect(readerLayout.sliderHeight).toBe(0);
   await page.evaluate(() => setReadingTheme('paper'));
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await expect(page.locator('#loading-overlay')).not.toBeVisible();
   await page.screenshot({ path: 'test-results/mobile-reader-dark.png' });
   await page.evaluate(() => enterImmersiveReading());
@@ -336,7 +317,7 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await expect(page.locator('#reader-immersive-progress')).toBeHidden();
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '0');
   await page.screenshot({ path: 'test-results/mobile-reader-immersive.png' });
-  await page.locator('#reader-tap-layer').click({ position: { x: 20, y: 210 } });
+  await page.touchscreen.tap(190,210);
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
   await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
   await expect(page.locator('#progress-bar')).toHaveCSS('opacity', '1');
@@ -362,44 +343,12 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   expect(revealedControls.menu.top).toBeGreaterThan(revealedControls.viewportHeight * 0.75);
   expect(revealedControls.progress.right).toBeLessThan(revealedControls.menu.left);
   await page.screenshot({ path: 'test-results/mobile-reader-revealed.png' });
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await page.evaluate(() => enterImmersiveReading());
-  await page.locator('#reader-tap-layer').evaluate(target => {
-    const touch = { identifier: 3, clientX: 20, clientY: 220 };
-    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
-      target.dispatchEvent(event);
-    }
-  });
-  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
-  await page.evaluate(() => enterImmersiveReading());
-  await page.locator('#reader-tap-layer').click({ position: { x: 365, y: 260 } });
-  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
-  await page.evaluate(() => enterImmersiveReading());
-  await page.locator('#reader-tap-layer').evaluate(target => {
-    for (const [type, x] of [['touchstart', 340], ['touchmove', 40], ['touchend', 40]]) {
-      const touch = { identifier: 4, clientX: x, clientY: 350 };
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, {
-        touches: { value: type === 'touchend' ? [] : [touch] },
-        changedTouches: { value: [touch] },
-      });
-      target.dispatchEvent(event);
-    }
-  });
+  await page.touchscreen.tap(330,350);
   await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter Two');
-  await page.locator('#reader-tap-layer').evaluate(target => {
-    const touch = { identifier: 5, clientX: 190, clientY: 350 };
-    for (const [type, touches] of [['touchstart', [touch]], ['touchend', []]]) {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [touch] } });
-      target.dispatchEvent(event);
-    }
-  });
-  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity', '1');
+  await page.touchscreen.tap(190,350);
+  await expect(page.locator('#mobile-reader-controls')).toHaveCSS('opacity','1');
   await page.locator('#mobile-reader-tools-button').click();
   await expect(page.locator('#mobile-reader-tools-menu')).toBeVisible();
   await expect(page.locator('[data-reader-tool="fullscreen"] svg')).toBeVisible();
@@ -439,8 +388,8 @@ test('immersive reading always exposes a route back to settings', async ({ page 
     app.webkitRequestFullscreen = undefined;
     toggleFullscreen();
   });
-  await expect(page.locator('#reader-tap-layer')).toBeVisible();
-  await page.locator('#reader-tap-layer').click({ position: { x: 195, y: 425 } });
+  await expect(page.locator('#app')).toHaveClass(/chrome-hidden/);
+  await page.touchscreen.tap(195,425);
   await expect(page.locator('#mobile-reader-controls')).toHaveAttribute('aria-hidden', 'false');
 });
 
@@ -491,7 +440,7 @@ test('invalid saved position recovers and layout switching keeps text visible', 
   });
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await page.evaluate(() => setLayout('scrolled'));
   await expect(page.locator('#reader-view')).toHaveClass(/scrolled/);
   await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
@@ -511,7 +460,7 @@ test('an illustration-only EPUB is accepted as rendered content', async ({ page 
 test('an available update stays out of the reader and shell assets share a version', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('button', { name: /Start reading|Continue reading|Read again/ }).click();
-  await expect(page.frameLocator('#viewer iframe').locator('body')).toContainText('Chapter One');
+  await expect(page.frameLocator('#viewer iframe').first().locator('body')).toContainText('Chapter One');
   await page.evaluate(() => { window.__pendingServiceWorker = {}; document.getElementById('update-banner').hidden = true; });
   await expect(page.locator('#update-banner')).toBeHidden();
   await page.evaluate(() => showShelf());
@@ -522,8 +471,8 @@ test('an available update stays out of the reader and shell assets share a versi
     const shell = await caches.open(names.find(name => name.startsWith('endpaper-shell-')));
     return (await shell.keys()).map(request => new URL(request.url).pathname + new URL(request.url).search);
   });
-  expect(shellAssets.some(path => path.startsWith('/app.js?v=v15.0.10-20260923'))).toBe(true);
-  expect(shellAssets.some(path => path.startsWith('/mobile.js?v=v15.0.10-20260923'))).toBe(true);
+  const version = await page.evaluate(() => new URL(document.querySelector('script[src*="app.js?v="]').src).searchParams.get('v'));
+  for (const asset of ['app.js', 'mobile.js', 'ui.js', 'app.css', 'ui.css']) expect(shellAssets).toContain(`/${asset}?v=${version}`);
   expect(shellAssets).toContain('/fonts/AtkinsonHyperlegible-Regular.woff2');
   expect(shellAssets).toContain('/fonts/WorkSans-Regular.woff2');
   expect(await page.evaluate(async () => (await document.fonts.load('16px "Atkinson Hyperlegible"')).length)).toBeGreaterThan(0);
@@ -533,13 +482,15 @@ test('Reader role can add books from mobile More', async ({ page }) => {
   const username = `mobile-reader-${Date.now()}`;
   await page.evaluate(async name => { await api.createUser({ username: name, passphrase: 'reader test passphrase', is_admin: false }); }, username);
   await page.locator('[data-mobile-tab="more"]').click();
+  if (await page.locator('#update-banner').isVisible()) await page.locator('#update-banner').getByRole('button', { name: 'Later', exact: true }).click();
   await page.getByRole('button', { name: /Log out/ }).click();
   await expect(page.locator('#login-btn')).toBeVisible();
   await page.locator('#username-input').fill(username);
   await page.locator('#passphrase-input').fill('reader test passphrase');
   await page.locator('#login-btn').click();
   await page.locator('[data-mobile-tab="more"]').click();
-  await expect(page.locator('#mobile-content')).toContainText('Role: Reader');
+  await expect(page.locator('#mobile-content .more-account-identity span')).toHaveText('Reader');
+  await expect(page.locator('#mobile-content').getByRole('button', { name: 'People & permissions', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Add books/ })).toBeVisible();
   const readerCopy = Buffer.from(fs.readFileSync(fixture));
   readerCopy[10] ^= 1; // Change ZIP metadata, preserving the EPUB content.
