@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Unit, API and dependency checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  e2e:
+    name: Browser tests (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [webkit, chromium]
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npx playwright test
+        env:
+          ENDPAPER_E2E_BROWSER: ${{ matrix.browser }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-${{ matrix.browser }}
+          path: server/test-results
+          retention-days: 7
+
+  container:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t endpaper:ci ./server
+      - name: Start it the way docker-compose does
+        run: |
+          mkdir -p data
+          docker run -d --name endpaper -p 3000:3000 \
+            -v "$PWD/data:/app/data" -v "$PWD/public:/app/public:ro" endpaper:ci
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3000/healthz && break
+            sleep 1
+          done
+      - name: Serves the frontend and keeps data in the mounted folder
+        run: |
+          curl -sf http://127.0.0.1:3000/healthz
+          curl -sf http://127.0.0.1:3000/ | grep -q '<title>Endpaper'
+          test -f data/endpaper.db
+          test -d data/books
+      - name: Container logs
+        if: always()
+        run: docker logs endpaper

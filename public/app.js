@@ -123,6 +123,18 @@ const api = {
     return { ...(firstPayload || {}), books, page: 1, totalPages: 1 };
   },
 
+  async uploadCover(id, file, opts = {}) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await this.fetch(`/api/books/${id}/cover`, { ...opts, method: 'POST', body: formData });
+    return res.json();
+  },
+
+  async lookupIsbn(id, isbn, opts = {}) {
+    const res = await this.fetch(`/api/books/${id}/lookup?isbn=${encodeURIComponent(isbn)}`, opts);
+    return res.json();
+  },
+
   async uploadBook(file) {
     const formData = new FormData();
     formData.append('file', file);
@@ -237,6 +249,11 @@ const api = {
     return res.json();
   },
 
+  async updateBookmark(id, data, opts = {}) {
+    const res = await this.fetch(`/api/bookmarks/${id}`, { ...opts, method: 'PATCH', body: JSON.stringify(data) });
+    return res.json();
+  },
+
   async removeBookmark(id, opts = {}) {
     await this.fetch(`/api/bookmarks/${id}`, { ...opts, method: 'DELETE' });
   },
@@ -247,8 +264,17 @@ const api = {
   },
 
   async getAllHighlights(query = '', opts = {}) {
-    const res = await this.fetch(`/api/highlights?q=${encodeURIComponent(query)}`, opts);
-    return res.json();
+    // The server pages results; fetch every page for the notebook.
+    const rows = [];
+    for (let offset = 0; ; ) {
+      const res = await this.fetch(`/api/highlights?q=${encodeURIComponent(query)}&limit=500&offset=${offset}`, opts);
+      const page = await res.json();
+      rows.push(...page);
+      const total = Number(res.headers.get('X-Total-Count'));
+      offset += page.length;
+      if (!page.length || !Number.isFinite(total) || offset >= total) break;
+    }
+    return rows;
   },
 
   async addHighlight(bookId, data, opts = {}) {
@@ -311,6 +337,26 @@ const api = {
     });
     return res.json();
   },
+
+  async changeOwnPassphrase(current, next) {
+    const res = await this.fetch('/api/account/passphrase', { method: 'POST', body: JSON.stringify({ current, next }) });
+    return res.json();
+  },
+
+  async getAccountSessions() {
+    const res = await this.fetch('/api/account/sessions');
+    return (await res.json()).sessions || [];
+  },
+
+  async revokeAccountSession(id) {
+    const res = await this.fetch(`/api/account/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return res.json();
+  },
+
+  async revokeOtherAccountSessions() {
+    const res = await this.fetch('/api/account/sessions/revoke-others', { method: 'POST' });
+    return res.json();
+  },
 };
 
 /* ---------------- State ---------------- */
@@ -333,29 +379,40 @@ let seekLockUntil = 0;
 let lastReaderInteractionAt = 0;
 const DEFAULT_READING_WORDS_PER_MINUTE = 238;
 let personalReadingWordsPerMinute = DEFAULT_READING_WORDS_PER_MINUTE;
-const CLIENT_ID = sessionStorage.getItem('endpaper_client_id') || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+// crypto.randomUUID only exists in secure contexts (HTTPS or localhost), but
+// getRandomValues also works on plain-HTTP deployments such as a Tailscale IP.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function uuidV4(){
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+const CLIENT_ID = sessionStorage.getItem('endpaper_client_id') || uuidV4();
 sessionStorage.setItem('endpaper_client_id', CLIENT_ID);
 
+// showToast(message) for news, showToast(message, 'error') for a failure, or
+// showToast(message, { text, onClick }) to offer an action such as Undo.
 function showToast(message, action = null) {
   const toast = document.getElementById('toast');
+  const isError = action === 'error';
+  if (isError) action = null;
   toast.innerHTML = '';
+  toast.classList.toggle('error', isError);
+  // Errors interrupt assistive technology; ordinary news waits its turn.
+  toast.setAttribute('role', isError ? 'alert' : 'status');
+  toast.setAttribute('aria-live', isError ? 'assertive' : 'polite');
   const textSpan = document.createElement('span');
   textSpan.textContent = message;
   toast.appendChild(textSpan);
 
   if (action && action.text && action.onClick) {
     const actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
     actionBtn.className = 'toast-action-btn';
     actionBtn.textContent = action.text;
-    actionBtn.style.marginLeft = '12px';
-    actionBtn.style.padding = '2px 8px';
-    actionBtn.style.borderRadius = '4px';
-    actionBtn.style.border = '1px solid currentColor';
-    actionBtn.style.background = 'transparent';
-    actionBtn.style.color = 'inherit';
-    actionBtn.style.cursor = 'pointer';
-    actionBtn.style.font = 'inherit';
-    actionBtn.style.fontWeight = '600';
     actionBtn.onclick = (e) => {
       e.stopPropagation();
       toast.classList.remove('show');
@@ -366,7 +423,7 @@ function showToast(message, action = null) {
 
   toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => toast.classList.remove('show'), action ? 5000 : 3200);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), action || isError ? 5000 : 3200);
 }
 
 function isCurrentUserAdmin() {
@@ -467,7 +524,63 @@ const DEFAULT_READER_SETTINGS = Object.freeze({
   letterSpacingIdx: 0,
   layout: 'paginated',
   gestures: { swipe: true, edge: true, center: true },
+  justify: false,
+  hyphenate: false,
+  fontWeight: 400,
+  spread: 'auto',
+  bookOverrides: {},
 });
+
+// Typesetting a reader can keep for one book only (theme stays global).
+const PER_BOOK_SETTING_KEYS = ['font', 'fontSize', 'lineHeight', 'marginIdx', 'letterSpacingIdx', 'justify', 'hyphenate', 'fontWeight', 'spread'];
+const READER_FONT_WEIGHTS = [400, 500, 600];
+// While a book with its own settings is open, the global values wait here.
+let readerGlobalSettings = null;
+
+function pickReaderSettings(source) {
+  return Object.fromEntries(PER_BOOK_SETTING_KEYS.map(key => [key, source[key]]));
+}
+
+// The settings that are saved: global values plus every book's overrides,
+// never the per-book values that happen to be active right now.
+function persistableSettings() {
+  return { ...settings, ...(readerGlobalSettings || {}), bookOverrides: { ...(settings.bookOverrides || {}) } };
+}
+
+function applyBookOverrides(bookId) {
+  restoreGlobalReaderSettings();
+  const readerTitle = document.getElementById('reader-topbar-title');
+  if (readerTitle) readerTitle.textContent = '';
+  const overrides = settings.bookOverrides?.[bookId];
+  if (!overrides) return;
+  readerGlobalSettings = pickReaderSettings(settings);
+  Object.assign(settings, overrides);
+  normalizeSettings();
+}
+
+function restoreGlobalReaderSettings() {
+  if (!readerGlobalSettings) return;
+  Object.assign(settings, readerGlobalSettings);
+  readerGlobalSettings = null;
+}
+
+function setBookSpecificSettings(enabled) {
+  const bookId = currentBookId;
+  if (!bookId) return;
+  settings.bookOverrides = { ...(settings.bookOverrides || {}) };
+  if (enabled) {
+    if (!readerGlobalSettings) readerGlobalSettings = pickReaderSettings(settings);
+    settings.bookOverrides[bookId] = pickReaderSettings(settings);
+    showToast('This book now keeps its own text settings.');
+  } else {
+    delete settings.bookOverrides[bookId];
+    restoreGlobalReaderSettings();
+    renderFontOptions();
+    if (rendition) rendition.spread?.(settings.spread === 'none' ? 'none' : 'auto');
+    showToast('This book uses your usual text settings again.');
+  }
+  applyTheme();
+}
 
 const settings = { ...DEFAULT_READER_SETTINGS };
 
@@ -479,16 +592,22 @@ const FONTS = [
   { name: 'Monospace', css: '"Courier New", monospace' },
 ];
 
+// Dark pages stay off pure black (#000/#fff causes halation on long reads).
+// `paper` keeps its key for saved settings but is a dark graphite page.
+// `light` marks pages that need darker, multiplied highlights.
 const THEMES = {
-  original: { body: '#050505', text: '#F7F5F1', link: '#D9B67A' },
-  quiet: { body: '#080808', text: '#A8A5A1', link: '#B79C78' },
-  paper: { body: '#29292B', text: '#F1EFEB', link: '#D4AF77' },
-  bold: { body: '#060606', text: '#FFFFFF', link: '#E7BF81', weight: 600 },
-  calm: { body: '#443B31', text: '#F1E1CB', link: '#E8C49A' },
-  focus: { body: '#242017', text: '#EEE6D5', link: '#D9B97F' },
+  original: { label: 'Original', body: '#111110', text: '#F2EFE9', link: '#D9B67A' },
+  quiet: { label: 'Quiet', body: '#131312', text: '#A8A5A1', link: '#B79C78' },
+  paper: { label: 'Graphite', body: '#29292B', text: '#F1EFEB', link: '#D4AF77' },
+  bold: { label: 'Bold', body: '#0F0F0F', text: '#F5F5F2', link: '#E7BF81', weight: 600 },
+  calm: { label: 'Calm', body: '#443B31', text: '#F1E1CB', link: '#E8C49A' },
+  focus: { label: 'Focus', body: '#242017', text: '#EEE6D5', link: '#D9B97F' },
+  light: { label: 'Light', body: '#FAF7F0', text: '#221E18', link: '#8A5A1E', light: true },
+  sepia: { label: 'Sepia', body: '#F1E4CA', text: '#3A2E21', link: '#87561B', light: true },
+  white: { label: 'Paper white', body: '#FFFFFF', text: '#121212', link: '#7A4F14', light: true },
 };
 
-const LEGACY_READER_THEMES = { light: 'paper', sepia: 'calm', dark: 'paper', night: 'original' };
+const LEGACY_READER_THEMES = { dark: 'paper', night: 'original' };
 
 // Many EPUBs hard-code foreground colours on individual text elements. Keep
 // the override deliberately text-only so page art and SVG illustrations retain
@@ -500,7 +619,6 @@ const MARGIN_PADDING = ['4%', '10%', '18%'];
 const SPACING_LABELS = ['Normal', 'Relaxed', 'Loose', 'Airy'];
 const SPACING_VALUES = ['normal', '0.5px', '1px', '1.6px'];
 
-const spineColors = ['#3F5D4C','#7A3B32','#3B4A6B','#6B4C3B','#5B3F5D','#2C4237','#8A6A2F','#43506B'];
 
 function normalizeSettings() {
   settings.theme = Object.hasOwn(LEGACY_READER_THEMES, settings.theme)
@@ -513,6 +631,11 @@ function normalizeSettings() {
   settings.letterSpacingIdx = Number.isInteger(settings.letterSpacingIdx) ? Math.max(0, Math.min(SPACING_VALUES.length - 1, settings.letterSpacingIdx)) : 0;
   if (!['paginated', 'scrolled'].includes(settings.layout)) settings.layout = 'paginated';
   settings.gestures = { swipe: true, edge: true, center: true, ...(settings.gestures || {}) };
+  settings.justify = settings.justify === true;
+  settings.hyphenate = settings.hyphenate === true;
+  settings.fontWeight = READER_FONT_WEIGHTS.includes(Number(settings.fontWeight)) ? Number(settings.fontWeight) : 400;
+  settings.spread = settings.spread === 'none' ? 'none' : 'auto';
+  if (!settings.bookOverrides || typeof settings.bookOverrides !== 'object' || Array.isArray(settings.bookOverrides)) settings.bookOverrides = {};
 }
 
 /* ---------------- Auth gate ---------------- */
@@ -603,7 +726,34 @@ function showLoginGate() {
 
 function hideLoginGate() {
   document.getElementById('login-gate').classList.add('hidden');
+  setPassphraseVisible(false);
 }
+
+function setPassphraseVisible(visible) {
+  const input = document.getElementById('passphrase-input');
+  const toggle = document.getElementById('passphrase-visibility');
+  if (!input || !toggle) return;
+  input.type = visible ? 'text' : 'password';
+  toggle.textContent = visible ? 'Hide' : 'Show';
+  toggle.setAttribute('aria-pressed', String(visible));
+  toggle.setAttribute('aria-label', visible ? 'Hide passphrase' : 'Show passphrase');
+}
+
+document.getElementById('passphrase-visibility')?.addEventListener('click', () => {
+  setPassphraseVisible(document.getElementById('passphrase-input').type === 'password');
+  document.getElementById('passphrase-input').focus();
+});
+
+// Warn about Caps Lock while typing a passphrase; it is the usual cause of a "wrong" passphrase.
+for (const type of ['keydown', 'keyup']) {
+  document.getElementById('passphrase-input')?.addEventListener(type, event => {
+    if (typeof event.getModifierState !== 'function') return;
+    document.getElementById('caps-lock-warning').hidden = !event.getModifierState('CapsLock');
+  });
+}
+document.getElementById('passphrase-input')?.addEventListener('blur', () => {
+  document.getElementById('caps-lock-warning').hidden = true;
+});
 
 async function handleLogin(e) {
   e.preventDefault();
@@ -613,6 +763,9 @@ async function handleLogin(e) {
   const passIn = document.getElementById('passphrase-input');
   const username = userIn.value.trim();
   const passphrase = passIn.value;
+  const codeRow = document.getElementById('login-code-row');
+  const codeIn = document.getElementById('login-code-input');
+  const code = codeRow && !codeRow.hidden ? codeIn.value.trim() : '';
 
   if (!username) { errEl.textContent = 'Please enter a username.'; return false; }
   if (!passphrase) { errEl.textContent = 'Please enter a passphrase.'; return false; }
@@ -625,12 +778,13 @@ async function handleLogin(e) {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, passphrase }),
+      body: JSON.stringify(code ? { username, passphrase, code } : { username, passphrase }),
     });
 
     if (res.ok) {
       userIn.value = '';
       passIn.value = '';
+      if (codeRow) { codeRow.hidden = true; codeIn.value = ''; }
       const session = await refreshCurrentUser();
       if (!session) {
         errEl.textContent = 'Your session could not be started. Please try again.';
@@ -643,6 +797,12 @@ async function handleLogin(e) {
       const data = await res.json().catch(() => ({}));
       if (res.status === 503 && data.error === 'Offline' && await unlockOfflineSnapshot(username, passphrase)) {
         userIn.value = ''; passIn.value = '';
+      } else if (data.totp_required && codeRow) {
+        // Passphrase accepted; this account also needs its authenticator code.
+        codeRow.hidden = false;
+        errEl.textContent = data.error;
+        codeIn.value = '';
+        codeIn.focus();
       } else errEl.textContent = data.error || 'Incorrect passphrase.';
     }
   } catch (err) {
@@ -717,6 +877,13 @@ document.body.addEventListener('drop', e => {
   }
 });
 document.getElementById('file-input').addEventListener('change', e => handleFiles(e.target.files));
+// A folder (for example a Calibre library) uploads every EPUB inside it.
+document.getElementById('folder-input')?.addEventListener('change', e => {
+  const files = [...(e.target.files || [])].filter(file => file.name.toLowerCase().endsWith('.epub'));
+  if (!files.length) showToast('That folder has no EPUB files.');
+  else handleFiles(files);
+  e.target.value = '';
+});
 
 async function handleFiles(fileList){
   const files = Array.from(fileList || []);
@@ -754,13 +921,15 @@ async function handleFiles(fileList){
         series: bookData.series || null,
         seriesIndex: bookData.series_index != null && bookData.series_index !== '' ? bookData.series_index : null,
         rating: bookData.rating != null ? Number(bookData.rating) : null,
-        coverColor: bookData.cover_color,
+        coverColor: safeCoverColor(bookData.cover_color),
         coverPath: bookData.cover_path,
-        description: bookData.description || '',
+        description: plainDescription(bookData.description),
         isbn: bookData.isbn || '',
         tags: bookData.tags || '',
         progress: bookData.progress_percent || 0,
         status: bookData.status || 'unread',
+        wantToRead: Boolean(bookData.want_to_read),
+        userTags: Array.isArray(bookData.user_tags) ? bookData.user_tags : [],
         lastLocationCfi: bookData.last_location_cfi,
         fileSize: Number(bookData.file_size) || file.size || 0,
         wordCount: Number(bookData.word_count) || 0,
@@ -772,6 +941,10 @@ async function handleFiles(fileList){
       library.push(entry);
       renderShelf();
       lastAddedBookId = entry.id;
+      if (bookData.possible_duplicate) {
+        const duplicate = bookData.possible_duplicate;
+        showToast(`“${entry.name}” looks like “${duplicate.title}”, which is already in the library.`, { text: 'Compare', onClick: () => openBookDetails(duplicate.id) });
+      }
       uploaded++;
       uploadRows[i].textContent = `${file.name} — added`;
     } catch(err) {
@@ -838,10 +1011,40 @@ function scheduleBookWarmup(entry) {
 
 function formatSeriesText(series, seriesIndex) {
   if (!series) return '';
+  const count = library.filter(entry => entry.series === series).length;
   if (seriesIndex != null && seriesIndex !== '') {
-    return `Book ${seriesIndex} of ${series}`;
+    return count > 1 ? `Book ${seriesIndex} of ${count} in ${series}` : `Book ${seriesIndex} of ${series}`;
   }
-  return series;
+  return count > 1 ? `${series} (${count} books)` : series;
+}
+
+// Status shown on a cover: finished, how far in, or saved for later.
+function shelfStatusLabel(entry) {
+  const status = readingStatus(entry);
+  if (status === 'finished') return 'Finished';
+  const progress = Math.round(Math.max(0, Math.min(100, Number(entry.progress) || 0)));
+  if (progress > 0) return `${progress}%`;
+  if (entry.wantToRead) return 'Want to read';
+  return '';
+}
+
+// Personal tags appear in the library filter as "Your tags".
+function syncUserTagFilter() {
+  const group = document.getElementById('shelf-filter-user-tags');
+  if (!group) return;
+  const tags = [...new Set(library.flatMap(entry => entry.userTags || []))].sort((a, b) => a.localeCompare(b));
+  const select = document.getElementById('shelf-filter');
+  const current = select.value;
+  group.replaceChildren(...tags.map(tag => new Option(tag, `utag:${tag}`)));
+  group.hidden = !tags.length;
+  if (current.startsWith('utag:') && !tags.includes(current.slice(5))) select.value = 'all';
+}
+
+function resetShelfFilters() {
+  document.getElementById('shelf-search').value = '';
+  document.getElementById('shelf-filter').value = 'all';
+  renderShelf();
+  document.getElementById('shelf-search').focus();
 }
 
 function renderRatingHtml(bookId, currentRating) {
@@ -850,10 +1053,19 @@ function renderRatingHtml(bookId, currentRating) {
   for (let i = 1; i <= 5; i++) {
     const filled = i <= r ? ' filled' : '';
     const label = `Rate ${i} star${i > 1 ? 's' : ''}`;
-    stars += `<button type="button" class="star-btn${filled}" title="${label}" aria-label="${label}" aria-pressed="${i <= r}" onclick="event.stopPropagation(); setBookRating('${bookId}', ${i === r ? 'null' : i})">${controlIconMarkup('star')}</button>`;
+    stars += `<button type="button" class="star-btn${filled}" title="${label}" aria-label="${label}" aria-pressed="${i <= r}" data-rating-book="${escapeHtml(bookId)}" data-rating="${i === r ? '' : i}">${controlIconMarkup('star')}</button>`;
   }
   return `<div class="rating-stars" role="group" aria-label="Book rating">${stars}</div>`;
 }
+
+// Star buttons are rendered as markup in several places. Handle them in the
+// capture phase so the click never reaches a parent card's own click handler.
+document.addEventListener('click', event => {
+  const star = event.target.closest?.('.star-btn[data-rating-book]');
+  if (!star) return;
+  event.stopPropagation();
+  setBookRating(star.dataset.ratingBook, star.dataset.rating ? Number(star.dataset.rating) : null);
+}, true);
 
 const ratingWrites = new Map();
 
@@ -866,6 +1078,11 @@ function refreshRatingUI(bookId) {
   if (activeOrganizeBookId === bookId) {
     const container = document.querySelector('#collection-list .rating-stars');
     if (container) container.outerHTML = renderRatingHtml(bookId, library.find(item => item.id === bookId)?.rating);
+  }
+  const details = document.querySelector('#book-details-content .book-details-rating');
+  if (details && details.querySelector(`[data-rating-book="${CSS.escape(bookId)}"]`)) {
+    details.innerHTML = renderRatingHtml(bookId, library.find(item => item.id === bookId)?.rating);
+    if (focusLabel && !focusedBook) [...details.querySelectorAll('.star-btn')].find(star => star.getAttribute('aria-label') === focusLabel)?.focus({ preventScroll: true });
   }
   if (focusLabel) {
     const scope = focusedBook ? document.querySelector(`[data-book-id="${CSS.escape(focusedBook)}"]`) : document.getElementById(focusSurface);
@@ -928,10 +1145,36 @@ async function removeBook(id){
   }
 }
 
+// Safe for both text content and quoted attribute values.
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+// Human file sizes: "640 KB", "2.4 MB". Small books no longer show as "0.0 MB".
+function formatBytes(bytes){
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  if (value < 1024 ** 3) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${(value / 1024 ** 3).toFixed(2)} GB`;
+}
+
+// cover_color is interpolated into style attributes, so only allow hex colours.
+function safeCoverColor(value){
+  if (!/^#[0-9a-f]{3,8}$/i.test(value || '')) return '#554a3b';
+  // Books stored with the old ochre placeholder get the darker shade, so the title passes 4.5:1.
+  return value.toUpperCase() === '#8A6A2F' ? '#755926' : value;
+}
+
+// EPUB descriptions are often HTML. DOMParser documents are inert (no scripts
+// or image loads), so this safely turns them into plain text with paragraphs.
+function plainDescription(value){
+  const text = String(value || '');
+  if (!/<\/?[a-z][^>]*>/i.test(text)) return text;
+  const html = text.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(?:p|div|li|h[1-6]|blockquote)>/gi, '$&\n\n');
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return (doc.body.textContent || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function escapeHtml(str){
-  const d = document.createElement('div');
-  d.textContent = str || '';
-  return d.innerHTML;
+  return String(str || '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
 }
 
 async function showShelf(){
@@ -940,6 +1183,8 @@ async function showShelf(){
   const saveAccountVersion = accountVersion;
   // Tear down first, so a late EPUB/network callback cannot revive this reader.
   discardReaderState();
+  refreshRecentlyHighlighted(saveAccountVersion);
+  refreshHomeGoals(saveAccountVersion);
   if (window.__pendingServiceWorker) document.getElementById('update-banner').hidden = false;
   renderShelf();
   updateRoleAwareControls();
@@ -1020,7 +1265,7 @@ function renditionOptions(){
       allowScriptedContent: true,
     };
   }
-  return { width: '100%', height: '100%', flow: 'paginated', spread: 'auto', allowScriptedContent: true };
+  return { width: '100%', height: '100%', flow: 'paginated', spread: settings.spread === 'none' ? 'none' : 'auto', allowScriptedContent: true };
 }
 
 function setLayout(mode){
@@ -1107,10 +1352,12 @@ function applyReaderContentStyles(contents) {
     }
     body {
       margin: 0 !important;
-      font-weight: ${theme.weight || 400} !important;
+      font-weight: ${theme.weight || settings.fontWeight || 400} !important;
       ${isScrolled ? 'padding-top: 14px !important; padding-bottom: 80px !important;' : 'padding-top: 0 !important; padding-bottom: 0 !important;'}
     }
-    ${theme.weight ? `body p, body li, body blockquote { font-weight: ${theme.weight} !important; }` : ''}
+    ${theme.weight || settings.fontWeight > 400 ? `body p, body li, body blockquote { font-weight: ${theme.weight || settings.fontWeight} !important; }` : ''}
+    ${settings.justify ? 'p, li, blockquote { text-align: justify !important; }' : ''}
+    ${settings.hyphenate ? 'p, li, blockquote { hyphens: auto !important; -webkit-hyphens: auto !important; }' : ''}
     body p, body div, body span, body li, body dd, body dt, body blockquote, body figcaption, body td, body th, body h1, body h2, body h3, body h4, body h5, body h6 {
       color: inherit !important;
       background-color: transparent !important;
@@ -1224,6 +1471,10 @@ function registerSwipeGestures(){
     const win = contents.window || (doc && doc.defaultView);
     applyReaderContentStyles(contents);
     doc.addEventListener('keydown', handleReaderShortcut);
+    doc.addEventListener('mousemove', event => {
+      const frame = win && win.frameElement;
+      revealReaderChromeNearEdge(event.clientY + (frame ? frame.getBoundingClientRect().top : 0));
+    }, { passive: true });
 
     let sx = 0, sy = 0, st = 0, moved = false, handled = false;
     const onTouchStart = (e) => {
@@ -1491,6 +1742,7 @@ function isReaderInteractionOpen() {
     document.querySelector('dialog[open]') ||
     document.querySelector('.modal.show') ||
     document.activeElement?.closest('#topbar, #mobile-reader-controls, #progress-bar') ||
+    document.querySelector('#topbar:hover, #progress-bar:hover') ||
     pendingHighlightContext
   );
 }
@@ -1516,6 +1768,44 @@ function showReaderChromeTemporarily(delay = 3000) {
       enterImmersiveReading();
     }
   }, delay);
+}
+
+/* Desktop (mouse) readers: moving the pointer to the top or bottom edge reveals
+   the controls, like a video player, and hovering them keeps them up. Moves in
+   the middle of the page are ignored so a resting hand does not flash them. */
+const FINE_POINTER_QUERY = window.matchMedia?.('(hover: hover) and (pointer: fine)');
+const CHROME_EDGE_PX = 96;
+let lastEdgeReveal = 0;
+function revealReaderChromeNearEdge(clientY){
+  if (!FINE_POINTER_QUERY?.matches || !document.body.classList.contains('reader-active')) return;
+  if (clientY > CHROME_EDGE_PX && clientY < window.innerHeight - CHROME_EDGE_PX) return;
+  const now = Date.now();
+  if (now - lastEdgeReveal < 250) return;
+  lastEdgeReveal = now;
+  showReaderChromeTemporarily();
+}
+document.addEventListener('mousemove', event => revealReaderChromeNearEdge(event.clientY), { passive: true });
+
+// The bars float over the page (R-13). On desktop, inset the page by their
+// height so they never cover the first or last lines; the inset is constant,
+// so toggling the controls still never resizes the book.
+if (window.ResizeObserver) {
+  const insets = { topbar: '--reader-topbar-h', 'progress-bar': '--reader-progress-h' };
+  const insetObserver = new ResizeObserver(entries => {
+    let changed = false;
+    for (const entry of entries) {
+      const name = insets[entry.target.id];
+      // Hidden bars collapse to zero height; keep the last visible size.
+      if (entry.target.offsetHeight === 0) continue;
+      const value = `${Math.round(entry.target.offsetHeight)}px`;
+      if (document.documentElement.style.getPropertyValue(name) !== value) {
+        document.documentElement.style.setProperty(name, value);
+        changed = true;
+      }
+    }
+    if (changed && FINE_POINTER_QUERY?.matches) scheduleReaderResize();
+  });
+  Object.keys(insets).forEach(id => { const element = document.getElementById(id); if (element) insetObserver.observe(element); });
 }
 
 function toggleReaderChrome(){
@@ -1713,18 +2003,12 @@ function bindRenditionInteractions(entry, targetRendition, request) {
   if (!targetRendition) return;
   const active = () => isReaderRequestCurrent(request, book, targetRendition);
   targetRendition.on('selected', (cfi, contents) => { if (active()) onTextSelected(entry, cfi, contents); });
-  targetRendition.on('selected', (cfiRange, contents) => {
+  // Definitions come from a third-party service, so only the explicit Define
+  // action looks a word up. A new selection just dismisses an old definition.
+  targetRendition.on('selected', () => {
     if (!active()) return;
-    targetRendition.book.getRange(cfiRange).then((range) => {
-      const text = range.toString().trim();
-      if (text && !text.includes(' ')) {
-        const rect = contents.window.getSelection().getRangeAt(0).getBoundingClientRect();
-        lookupDictionary(text, rect.left + 50, rect.bottom + 50);
-      } else {
-        const tooltip = document.getElementById('dict-tooltip');
-        if (tooltip) tooltip.classList.add('hidden');
-      }
-    });
+    const tooltip = document.getElementById('dict-tooltip');
+    if (tooltip) tooltip.classList.add('hidden');
   });
   targetRendition.on('markClicked', (cfi) => { if (active()) onHighlightClicked(entry, cfi); });
   targetRendition.on('mousedown', () => { if (active()) hideHighlightPopup(); });
@@ -1752,6 +2036,8 @@ async function openBook(id){
     if (!currentUser) return;
   }
 
+  applyBookOverrides(id);
+  document.getElementById('reader-topbar-title').textContent = entry.author ? `${entry.name} — ${entry.author}` : entry.name;
   const request = createReaderRequest(id);
   readerNavigationReady = false;
   readerNavigationTail = Promise.resolve();
@@ -1884,7 +2170,7 @@ async function openBook(id){
   Promise.all([api.getBookmarks(id, requestOptions), api.getHighlights(id, requestOptions)]).then(([bookmarks, highlights]) => {
     if (!isReaderBookCurrent(request, targetBook)) return;
     entry.annotationLoadFailed = false;
-    entry.bookmarks = bookmarks.map(bm => ({ id: bm.id, cfi: bm.cfi, chapter: bm.chapter || bm.label || 'Untitled section', pct: bm.progress_percent || 0, addedAt: bm.created_at ? new Date(bm.created_at).getTime() : Date.now() }));
+    entry.bookmarks = bookmarks.map(bm => ({ id: bm.id, cfi: bm.cfi, chapter: bm.chapter || bm.label || 'Untitled section', label: bm.label && bm.label !== bm.chapter ? bm.label : '', note: bm.note || '', pct: bm.progress_percent || 0, addedAt: bm.created_at ? new Date(bm.created_at).getTime() : Date.now() }));
     entry.highlights = highlights.map(hl => ({ id: hl.id, cfi: hl.cfi_range, color: hl.color || 'gold', excerpt: hl.excerpt || '', note: hl.note || '', tags: hl.tags || [], chapter: hl.chapter || 'Untitled section', addedAt: hl.created_at ? new Date(hl.created_at).getTime() : Date.now() }));
     renderBookmarks(); renderBookmarkTicks(); renderHighlights(); applySavedHighlights(entry, rendition); updateBookmarkIcon();
   }).catch(error => { if (isReaderBookCurrent(request, targetBook) && !isAbortError(error)) { entry.annotationLoadFailed = true; console.error('Failed to load annotations:', error); } });
@@ -1922,8 +2208,13 @@ async function openBook(id){
         // a concurrent page render or search never loses its document/output.
         const processIndexSection = targetBook.locations.process.bind(targetBook.locations);
         targetBook.locations.process = section => {
+          // Leaving the reader destroys the book mid-run; EPUB.js would then append to a
+          // cleared location list and throw. Stop quietly once this book is no longer open.
+          if (!isReaderBookCurrent(request, targetBook)) return Promise.resolve([]);
           const isolated = new section.constructor({ ...section, linear: section.linear ? 'yes' : 'no' }, section.hooks);
-          return processIndexSection(isolated).finally(() => isolated.unload());
+          return processIndexSection(isolated)
+            .catch(error => { if (isReaderBookCurrent(request, targetBook)) throw error; return []; })
+            .finally(() => isolated.unload());
         };
         // EPUB.js already yields to an animation frame between chapters. Its
         // additional default 100 ms pause adds minutes to very long books.
@@ -2280,15 +2571,18 @@ function updateReaderLocation(entry, location, targetBook, targetRendition, requ
 
     const isSeekingLocked = isDraggingProgressSlider || Date.now() < seekLockUntil;
 
+    const previousProgress = entry.progress;
     if (calculatedPct !== null && !isSeekingLocked) {
       pct = Math.max(0, Math.min(100, calculatedPct));
       entry.progress = pct;
     }
 
-    // Auto-update status
-    if (pct != null && pct >= 98 && entry.status !== 'finished') { // R-22: 95→98
+    // Mirror the server: infer status only when the reader actually moved, so
+    // reopening a book marked unread does not flip it back to reading.
+    const progressMoved = pct != null && pct !== previousProgress;
+    if (progressMoved && pct >= 98 && entry.status !== 'finished') { // R-22: 95→98
       entry.status = 'finished';
-    } else if (pct != null && pct > 0 && entry.status === 'unread') {
+    } else if (progressMoved && pct > 0 && pct < 98 && entry.status === 'unread') {
       entry.status = 'reading';
     }
 
@@ -2462,7 +2756,7 @@ function renderBookmarks(){
   const list = document.getElementById('bookmarks-list');
   list.innerHTML = '';
   if (entry && entry.annotationLoadFailed && (!entry.bookmarks || entry.bookmarks.length === 0)) {
-    list.innerHTML = '<div class="bookmark-empty" style="color:#C14B4B;">Could not load bookmarks. Please try reopening the book.</div>';
+    list.innerHTML = '<div class="bookmark-empty inline-error">Could not load bookmarks. Please try reopening the book.</div>';
     return;
   }
   if (!entry || entry.bookmarks.length === 0){
@@ -2472,23 +2766,65 @@ function renderBookmarks(){
   entry.bookmarks.forEach(bm => {
     const item = document.createElement('div');
     item.className = 'bookmark-item';
-    item.innerHTML = `
-      <button type="button" class="bookmark-destination"><span class="bookmark-chapter">${escapeHtml(bm.chapter)}</span><span class="bookmark-pct">${bm.pct}% through the book</span></button>
-      <div class="bookmark-meta">
-        <button type="button" class="bookmark-remove" aria-label="Remove bookmark in ${escapeHtml(bm.chapter)}">Remove</button>
-      </div>
-    `;
-    item.querySelector('.bookmark-destination').onclick = () => {
-        if (getCurrentEntry() !== entry || !rendition) return;
-        navigateReader(bm.cfi);
-        toggleDrawer('bookmarks', true);
-      };
-    item.querySelector('.bookmark-remove').onclick = (e) => {
+    // Chapter labels come from the EPUB, so build this row without innerHTML.
+    const destination = document.createElement('button');
+    destination.type = 'button';
+    destination.className = 'bookmark-destination';
+    const chapter = document.createElement('span');
+    chapter.className = 'bookmark-chapter';
+    chapter.textContent = bm.label || bm.chapter || '';
+    const pct = document.createElement('span');
+    pct.className = 'bookmark-pct';
+    pct.textContent = `${bm.pct}% through the book`;
+    destination.append(chapter, pct);
+    if (bm.note) {
+      const note = document.createElement('span');
+      note.className = 'bookmark-note';
+      note.textContent = bm.note;
+      destination.appendChild(note);
+    }
+    destination.onclick = () => {
+      if (getCurrentEntry() !== entry || !rendition) return;
+      navigateReader(bm.cfi);
+      toggleDrawer('bookmarks', true);
+    };
+    const meta = document.createElement('div');
+    meta.className = 'bookmark-meta';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'bookmark-remove';
+    remove.setAttribute('aria-label', `Remove bookmark in ${bm.chapter || 'this book'}`);
+    remove.textContent = 'Remove';
+    remove.onclick = (e) => {
       e.stopPropagation();
       removeSavedBookmark(entry, bm);
     };
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'bookmark-remove bookmark-edit';
+    editButton.setAttribute('aria-label', `Rename or add a note to the bookmark in ${bm.chapter || 'this book'}`);
+    editButton.textContent = 'Edit';
+    editButton.onclick = (e) => { e.stopPropagation(); editSavedBookmark(entry, bm); };
+    meta.append(editButton, remove);
+    item.append(destination, meta);
     list.appendChild(item);
   });
+}
+
+async function editSavedBookmark(entry, bm) {
+  if (!bm.id || String(bm.id).startsWith('temp_')) { showToast('This bookmark is still syncing. Try again shortly.'); return; }
+  const expectedAccountVersion = accountVersion;
+  const saved = await openFormEditor({ title: 'Edit bookmark', fields: [
+    { name: 'label', label: 'Name', value: bm.label || bm.chapter || '' },
+    { name: 'note', label: 'Note', value: bm.note || '', multiline: true },
+  ], onSave: async values => {
+    const label = values.label.trim();
+    const updated = await api.updateBookmark(bm.id, { label: label && label !== bm.chapter ? label : null, note: values.note }, { expectedAccountVersion });
+    if (accountVersion !== expectedAccountVersion) return;
+    bm.label = updated.label || '';
+    bm.note = updated.note || '';
+  }});
+  if (saved && getCurrentEntry() === entry) { renderBookmarks(); renderBookmarkTicks(); }
 }
 
 function renderBookmarkTicks(){
@@ -2571,7 +2907,8 @@ function onTextSelected(entry, cfi, contents){
   if (!text) return;
   context.cfi = cfi;
   context.selectionText = text;
-  context.excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
+  // Store the whole passage (the server allows 1000 characters); lists clamp it for display.
+  context.excerpt = text.length > HIGHLIGHT_EXCERPT_MAX ? text.slice(0, HIGHLIGHT_EXCERPT_MAX - 1) + '…' : text;
   context.returnFocus = contents.document.defaultView && contents.document.defaultView.frameElement;
   pendingHighlightContext = context;
   highlightReturnFocus = context.returnFocus;
@@ -2585,6 +2922,8 @@ function onTextSelected(entry, cfi, contents){
     showHighlightPopup(iframeRect.left + rect.left + rect.width / 2, iframeRect.top + rect.top, false);
   } catch(e){ showHighlightPopup(window.innerWidth / 2, 90, false); }
 }
+
+const HIGHLIGHT_EXCERPT_MAX = 1000;
 
 function onHighlightClicked(entry, cfi){
   const context = createReaderMutationContext(entry);
@@ -2635,11 +2974,12 @@ function finishPendingHighlight(context, returnFocus = true){
 }
 
 function highlightStyle(color){
+  const lightPage = Boolean((THEMES[settings.theme] || THEMES.paper).light);
   return {
     fill: color,
-    'fill-opacity': '0.62',
-    // All six page palettes are dark; screen blending keeps highlights visible.
-    'mix-blend-mode': 'screen',
+    // Screen brightens dark pages; multiply keeps text legible on light ones.
+    'fill-opacity': lightPage ? '0.45' : '0.62',
+    'mix-blend-mode': lightPage ? 'multiply' : 'screen',
   };
 }
 
@@ -2754,7 +3094,7 @@ function renderHighlights(){
   const list = document.getElementById('highlights-list');
   list.innerHTML = '';
   if (entry && entry.annotationLoadFailed && (!entry.highlights || entry.highlights.length === 0)) {
-    list.innerHTML = '<div class="bookmark-empty" style="color:#C14B4B;">Could not load highlights. Please try reopening the book.</div>';
+    list.innerHTML = '<div class="bookmark-empty inline-error">Could not load highlights. Please try reopening the book.</div>';
     return;
   }
   if (!entry || entry.highlights.length === 0){
@@ -2874,7 +3214,7 @@ async function runSearch(query, requestVersion = ++searchRequestVersion){
       item.className = 'search-result';
       item.innerHTML = `
         <div class="search-chapter">${chapter ? escapeHtml(chapter.label.trim()) : ''}</div>
-        <div class="search-excerpt">${escapeHtml(r.excerpt).replace(re, '<mark>$1</mark>')}</div>
+        <div class="search-excerpt">${String(r.excerpt || '').split(re).map((part, i) => i % 2 ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part)).join('')}</div>
       `;
       item.onclick = () => {
         if (!isCurrentSearch()) return;
@@ -3107,11 +3447,36 @@ function applyTheme(){
   if (typeof rendition.getContents === 'function') {
     rendition.getContents().forEach(applyReaderContentStyles);
   }
+  if (currentBookId && settings.bookOverrides?.[currentBookId]) {
+    settings.bookOverrides = { ...settings.bookOverrides, [currentBookId]: pickReaderSettings(settings) };
+  }
   updateSettingsUI();
   saveSettings();
 }
 
+function setReaderSpread(twoPages) {
+  setReaderTypesetting('spread', twoPages ? 'auto' : 'none');
+}
+
+function setReaderTypesetting(key, value) {
+  settings[key] = value;
+  normalizeSettings();
+  if (key === 'spread' && rendition) {
+    try { rendition.spread(settings.spread === 'none' ? 'none' : 'auto'); } catch (_) {}
+  }
+  applyTheme();
+}
+
 function updateSettingsUI(){
+  const setChecked = (id, value) => { const input = document.getElementById(id); if (input) input.checked = value; };
+  setChecked('setting-justify', settings.justify);
+  setChecked('setting-hyphenate', settings.hyphenate);
+  setChecked('setting-spread', settings.spread !== 'none');
+  setChecked('setting-book-only', Boolean(currentBookId && settings.bookOverrides?.[currentBookId]));
+  const weight = document.getElementById('setting-font-weight');
+  if (weight) weight.value = String(settings.fontWeight);
+  const bookOnly = document.getElementById('setting-book-only-row');
+  if (bookOnly) bookOnly.hidden = !currentBookId;
   document.querySelectorAll('.layout-option').forEach(el => {
     const selected = el.dataset.layout === settings.layout;
     el.classList.toggle('active', selected);
@@ -3285,7 +3650,7 @@ function storeOfflineQueue(queue) {
 }
 
 async function resilientApiPost(url, body, isProgressSave = false, method = 'POST', opts = {}) {
-  const operationId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  const operationId = uuidV4();
   setSyncState(navigator.onLine ? 'saving' : 'offline');
   try {
     const headers = new Headers(opts.headers || {});
@@ -3325,7 +3690,8 @@ async function flushOfflineQueue() {
       try {
         await api.fetch(item.url, {
           method: item.method || 'POST',
-          headers: { 'Idempotency-Key': item.operationId },
+          // Older builds queued non-UUID keys on plain HTTP, which the server rejects.
+          headers: { 'Idempotency-Key': UUID_PATTERN.test(item.operationId || '') ? item.operationId : uuidV4() },
           body: JSON.stringify(item.body),
         });
       } catch (e) {
@@ -3346,13 +3712,27 @@ window.addEventListener('offline', () => setSyncState('offline', loadOfflineQueu
 
 let metaSaveTimer = null;
 let metaSaveAbortController = null;
+let pendingMetaSave = null;
 function scheduleSaveMeta(entry, request = activeReaderRequest){
   clearTimeout(metaSaveTimer);
   const expectedAccountVersion = request ? request.accountVersion : accountVersion;
-  metaSaveTimer = setTimeout(() => saveBookMeta(entry, { expectedAccountVersion, request }), 1200);
+  pendingMetaSave = { entry, expectedAccountVersion, request };
+  metaSaveTimer = setTimeout(() => {
+    pendingMetaSave = null;
+    saveBookMeta(entry, { expectedAccountVersion, request });
+  }, 1200);
 }
 
-async function saveBookMeta(entry, { expectedAccountVersion = accountVersion, request = null, allowInactiveReader = false } = {}){
+// Send a debounced progress save now; keepalive lets it outlive the page.
+function flushPendingMetaSave(){
+  if (!pendingMetaSave) return;
+  const { entry, expectedAccountVersion, request } = pendingMetaSave;
+  pendingMetaSave = null;
+  clearTimeout(metaSaveTimer);
+  saveBookMeta(entry, { expectedAccountVersion, request, keepalive: true });
+}
+
+async function saveBookMeta(entry, { expectedAccountVersion = accountVersion, request = null, allowInactiveReader = false, keepalive = false } = {}){
   if (!entry || !isActiveAccount(expectedAccountVersion)) return false;
   if (!allowInactiveReader && !isReaderRequestCurrent(request)) return false;
   if (metaSaveAbortController) metaSaveAbortController.abort();
@@ -3363,7 +3743,7 @@ async function saveBookMeta(entry, { expectedAccountVersion = accountVersion, re
       progress_percent: entry.progress,
       last_location_cfi: entry.lastLocationCfi,
       last_opened_at: new Date().toISOString(),
-    }, true, 'PATCH', { signal: controller.signal, expectedAccountVersion });
+    }, true, 'PATCH', { signal: controller.signal, expectedAccountVersion, keepalive });
     return true;
   } catch(e){
     if (!isAbortError(e) && isActiveAccount(expectedAccountVersion)) console.error('Could not save book meta', e);
@@ -3379,7 +3759,7 @@ async function saveSettings(){
   clearTimeout(settingsSaveTimer);
   scheduleOfflineSnapshot();
   const expectedAccountVersion = accountVersion;
-  const settingsSnapshot = { ...settings };
+  const settingsSnapshot = persistableSettings();
   settingsSaveTimer = setTimeout(async () => {
     if (!isActiveAccount(expectedAccountVersion)) return;
     if (settingsSaveAbortController) settingsSaveAbortController.abort();
@@ -3409,13 +3789,15 @@ async function loadLibraryFromStorage(expectedAccountVersion = accountVersion){
     series: b.series || null,
     seriesIndex: b.series_index != null && b.series_index !== '' ? b.series_index : null,
     rating: b.rating != null ? Number(b.rating) : null,
-    coverColor: b.cover_color,
+    coverColor: safeCoverColor(b.cover_color),
     coverPath: b.cover_path,
-    description: b.description || '',
+    description: plainDescription(b.description),
     isbn: b.isbn || '',
     tags: b.tags || '',
     progress: b.progress_percent || 0,
     status: b.status || 'unread',
+    wantToRead: Boolean(b.want_to_read),
+    userTags: Array.isArray(b.user_tags) ? b.user_tags : [],
     lastLocationCfi: b.last_location_cfi,
     fileSize: Number(b.file_size) || 0,
     wordCount: Number(b.word_count) || 0,
@@ -3443,12 +3825,14 @@ async function exportLibrary(){
   if (!requireAdmin('create a library backup')) return;
   // Native navigation lets the browser stream directly to disk instead of
   // buffering a potentially huge ZIP in JavaScript memory.
-  const link = document.createElement('a');
-  link.href = '/api/export';
-  link.download = '';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  // A form POST keeps that streaming download while keeping the endpoint POST-only.
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/api/export';
+  form.hidden = true;
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
 }
 
 document.getElementById('import-input').addEventListener('change', async (e) => {
@@ -3469,6 +3853,21 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
     return;
   }
   try {
+    // Dry run first, so the admin sees what will change before anything does.
+    const previewForm = new FormData();
+    previewForm.append('file', file);
+    const preview = await api.fetch('/api/import?dry_run=1', { method: 'POST', body: previewForm }).then(res => res.json());
+    const when = preview.exported_at ? new Date(preview.exported_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'an unknown date';
+    const lines = [
+      `Backup from ${when}: ${preview.books_total} book${preview.books_total === 1 ? '' : 's'}.`,
+      `${preview.books_new} new, ${preview.books_already_here} already in this library.`,
+      preview.collections_new ? `${preview.collections_new} new collection${preview.collections_new === 1 ? '' : 's'}.` : '',
+      `Reading data for ${preview.accounts_matched} matching account${preview.accounts_matched === 1 ? '' : 's'}${preview.accounts_unmatched ? `; ${preview.accounts_unmatched} account${preview.accounts_unmatched === 1 ? '' : 's'} not found here will be skipped` : ''}.`,
+      preview.adjustments?.length ? `${preview.adjustments.length} value${preview.adjustments.length === 1 ? '' : 's'} will be adjusted to fit.` : '',
+      'Existing books and reading data are kept; nothing is deleted.',
+    ].filter(Boolean);
+    const confirmed = await showConfirmDialog({ title: 'Import this backup?', message: lines.join(' '), confirmText: preview.books_new ? `Import ${preview.books_new} book${preview.books_new === 1 ? '' : 's'}` : 'Import', danger: false });
+    if (!confirmed) { e.target.value = ''; return; }
     const formData = new FormData();
     formData.append('file', file);
     const res = await api.fetch('/api/import', {
@@ -3482,7 +3881,13 @@ document.getElementById('import-input').addEventListener('change', async (e) => 
     renderFontOptions();
     renderShelf();
     updateSettingsUI();
-    showToast(result.restored_files ? `Backup imported (${result.restored_files} files restored).` : 'Backup imported.');
+    const adjusted = Array.isArray(result.adjustments) ? result.adjustments.length : 0;
+    if (adjusted) console.info('Backup values adjusted during import:', result.adjustments);
+    const details = [
+      result.restored_files ? `${result.restored_files} files restored` : '',
+      adjusted ? `${adjusted} value${adjusted === 1 ? '' : 's'} adjusted to fit` : '',
+    ].filter(Boolean).join(', ');
+    showToast(details ? `Backup imported (${details}).` : 'Backup imported.');
   } catch(err){
     console.error('Import failed', err);
     showToast(`Import failed: ${err.message}`);
@@ -3505,13 +3910,67 @@ if (window.visualViewport) window.visualViewport.addEventListener('resize', hand
 window.addEventListener('resize', handleViewportResize);
 window.addEventListener('orientationchange', handleViewportResize);
 
-// End reading session on page unload
-window.addEventListener('beforeunload', () => {
-  if (currentSessionId) {
-    // Use sendBeacon for reliable delivery
-    navigator.sendBeacon(`/api/sessions/${currentSessionId}/end`, '{}');
+/* Reading sessions only count time the reader is on screen. Mobile Safari and
+   installed PWAs rarely fire beforeunload, so end the session whenever the page
+   is hidden and start a fresh one when it comes back. A heartbeat lets the
+   server cap a session that was never ended at its last sign of life. */
+const SESSION_HEARTBEAT_MS = 60_000;
+let pausedReadingSession = null;
+
+function pauseReadingSession(){
+  flushPendingMetaSave();
+  if (!currentSessionId) return;
+  navigator.sendBeacon(`/api/sessions/${currentSessionId}/end`, '{}');
+  pausedReadingSession = { bookId: currentBookId, request: activeReaderRequest };
+  currentSessionId = null;
+}
+
+async function resumeReadingSession(){
+  const paused = pausedReadingSession;
+  pausedReadingSession = null;
+  if (!paused || currentSessionId || !isReaderRequestCurrent(paused.request) || currentBookId !== paused.bookId) return;
+  const opts = { expectedAccountVersion: paused.request.accountVersion };
+  try {
+    const session = await api.startSession(paused.bookId, opts);
+    if (!session || !session.id) return;
+    if (!currentSessionId && isReaderRequestCurrent(paused.request)) currentSessionId = session.id;
+    else api.endSession(session.id, opts).catch(() => {});
+  } catch (e) {
+    if (!isAbortError(e)) console.debug('Could not resume reading session:', e);
   }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') pauseReadingSession();
+  else resumeReadingSession();
 });
+window.addEventListener('pagehide', pauseReadingSession);
+window.addEventListener('beforeunload', pauseReadingSession);
+
+setInterval(() => {
+  if (!currentSessionId || document.visibilityState !== 'visible') return;
+  api.fetch(`/api/sessions/${currentSessionId}/heartbeat`, { method: 'POST' }).catch(() => {});
+}, SESSION_HEARTBEAT_MS);
+
+/* Skeleton placeholders shaped like the content they stand in for. The label
+   is announced once; the shapes themselves are hidden from assistive tech. */
+function loadingSkeleton(kind, count, label) {
+  const wrap = document.createElement('div');
+  wrap.className = `skeleton skeleton-${kind}`;
+  wrap.setAttribute('role', 'status');
+  const text = document.createElement('span');
+  text.className = 'sr-only';
+  text.textContent = label;
+  wrap.appendChild(text);
+  for (let index = 0; index < count; index++) {
+    const item = document.createElement('div');
+    item.className = 'skeleton-item';
+    item.setAttribute('aria-hidden', 'true');
+    item.innerHTML = kind === 'covers' ? '<span class="skeleton-cover"></span><span class="skeleton-line"></span><span class="skeleton-line short"></span>' : '<span class="skeleton-line"></span><span class="skeleton-line"></span><span class="skeleton-line short"></span>';
+    wrap.appendChild(item);
+  }
+  return wrap;
+}
 
 /* ---------------- Init ---------------- */
 async function boot(){
@@ -3524,7 +3983,7 @@ async function boot(){
   const dropzone = document.getElementById('dropzone');
   const emptyImportRow = document.getElementById('empty-import-row');
 
-  if (emptyP) emptyP.textContent = 'Loading the shared library…';
+  if (emptyP) emptyP.replaceChildren(loadingSkeleton('covers', 6, 'Loading the shared library…'));
   if (emptyDiv) emptyDiv.style.display = 'block';
   if (header) header.style.display = 'none';
   if (continueCard) continueCard.style.display = 'none';
@@ -3544,7 +4003,8 @@ async function boot(){
     if (header) header.style.display = 'none';
     if (continueCard) continueCard.style.display = 'none';
     if (emptyP) {
-      emptyP.innerHTML = '<div style="color:var(--ink); font-weight:500; margin-bottom:12px;">Could not load your library.</div><button type="button" class="file-link-btn" onclick="boot()" style="margin: 0 auto; display: inline-flex;">Retry</button>';
+      emptyP.innerHTML = '<div style="color:var(--ink); font-weight:500; margin-bottom:12px;">Could not load your library.</div><button type="button" class="file-link-btn" style="margin: 0 auto; display: inline-flex;">Retry</button>';
+      emptyP.querySelector('button').addEventListener('click', () => boot());
     }
     if (dropzone) dropzone.hidden = true;
     if (emptyImportRow) emptyImportRow.hidden = true;
@@ -3566,6 +4026,9 @@ async function boot(){
     personalReadingWordsPerMinute = pace >= 120 && pace <= 450 ? pace : DEFAULT_READING_WORDS_PER_MINUTE;
     renderShelf();
   }).catch(() => {});
+  refreshRecentlyHighlighted(bootAccountVersion);
+  refreshHomeGoals(bootAccountVersion);
+  window.restoreRouteFromHash?.();
   return true;
 }
 
@@ -3599,6 +4062,9 @@ function discardReaderState({ clearLibrary = false, resetPreferences = false } =
   searchRequestVersion += 1;
   clearTimeout(searchDebounce);
   clearTimeout(metaSaveTimer);
+  pendingMetaSave = null;
+  pausedReadingSession = null;
+  restoreGlobalReaderSettings();
   clearTimeout(settingsSaveTimer);
   if (typeof metaSaveAbortController !== 'undefined' && metaSaveAbortController) metaSaveAbortController.abort();
   if (typeof settingsSaveAbortController !== 'undefined' && settingsSaveAbortController) settingsSaveAbortController.abort();
@@ -3810,9 +4276,9 @@ async function openBookCollectionsModal(bookId) {
   
   if (book) {
     const ratingRow = document.createElement('div');
-    ratingRow.style.cssText = 'padding: 8px 4px 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border-soft); display: flex; align-items: center; justify-content: space-between;';
+    ratingRow.className = 'collection-rating-row';
     ratingRow.innerHTML = `
-      <span style="font-size:13px; font-weight:600; color:var(--ink);">Your Rating</span>
+      <span class="collection-rating-label">Your rating</span>
       ${renderRatingHtml(book.id, book.rating)}
     `;
     list.appendChild(ratingRow);
@@ -3820,7 +4286,7 @@ async function openBookCollectionsModal(bookId) {
 
   if (allCollections.length === 0) {
     const emptyMsg = document.createElement('div');
-    emptyMsg.style.cssText = 'color:var(--ink-soft); font-size:13px; font-style:italic; padding: 4px;';
+    emptyMsg.className = 'collection-empty';
     emptyMsg.textContent = 'No collections yet.';
     list.appendChild(emptyMsg);
   } else {
@@ -3828,7 +4294,9 @@ async function openBookCollectionsModal(bookId) {
       const isChecked = c.book_ids.includes(bookId);
       const row = document.createElement('label');
       row.className = 'collection-item';
-      row.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleBookCollection('${c.id}', this.checked)"> <span>${escapeHtml(c.name)}</span>`;
+      row.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''}> <span>${escapeHtml(c.name)}</span>`;
+      const checkbox = row.querySelector('input');
+      checkbox.addEventListener('change', () => toggleBookCollection(c.id, checkbox.checked));
       list.appendChild(row);
     });
   }
@@ -3890,9 +4358,10 @@ async function openCollectionsManager() {
   } catch (e) {
     console.error('Failed to load collections in manager:', e);
     list.innerHTML = `
-      <div style="color:#C14B4B; font-size:13px; margin-bottom:8px;">Could not load collections: ${escapeHtml(e.message)}</div>
-      <button type="button" class="file-link-btn" onclick="openCollectionsManager()">Retry</button>
+      <div class="inline-error" style="margin-bottom:8px;">Could not load collections: ${escapeHtml(e.message)}</div>
+      <button type="button" class="file-link-btn">Retry</button>
     `;
+    list.querySelector('.file-link-btn').addEventListener('click', () => openCollectionsManager());
   }
 }
 
@@ -3967,17 +4436,22 @@ async function deleteCollection(id, name) {
 
 async function renameCollection(id, currentName) {
   if (!requireAdmin('manage shared collections')) return;
-  const name = prompt('Collection name', currentName);
-  if (name === null || name.trim() === currentName) return;
-  try {
-    await api.renameCollection(id, name.trim());
-    await loadCollections();
-    openCollectionsManager();
-    showToast('Collection renamed.');
-  } catch (e) {
-    console.error('Failed to rename collection:', e);
-    showToast(`Could not rename collection: ${e.message}`);
-  }
+  const renamed = await openFormEditor({ title: 'Rename collection', submitLabel: 'Rename', fields: [
+    { name: 'name', label: 'Collection name', value: currentName, required: true },
+  ], onSave: async values => {
+    const name = values.name.trim();
+    if (!name) throw new Error('Enter a collection name.');
+    if (name.length > 80) throw new Error('Collection names can be at most 80 characters.');
+    if (name === currentName) return;
+    if (allCollections.some(item => item.id !== id && item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      throw new Error('Another collection already has that name.');
+    }
+    await api.renameCollection(id, name);
+  }});
+  if (!renamed) return;
+  await loadCollections().catch(() => {});
+  openCollectionsManager();
+  showToast('Collection renamed.');
 }
 
 async function createCollection() {
@@ -3998,6 +4472,48 @@ async function createCollection() {
   } catch(e) { console.error('Failed to create collection:', e); showToast(`Could not create collection: ${e.message}`); }
 }
 
+const AUDIT_ACTION_LABELS = {
+  'book.add': 'added', 'book.edit': 'edited details of', 'book.remove': 'removed', 'book.cover': 'changed the cover of',
+  'user.create': 'created the account', 'user.update': 'updated the account', 'user.remove': 'removed the account',
+  'collection.create': 'created the collection', 'collection.rename': 'renamed the collection', 'collection.remove': 'removed the collection',
+  'library.import': 'imported a backup', 'library.export': 'exported a backup',
+  'account.passphrase': 'changed their passphrase', 'account.app_key_create': 'created a reading-app key', 'account.app_key_revoke': 'revoked their reading-app key',
+  'account.two_factor_on': 'turned on two-step sign-in', 'account.two_factor_off': 'turned off two-step sign-in',
+};
+
+function describeAuditEntry(entry) {
+  const details = entry.details || {};
+  let extra = '';
+  if (details.fields) extra = ` (${details.fields.join(', ')})`;
+  else if (details.admin === true) extra = ' (admin)';
+  else if (details.passphrase_reset) extra = ' (passphrase reset)';
+  else if (details.to) extra = ` to “${details.to}”`;
+  const target = entry.target_label ? ` “${entry.target_label}”` : '';
+  return `${entry.username || 'Someone'} ${AUDIT_ACTION_LABELS[entry.action] || entry.action}${target}${extra}`;
+}
+
+async function renderAdminActivity() {
+  const list = document.getElementById('admin-activity-list');
+  if (!list) return;
+  list.replaceChildren(loadingSkeleton('rows', 3, 'Loading activity…'));
+  const message = text => { const item = document.createElement('li'); item.textContent = text; list.replaceChildren(item); };
+  try {
+    const { entries } = await api.fetch('/api/admin/audit?limit=50').then(res => res.json());
+    if (!entries.length) { message('No activity yet.'); return; }
+    list.replaceChildren(...entries.map(entry => {
+      const item = document.createElement('li');
+      const when = new Date(String(entry.at).replace(' ', 'T') + 'Z');
+      const time = document.createElement('time');
+      time.dateTime = when.toISOString();
+      time.textContent = when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+      const text = document.createElement('span');
+      text.textContent = describeAuditEntry(entry);
+      item.append(text, time);
+      return item;
+    }));
+  } catch (_) { message('Activity is unavailable right now.'); }
+}
+
 async function openAdminModal() {
   if (!requireAdmin('manage users')) return;
   const modal = document.getElementById('admin-modal');
@@ -4008,6 +4524,7 @@ async function openAdminModal() {
   modal.classList.add('show');
   modal.setAttribute('aria-hidden', 'false');
   await renderAdminUsers();
+  renderAdminActivity();
   if (modal.classList.contains('show')) {
     document.getElementById('new-user-username').focus({ preventScroll: true });
   }
@@ -4133,8 +4650,9 @@ async function renderAdminUsers() {
     });
   } catch (e) {
     const error = document.createElement('div');
-    error.style.cssText = 'color:#C14B4B; font-size:13px; padding:8px 0;';
-    error.innerHTML = `Could not load accounts: ${escapeHtml(e.message)} <button type="button" class="file-link-btn" style="margin-left:8px; display:inline-flex; vertical-align:middle;" onclick="renderAdminUsers()">Retry</button>`;
+    error.className = 'inline-error'; error.style.padding = '8px 0';
+    error.innerHTML = `Could not load accounts: ${escapeHtml(e.message)} <button type="button" class="file-link-btn" style="margin-left:8px; display:inline-flex; vertical-align:middle;">Retry</button>`;
+    error.querySelector('button').addEventListener('click', () => renderAdminUsers());
     list.appendChild(error);
   }
 }
@@ -4194,7 +4712,8 @@ async function handleResetPassphraseSubmit(event) {
   if (event) event.preventDefault();
   if (!resetPassphraseTargetId) return;
   const input = document.getElementById('reset-passphrase-input');
-  const passphrase = input.value.trim();
+  // Not trimmed: login compares the passphrase exactly as typed.
+  const passphrase = input.value;
   if (!passphrase || passphrase.length < 12) {
     showToast('Passphrase must be at least 12 characters.');
     input.focus();
@@ -4216,7 +4735,7 @@ async function createUser(event) {
   const userIn = document.getElementById('new-user-username');
   const passIn = document.getElementById('new-user-passphrase');
   const username = userIn.value.trim();
-  const passphrase = passIn.value.trim();
+  const passphrase = passIn.value;
   const isAdmin = document.getElementById('new-user-isadmin').checked;
   if (!username || !passphrase) {
     showToast('Please enter a username and passphrase.');
@@ -4443,6 +4962,24 @@ let ttsVoiceURI = '';
 let ttsSleepTimer = null;
 const TTS_RATES = [0.75, 1.0, 1.25, 1.5, 2.0];
 
+// Voices differ per device, so read-aloud preferences live in this browser only.
+const TTS_PREFS_KEY = 'endpaper-tts-preferences';
+try {
+  const saved = JSON.parse(localStorage.getItem(TTS_PREFS_KEY) || '{}');
+  if (TTS_RATES.includes(saved.rate)) ttsRate = saved.rate;
+  if (Number.isFinite(saved.pitch) && saved.pitch >= 0.5 && saved.pitch <= 2) ttsPitch = saved.pitch;
+  if (typeof saved.voiceURI === 'string') ttsVoiceURI = saved.voiceURI;
+} catch (_) { /* storage unavailable: keep defaults */ }
+
+function saveTtsPreferences() {
+  try { localStorage.setItem(TTS_PREFS_KEY, JSON.stringify({ rate: ttsRate, pitch: ttsPitch, voiceURI: ttsVoiceURI })); } catch (_) {}
+}
+
+function resetTtsSleepTimerUI() {
+  const select = document.getElementById('tts-sleep');
+  if (select) select.value = '0';
+}
+
 function splitIntoSentences(text) {
   if (!text) return [];
   if (typeof Intl !== 'undefined' && Intl.Segmenter) {
@@ -4527,7 +5064,42 @@ function highlightTtsElement(element, doc) {
   } catch (_) {}
 }
 
+// Media Session: book title and play/pause/skip on lock screens and media keys.
+// Browsers only surface these where speech counts as media playback, so this
+// is progressive: media keys and some lock screens, not every platform.
+function syncTtsMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const session = navigator.mediaSession;
+  if (!ttsQueue.length) { session.metadata = null; session.playbackState = 'none'; return; }
+  const entry = getCurrentEntry();
+  try {
+    session.metadata = new MediaMetadata({
+      title: entry?.name || 'Endpaper',
+      artist: entry?.author || '',
+      album: 'Read aloud',
+      artwork: entry?.coverPath
+        ? [{ src: coverUrl(entry), sizes: '400x600', type: 'image/webp' }]
+        : [{ src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
+    });
+  } catch (_) {}
+  session.playbackState = ttsIsPaused ? 'paused' : 'playing';
+}
+
+if ('mediaSession' in navigator) {
+  const handlers = {
+    play: () => { if (ttsQueue.length && ttsIsPaused) toggleTtsPause(); },
+    pause: () => { if (ttsQueue.length && !ttsIsPaused) toggleTtsPause(); },
+    nexttrack: () => ttsNextSentence(),
+    previoustrack: () => ttsPrevSentence(),
+    stop: () => stopTts(),
+  };
+  for (const [action, handler] of Object.entries(handlers)) {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch (_) { /* action unsupported */ }
+  }
+}
+
 function updateTtsPlayerUI() {
+  syncTtsMediaSession();
   const bar = document.getElementById('tts-player-bar');
   const ttsBtn = document.getElementById('tts-btn');
   const playIcon = document.getElementById('tts-play-icon');
@@ -4543,6 +5115,7 @@ function updateTtsPlayerUI() {
     bar.setAttribute('aria-hidden', 'false');
     bar.classList.remove('hidden');
     if (ttsBtn) ttsBtn.setAttribute('aria-pressed', 'true');
+    bar.classList.toggle('tts-paused', ttsIsPaused);
     const current = ttsQueue[ttsIndex];
     if (activeTextEl) activeTextEl.textContent = current ? current.text : '';
     if (playIcon && pauseIcon) {
@@ -4652,6 +5225,7 @@ function stopTts() {
   ttsIsPaused = false;
   if (ttsSleepTimer) clearTimeout(ttsSleepTimer);
   ttsSleepTimer = null;
+  resetTtsSleepTimerUI();
   clearTtsHighlights();
   updateTtsPlayerUI();
 }
@@ -4707,6 +5281,7 @@ function cycleTtsRate() {
   const currentIndex = TTS_RATES.indexOf(ttsRate);
   const nextIndex = (currentIndex + 1) % TTS_RATES.length;
   ttsRate = TTS_RATES[nextIndex];
+  saveTtsPreferences();
   const rateLabel = document.getElementById('tts-rate-label');
   if (rateLabel) rateLabel.textContent = ttsRate + '×';
   if (!ttsIsPaused && ttsQueue.length > 0) {
@@ -4980,7 +5555,7 @@ if (document.getElementById('export-highlights-btn')) {
     const bookTitle = entry.name || 'Untitled book';
     let md = '# Highlights for ' + bookTitle + '\n\n';
     entry.highlights.forEach(h => {
-      md += '> ' + h.excerpt + '\n\n';
+      md += String(h.excerpt || '').split(/\r?\n/).map(line => '> ' + line).join('\n') + '\n\n';
       if (h.note) md += '**Note:** ' + h.note + '\n\n';
       md += '---\n\n';
     });
@@ -5023,7 +5598,7 @@ function restoreShelfPreferences() {
     if (document.getElementById('shelf-search')) document.getElementById('shelf-search').value = value.search || '';
     if (document.getElementById('shelf-filter') && [...document.getElementById('shelf-filter').options].some(option => option.value === value.filter)) document.getElementById('shelf-filter').value = value.filter;
     if (document.getElementById('shelf-sort') && [...document.getElementById('shelf-sort').options].some(option => option.value === value.sort)) document.getElementById('shelf-sort').value = value.sort;
-    if (document.getElementById('shelf-density') && ['comfortable', 'compact'].includes(value.density)) document.getElementById('shelf-density').value = value.density;
+    if (document.getElementById('shelf-density') && ['comfortable', 'compact', 'list'].includes(value.density)) document.getElementById('shelf-density').value = value.density;
   } catch (_) {}
 }
 
@@ -5046,9 +5621,21 @@ function formatMinutes(minutes) {
   return `${hours}h${rest ? ` ${rest}m` : ''}`;
 }
 
+// Covers fade in when their image arrives. Load events do not bubble, so listen in the capture phase.
+document.addEventListener('load', event => {
+  if (event.target instanceof HTMLImageElement && event.target.matches('.cover-img, .mobile-cover img')) event.target.classList.add('cover-arrived');
+}, true);
+
+// The stored cover filename changes on every replacement, so putting it in the URL
+// makes browsers fetch the new image instead of serving the cached old one.
+function coverUrl(entry) {
+  const base = `/api/books/${encodeURIComponent(entry.id)}/cover`;
+  return entry.coverPath ? `${base}?v=${encodeURIComponent(entry.coverPath)}` : base;
+}
+
 function coverMarkup(entry, className = 'cover-img') {
   return entry.coverPath
-    ? `<img class="${className}" src="/api/books/${entry.id}/cover" alt="" loading="lazy" decoding="async">`
+    ? `<img class="${className}" src="${coverUrl(entry)}" alt="" loading="lazy" decoding="async">`
     : `<span class="spine-title">${escapeHtml(entry.name)}</span><span class="spine-author">${escapeHtml(entry.author || '')}</span>`;
 }
 
@@ -5066,7 +5653,7 @@ function renderContinueCard(){
     item.setAttribute('aria-label', `Continue reading ${entry.name}`);
     item.tabIndex = 0;
     const remaining = formatMinutes(estimatedBookMinutes(entry, true));
-    item.innerHTML = `<div class="spine" style="background:${entry.coverColor}">${coverMarkup(entry)}</div><div class="continue-info"><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div>${entry.description ? `<p class="continue-description">${escapeHtml(entry.description)}</p>` : ''}<div class="progress-text">${Math.round(entry.progress)}%${remaining ? ` · about ${remaining} left` : ''}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div><span class="continue-reading-action"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h7a3 3 0 0 1 2 1 3 3 0 0 1 2-1h7v15h-7a3 3 0 0 0-2 1 3 3 0 0 0-2-1H3zM12 5v15"/></svg>Continue reading</span></div>`;
+    item.innerHTML = `<div class="spine" style="background:${safeCoverColor(entry.coverColor)}">${coverMarkup(entry)}</div><div class="continue-info"><div class="kicker">Continue reading</div><h3>${escapeHtml(entry.name)}</h3><div class="author">${escapeHtml(entry.author || 'Unknown author')}</div>${entry.description ? `<p class="continue-description">${escapeHtml(entry.description)}</p>` : ''}<div class="progress-text">${Math.round(entry.progress)}%${remaining ? ` · about ${remaining} left` : ''}</div><div class="book-progress-bar"><div class="book-progress-fill" style="width:${entry.progress}%"></div></div><span class="continue-reading-action"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h7a3 3 0 0 1 2 1 3 3 0 0 1 2-1h7v15h-7a3 3 0 0 0-2 1 3 3 0 0 0-2-1H3zM12 5v15"/></svg>Continue reading</span></div>`;
     item.onclick = () => openBook(entry.id);
     item.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openBook(entry.id); } };
     fragment.appendChild(item);
@@ -5081,9 +5668,49 @@ function smartBook(entry, subtitle) {
   item.type = 'button';
   item.className = 'smart-book';
   item.setAttribute('aria-label', entry.__series ? `Open series ${entry.name}` : `Details for ${entry.name}`);
-  item.innerHTML = `<div class="smart-cover" style="background:${/^#[0-9a-f]{3,8}$/i.test(entry.coverColor || '') ? entry.coverColor : '#554a3b'}">${coverMarkup(entry)}</div><strong>${escapeHtml(entry.name)}</strong><span>${escapeHtml(subtitle || entry.author || 'Unknown author')}</span>`;
+  item.innerHTML = `<div class="smart-cover" style="background:${safeCoverColor(entry.coverColor)}">${coverMarkup(entry)}</div><strong>${escapeHtml(entry.name)}</strong><span>${escapeHtml(subtitle || entry.author || 'Unknown author')}</span>`;
   item.onclick = () => entry.__series ? navigateDesktop('series', entry.name) : openBookDetails(entry.id);
   return item;
+}
+
+// Books with the newest highlights, for the Home rail. Refreshed in the background.
+let recentlyHighlightedIds = [];
+async function refreshRecentlyHighlighted(expectedAccountVersion = accountVersion) {
+  try {
+    const res = await api.fetch('/api/highlights?limit=60', { expectedAccountVersion });
+    const rows = await res.json();
+    if (!isActiveAccount(expectedAccountVersion)) return;
+    const ids = [...new Set(rows.map(row => row.book_id))].slice(0, 8);
+    if (ids.join() === recentlyHighlightedIds.join()) return;
+    recentlyHighlightedIds = ids;
+    if (!document.body.classList.contains('reader-active')) renderShelf();
+  } catch (_) { /* the rail is optional */ }
+}
+
+// The Home goal card reads cached stats and goals; both refresh in the background.
+let homeGoalSnapshot = null;
+async function refreshHomeGoals(expectedAccountVersion = accountVersion) {
+  try {
+    const [stats, prefs] = await Promise.all([api.getStats({ expectedAccountVersion }), api.getSettings({ expectedAccountVersion })]);
+    if (!isActiveAccount(expectedAccountVersion)) return;
+    homeGoalSnapshot = { stats, goals: prefs['reading-goals'] || {} };
+    if (!document.body.classList.contains('reader-active')) renderShelf();
+  } catch (_) { /* optional */ }
+}
+
+function renderHomeGoalCard(root) {
+  if (!homeGoalSnapshot || typeof goalProgressSection !== 'function') return;
+  const section = goalProgressSection(homeGoalSnapshot.stats, homeGoalSnapshot.goals);
+  if (!section) return;
+  const card = document.createElement('section');
+  card.className = 'smart-section home-goal-card';
+  const header = document.createElement('div'); header.className = 'section-heading';
+  const heading = document.createElement('h2'); heading.textContent = 'Your goals';
+  const link = document.createElement('button'); link.type = 'button'; link.className = 'file-link-btn'; link.textContent = 'Reading stats';
+  link.addEventListener('click', () => (window.isMobileShell?.() ? mobileNavigate('stats') : navigateDesktop('stats')));
+  header.append(heading, link);
+  card.append(header, section);
+  root.appendChild(card);
 }
 
 function renderSmartSections(searchQuery, filterValue) {
@@ -5094,6 +5721,10 @@ function renderSmartSections(searchQuery, filterValue) {
   const sections = [];
   const resume = library.filter(entry => entry.lastOpenedAt && readingStatus(entry) === 'reading').sort((a,b) => b.lastOpenedAt - a.lastOpenedAt)[0];
   sections.push(['Recently added', [...library].sort((a,b) => b.addedAt - a.addedAt).filter(entry => entry.id !== resume?.id).slice(0,8), entry => entry.author]);
+  const highlighted = recentlyHighlightedIds.map(id => library.find(entry => entry.id === id)).filter(Boolean);
+  if (highlighted.length) sections.push(['Recently highlighted', highlighted, entry => entry.author]);
+  const wanted = library.filter(entry => entry.wantToRead && readingStatus(entry) !== 'finished').slice(0,8);
+  if (wanted.length) sections.push(['Want to read', wanted, entry => entry.author]);
   const unread = library.filter(entry => readingStatus(entry) === 'unread').slice(0,8);
   if (unread.length) sections.push(['Unread', unread, entry => entry.author]);
   const finished = library.filter(entry => readingStatus(entry) === 'finished').slice(0,8);
@@ -5107,15 +5738,21 @@ function renderSmartSections(searchQuery, filterValue) {
     const seriesEntries = [...series.entries()].slice(0,8).map(([name, entries]) => ({ ...entries[0], name, __series: true, __subtitle: `${entries.length} book${entries.length === 1 ? '' : 's'}` }));
     sections.splice(1, 0, ['Your series', seriesEntries, entry => entry.__subtitle]);
   }
-  for (const [title, entries, subtitle] of sections) {
+  // A small library would otherwise show the same books in every rail. Each
+  // book appears in the first rail that lists it; empty rails are dropped.
+  renderHomeGoalCard(root);
+  const shownBooks = new Set();
+  for (const [title, allEntries, subtitle] of sections) {
+    const entries = title === 'Your series' ? allEntries : allEntries.filter(entry => !shownBooks.has(entry.id));
     if (!entries.length) continue;
+    if (title !== 'Your series') entries.forEach(entry => shownBooks.add(entry.id));
     const section = document.createElement('section');
     section.className = 'smart-section';
     const sectionHeader = document.createElement('div'); sectionHeader.className = 'section-heading';
     const heading = document.createElement('h2'); heading.textContent = title;
     const seeAll = document.createElement('button'); seeAll.type = 'button'; seeAll.className = 'file-link-btn'; seeAll.textContent = 'See all';
     seeAll.setAttribute('aria-label', `See all ${title.toLocaleLowerCase()} books`);
-    seeAll.onclick = () => { document.getElementById('shelf-search').value = ''; document.getElementById('shelf-filter').value = title === 'Unread' ? 'unread' : title === 'Finished' ? 'finished' : 'all'; if (title === 'Your series') document.getElementById('shelf-sort').value = 'series'; navigateDesktop('library'); };
+    seeAll.onclick = () => { document.getElementById('shelf-search').value = ''; document.getElementById('shelf-filter').value = ({ Unread: 'unread', Finished: 'finished', 'Want to read': 'want' })[title] || 'all'; if (title === 'Your series') document.getElementById('shelf-sort').value = 'series'; navigateDesktop('library'); };
     sectionHeader.append(heading, seeAll);
     const rail = document.createElement('div'); rail.className = 'smart-rail';
     entries.forEach(entry => rail.appendChild(smartBook(entry, subtitle(entry))));
@@ -5139,10 +5776,10 @@ function createShelfCard(entry) {
     card.appendChild(select);
   }
   const spine = document.createElement('div'); spine.className = 'spine';
-  spine.style.backgroundColor = /^#[0-9a-f]{3,8}$/i.test(entry.coverColor || '') ? entry.coverColor : '#554a3b';
+  spine.style.backgroundColor = safeCoverColor(entry.coverColor);
   if (entry.coverPath) {
     const cover = document.createElement('img'); cover.className = 'cover-img';
-    cover.src = `/api/books/${encodeURIComponent(entry.id)}/cover`;
+    cover.src = coverUrl(entry);
     cover.alt = ''; cover.loading = 'lazy'; cover.decoding = 'async'; spine.appendChild(cover);
   } else {
     const title = document.createElement('span'); title.className = 'spine-title'; title.textContent = entry.name;
@@ -5150,9 +5787,10 @@ function createShelfCard(entry) {
     spine.append(title, author);
   }
   const progress = Math.max(0, Math.min(100, Number(entry.progress) || 0));
-  if (progress > 0) {
-    const badge = document.createElement('span'); badge.className = 'spine-badge';
-    badge.textContent = `${Math.round(progress)}%`; spine.appendChild(badge);
+  const statusLabel = shelfStatusLabel(entry);
+  if (statusLabel) {
+    const badge = document.createElement('span'); badge.className = `spine-badge${entry.wantToRead && !(Number(entry.progress) > 0) ? ' want' : ''}`;
+    badge.textContent = statusLabel; spine.appendChild(badge);
   }
   const menu = document.createElement('button'); menu.type = 'button'; menu.className = 'book-menu-btn';
   menu.setAttribute('aria-label', `Details and actions for ${entry.name}`); menu.appendChild(controlIcon('ellipsis')); spine.appendChild(menu);
@@ -5193,9 +5831,67 @@ function createShelfCard(entry) {
   return card;
 }
 
+/* ---------- Search inside books ---------- */
+// Snippets arrive with \u0002…\u0003 around matches; build them as text nodes
+// plus <mark>, so book text is never parsed as HTML.
+function snippetFragment(snippet) {
+  const fragment = document.createDocumentFragment();
+  String(snippet || '').split(/(\u0002[^\u0003]*\u0003)/).forEach(part => {
+    if (part.startsWith('\u0002')) {
+      const mark = document.createElement('mark');
+      mark.textContent = part.slice(1, -1);
+      fragment.appendChild(mark);
+    } else if (part) fragment.appendChild(document.createTextNode(part));
+  });
+  return fragment;
+}
+
+async function openBookAtSection(id, href) {
+  await openBook(id);
+  for (let attempt = 0; attempt < 60 && !readerNavigationReady; attempt++) await new Promise(resolve => setTimeout(resolve, 100));
+  if (currentBookId === id && rendition && href) await navigateReader(href);
+}
+
+let textSearchTimer = null;
+let textSearchVersion = 0;
+function scheduleTextSearch(query, container) {
+  clearTimeout(textSearchTimer);
+  const version = ++textSearchVersion;
+  const trimmed = String(query || '').trim();
+  if (!container) return;
+  if (trimmed.length < 3) { container.hidden = true; container.replaceChildren(); return; }
+  textSearchTimer = setTimeout(async () => {
+    const expectedAccountVersion = accountVersion;
+    try {
+      const res = await api.fetch(`/api/search/text?q=${encodeURIComponent(trimmed)}`, { expectedAccountVersion });
+      const { results } = await res.json();
+      if (version !== textSearchVersion || !isActiveAccount(expectedAccountVersion)) return;
+      container.replaceChildren();
+      if (!results.length) { container.hidden = true; return; }
+      const heading = document.createElement('h2');
+      heading.textContent = `Inside books · ${results.length} passage${results.length === 1 ? '' : 's'}`;
+      const list = document.createElement('ul'); list.className = 'text-search-list';
+      for (const result of results) {
+        const item = document.createElement('li');
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'text-search-hit';
+        const title = document.createElement('strong'); title.textContent = result.title;
+        const author = document.createElement('small'); author.textContent = result.author || '';
+        const excerpt = document.createElement('span'); excerpt.className = 'text-search-snippet'; excerpt.appendChild(snippetFragment(result.snippet));
+        button.append(title, author, excerpt);
+        button.setAttribute('aria-label', `Open ${result.title} at this passage`);
+        button.addEventListener('click', () => openBookAtSection(result.book_id, result.href));
+        item.appendChild(button); list.appendChild(item);
+      }
+      container.append(heading, list);
+      container.hidden = false;
+    } catch (_) { if (version === textSearchVersion) container.hidden = true; }
+  }, 350);
+}
+
 function renderShelf(){
   const shelf = document.getElementById('shelf');
   shelf.classList.toggle('compact', document.getElementById('shelf-density')?.value === 'compact');
+  shelf.classList.toggle('list-layout', document.getElementById('shelf-density')?.value === 'list');
   const empty = document.getElementById('shelf-empty');
   const header = document.getElementById('shelf-header');
   shelf.replaceChildren();
@@ -5206,12 +5902,15 @@ function renderShelf(){
   empty.style.display = 'none'; header.style.display = 'flex';
   const searchQuery = document.getElementById('shelf-search').value.trim().toLocaleLowerCase();
   const filterValue = document.getElementById('shelf-filter').value;
-  const searchable = entry => `${entry.name || ''} ${entry.author || ''} ${entry.series || ''} ${entry.description || ''} ${entry.tags || ''} ${entry.isbn || ''}`.toLocaleLowerCase();
+  syncUserTagFilter();
+  const searchable = entry => `${entry.name || ''} ${entry.author || ''} ${entry.series || ''} ${entry.description || ''} ${entry.tags || ''} ${(entry.userTags || []).join(' ')} ${entry.isbn || ''}`.toLocaleLowerCase();
   let filtered = searchQuery ? library.filter(entry => searchable(entry).includes(searchQuery)) : [...library];
   if (filterValue === 'unread') filtered = filtered.filter(entry => readingStatus(entry) === 'unread');
   else if (filterValue === 'reading') filtered = filtered.filter(entry => readingStatus(entry) === 'reading');
   else if (filterValue === 'finished') filtered = filtered.filter(entry => readingStatus(entry) === 'finished');
   else if (filterValue === 'downloaded') filtered = filtered.filter(entry => typeof mobilePinnedIds !== 'undefined' && mobilePinnedIds.has(entry.id));
+  else if (filterValue === 'want') filtered = filtered.filter(entry => entry.wantToRead);
+  else if (filterValue.startsWith('utag:')) filtered = filtered.filter(entry => (entry.userTags || []).includes(filterValue.slice(5)));
   else if (filterValue.startsWith('col_')) {
     const collection = allCollections.find(item => item.id === filterValue.slice(4));
     if (collection) filtered = filtered.filter(entry => collection.book_ids.includes(entry.id));
@@ -5227,8 +5926,16 @@ function renderShelf(){
   });
   document.getElementById('shelf-count').textContent = filtered.length === library.length ? `${library.length} book${library.length === 1 ? '' : 's'}` : `${filtered.length} of ${library.length} books`;
   renderSmartSections(searchQuery, filterValue);
+  scheduleTextSearch(searchQuery, document.getElementById('text-search-results'));
   const fragment = document.createDocumentFragment();
   filtered.forEach(entry => fragment.appendChild(createShelfCard(entry)));
+  if (!filtered.length) {
+    const none = document.createElement('div'); none.className = 'shelf-no-results'; none.setAttribute('role', 'status');
+    const message = document.createElement('p'); message.textContent = searchQuery ? `No titles, authors or tags match “${document.getElementById('shelf-search').value.trim()}”.` : 'No books match this filter.';
+    const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'file-link-btn'; reset.textContent = 'Reset filters';
+    reset.addEventListener('click', resetShelfFilters);
+    none.append(message, reset); fragment.appendChild(none);
+  }
   shelf.appendChild(fragment);
   saveShelfPreferences();
   window.renderMobileShell?.();
@@ -5275,7 +5982,7 @@ async function downloadBookOffline(id) {
   setSyncState('saving', 'Downloading…');
   const [fileResponse, coverResponse] = await Promise.all([
     api.fetch(`/api/books/${id}/file`, { headers: {} }),
-    api.fetch(`/api/books/${id}/cover`, { headers: {} }).catch(() => null),
+    api.fetch(coverUrl(library.find(item => item.id === id) || { id }), { headers: {} }).catch(() => null),
   ]);
   const fileBlob = await fileResponse.blob();
   const coverBlob = coverResponse?.ok ? await coverResponse.blob() : null;
@@ -5345,50 +6052,98 @@ async function serviceWorkerMessage(type, payload = {}) {
   });
 }
 
-async function bulkDownloadOffline() {
-  for (const id of bulkSelection) await downloadBookOffline(id);
-  showToast(`${bulkSelection.size} book${bulkSelection.size === 1 ? '' : 's'} available offline.`); toggleBulkMode(false);
+// Apply a bulk action book by book. One failure no longer aborts the rest
+// silently: every book is attempted and the toast reports what happened.
+async function runBulkAction(items, action, describeSuccess) {
+  let done = 0;
+  const failures = [];
+  for (let index = 0; index < items.length; index++) {
+    try { await action(items[index], index); done++; }
+    catch (error) {
+      if (error && error.message === 'Session expired') throw error;
+      failures.push(error);
+    }
+  }
+  const summary = describeSuccess(done);
+  if (failures.length) showToast(`${summary} ${failures.length} failed: ${failures[0]?.message || 'unknown error'}`, 'error');
+  else showToast(summary);
+  return failures.length === 0;
 }
+
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+async function bulkDownloadOffline() {
+  try {
+    const ok = await runBulkAction([...bulkSelection], id => downloadBookOffline(id), done => `${plural(done, 'book')} available offline.`);
+    if (ok) toggleBulkMode(false);
+  } catch (error) { showToast(`Could not download books: ${error.message}`, 'error'); }
+}
+
+const NEW_COLLECTION = '__new__';
 
 async function bulkAddToCollection() {
   if (!requireAdmin('organize books')) return;
-  const name = prompt(`Collection name (${allCollections.map(item => item.name).join(', ')})`);
-  if (!name) return;
-  let collection = allCollections.find(item => item.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
-  if (!collection) collection = await api.createCollection(name.trim());
-  for (const id of bulkSelection) await api.addBookToCollection(id, collection.id);
-  await loadCollections(); showToast('Books added to collection.'); toggleBulkMode(false);
+  let choice = null;
+  await openFormEditor({ title: 'Add to collection', submitLabel: 'Add books', fields: [
+    { name: 'collection', label: 'Collection', type: 'select', value: allCollections[0]?.id || NEW_COLLECTION,
+      options: [...allCollections.map(item => ({ value: item.id, label: item.name })), { value: NEW_COLLECTION, label: 'New collection…' }] },
+    { name: 'name', label: 'New collection name (only when creating one)' },
+  ], onSave: async values => {
+    if (values.collection === NEW_COLLECTION && !values.name.trim()) throw new Error('Name the new collection.');
+    choice = values;
+  }});
+  if (!choice) return;
+  try {
+    let collection = allCollections.find(item => item.id === choice.collection);
+    if (!collection) {
+      const name = choice.name.trim();
+      collection = allCollections.find(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()) || await api.createCollection(name);
+    }
+    const ok = await runBulkAction([...bulkSelection], id => api.addBookToCollection(id, collection.id), done => `Added ${plural(done, 'book')} to ${collection.name}.`);
+    await loadCollections();
+    if (ok) toggleBulkMode(false);
+  } catch (error) { showToast(`Could not add books to the collection: ${error.message}`, 'error'); }
 }
 
 async function bulkRemoveFromCollection() {
   if (!requireAdmin('organize books')) return;
-  const name = prompt(`Remove from collection (${allCollections.map(item => item.name).join(', ')})`);
-  if (!name) return;
-  const collection = allCollections.find(item => item.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
-  if (!collection) { showToast('Collection not found.'); return; }
-  for (const id of bulkSelection) await api.removeBookFromCollection(id, collection.id);
-  await loadCollections(); showToast('Books removed from collection.'); toggleBulkMode(false);
+  if (!allCollections.length) { showToast('There are no collections yet.'); return; }
+  let collectionId = null;
+  await openFormEditor({ title: 'Remove from collection', submitLabel: 'Remove books', fields: [
+    { name: 'collection', label: 'Collection', type: 'select', value: allCollections[0].id, options: allCollections.map(item => ({ value: item.id, label: item.name })) },
+  ], onSave: async values => { collectionId = values.collection; }});
+  const collection = allCollections.find(item => item.id === collectionId);
+  if (!collection) return;
+  try {
+    const ok = await runBulkAction([...bulkSelection], id => api.removeBookFromCollection(id, collection.id), done => `Removed ${plural(done, 'book')} from ${collection.name}.`);
+    await loadCollections();
+    if (ok) toggleBulkMode(false);
+  } catch (error) { showToast(`Could not remove books from the collection: ${error.message}`, 'error'); }
 }
 
 async function bulkEditSeries() {
   if (!requireAdmin('edit shared book metadata')) return;
-  const series = prompt('Series name (leave blank to clear)');
-  if (series == null) return;
+  let values = null;
+  await openFormEditor({ title: 'Set series', fields: [
+    { name: 'series', label: 'Series name (leave blank to clear)' },
+    { name: 'start', label: 'Starting number (optional; increments in shelf order)', type: 'number' },
+  ], onSave: async input => {
+    if (input.start.trim() !== '' && !Number.isFinite(Number(input.start))) throw new Error('Series number must be numeric.');
+    values = input;
+  }});
+  if (!values) return;
+  const series = values.series.trim() || null;
+  const parsedStart = series && values.start.trim() !== '' ? Number(values.start) : null;
   const ordered = [...bulkSelection].map(id => library.find(entry => entry.id === id)).filter(Boolean);
-  const startText = series.trim() ? prompt('Starting series number (optional; increments in shelf order)', '') : '';
-  if (startText == null) return;
-  const parsedStart = startText.trim() === '' ? null : Number(startText);
-  if (parsedStart != null && !Number.isFinite(parsedStart)) { showToast('Series number must be numeric.'); return; }
-  for (let index = 0; index < ordered.length; index++) {
-    const entry = ordered[index];
-    const updated = await api.updateBook(entry.id, {
-      series: series.trim() || null,
-      series_index: parsedStart == null ? null : parsedStart + index,
-    });
-    entry.series = updated.series || '';
-    entry.seriesIndex = updated.series_index;
-  }
-  showToast('Series details updated.'); toggleBulkMode(false); renderShelf();
+  try {
+    const ok = await runBulkAction(ordered, async (entry, index) => {
+      const updated = await api.updateBook(entry.id, { series, series_index: parsedStart == null ? null : parsedStart + index });
+      entry.series = updated.series || '';
+      entry.seriesIndex = updated.series_index;
+    }, done => `Updated series details for ${plural(done, 'book')}.`);
+    if (ok) toggleBulkMode(false);
+  } catch (error) { showToast(`Could not update series details: ${error.message}`, 'error'); }
+  renderShelf();
 }
 
 async function bulkDeleteBooks() {
@@ -5430,7 +6185,7 @@ async function openBookDetails(id) {
   document.getElementById('book-details-title').textContent = entry.name;
   const totalTime = formatMinutes(estimatedBookMinutes(entry));
   const remaining = formatMinutes(estimatedBookMinutes(entry, true));
-  document.getElementById('book-details-content').innerHTML = `<div class="book-details-layout"><div class="book-details-cover" style="background:${entry.coverColor}">${coverMarkup(entry, 'book-details-cover')}</div><div><div class="book-detail-meta">${escapeHtml(entry.author || 'Unknown author')}<br>${entry.series ? escapeHtml(formatSeriesText(entry.series, entry.seriesIndex)) + '<br>' : ''}${(entry.fileSize / 1024 / 1024).toFixed(1)} MB${totalTime ? ` · about ${totalTime}` : ''}<br>${entry.progress ? `${Math.round(entry.progress)}% read${remaining ? ` · ${remaining} remaining` : ''}` : 'Unread'}${entry.isbn ? `<br>ISBN ${escapeHtml(entry.isbn)}` : ''}${entry.tags ? `<br>${escapeHtml(entry.tags)}` : ''}</div><p class="book-description">${escapeHtml(entry.description || 'No description available.')}</p></div></div>`;
+  document.getElementById('book-details-content').innerHTML = `<div class="book-details-layout"><div class="book-details-cover" style="background:${safeCoverColor(entry.coverColor)}">${coverMarkup(entry, 'book-details-cover')}</div><div><div class="book-detail-meta">${escapeHtml(entry.author || 'Unknown author')}<br>${entry.series ? escapeHtml(formatSeriesText(entry.series, entry.seriesIndex)) + '<br>' : ''}${formatBytes(entry.fileSize)}${totalTime ? ` · about ${totalTime}` : ''}<br>${entry.progress ? `${Math.round(entry.progress)}% read${remaining ? ` · ${remaining} remaining` : ''}` : 'Unread'}${entry.isbn ? `<br>ISBN ${escapeHtml(entry.isbn)}` : ''}${entry.tags ? `<br>${escapeHtml(entry.tags)}` : ''}</div><div class="book-details-rating">${renderRatingHtml(entry.id, entry.rating)}</div><p class="book-description">${escapeHtml(entry.description || 'No description available.')}</p></div></div>`;
   const actions = document.getElementById('book-details-actions');
   actions.replaceChildren();
   const addAction = (label, handler) => {
@@ -5450,6 +6205,20 @@ async function openBookDetails(id) {
     finally { status.disabled = false; }
   });
   statusLabel.appendChild(status); actions.appendChild(statusLabel);
+  const want = addAction(entry.wantToRead ? 'Saved to Want to read' : 'Want to read', async () => {
+    want.disabled = true;
+    try {
+      const updated = await api.updateBook(id, { want_to_read: !entry.wantToRead }, { expectedAccountVersion });
+      if (!isActiveAccount(expectedAccountVersion)) return;
+      entry.wantToRead = Boolean(updated.want_to_read);
+      want.textContent = entry.wantToRead ? 'Saved to Want to read' : 'Want to read';
+      want.setAttribute('aria-pressed', String(entry.wantToRead));
+      renderShelf();
+    } catch (error) { if (isActiveAccount(expectedAccountVersion)) showToast(error.message || 'Could not update Want to read.', 'error'); }
+    finally { want.disabled = false; }
+  });
+  want.setAttribute('aria-pressed', String(Boolean(entry.wantToRead)));
+  addAction(entry.userTags?.length ? `Your tags: ${entry.userTags.join(', ')}` : 'Add your tags', () => editUserTags(id));
   const offline = addAction('Checking download…', async () => {
     offline.disabled = true;
     try {
@@ -5471,6 +6240,8 @@ async function openBookDetails(id) {
   if (isCurrentUserAdmin()) {
     addAction('Collections', () => openBookCollectionsModal(id));
     addAction('Edit details', () => editBookMetadata(id));
+    addAction(entry.coverPath ? 'Replace cover' : 'Add cover', () => chooseCover(id));
+    addAction('Look up by ISBN', () => lookupBookMetadata(id));
     addAction('Remove book', () => { closeBookDetails(); removeBook(id); }).classList.add('destructive-action');
   }
   modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false'); modal.querySelector('button')?.focus();
@@ -5485,6 +6256,69 @@ function closeBookDetails({ returnFocus = true } = {}) {
     if (target?.getClientRects().length) target.focus({ preventScroll: true });
   }
   bookDetailsReturnFocus = null; bookDetailsReturnId = null;
+}
+
+// A reader's own tags, private to them (unlike the shared catalogue tags).
+async function editUserTags(id) {
+  const entry = library.find(item => item.id === id); if (!entry) return;
+  const expectedAccountVersion = accountVersion;
+  const saved = await openFormEditor({ title: 'Your tags', submitLabel: 'Save tags', fields: [
+    { name: 'tags', label: 'Tags only you see, separated by commas', value: (entry.userTags || []).join(', ') },
+  ], onSave: async values => {
+    const updated = await api.updateBook(id, { user_tags: values.tags }, { expectedAccountVersion });
+    if (accountVersion !== expectedAccountVersion) return;
+    entry.userTags = Array.isArray(updated.user_tags) ? updated.user_tags : [];
+  }});
+  if (!saved || accountVersion !== expectedAccountVersion) return;
+  renderShelf();
+  if (window.isMobileShell?.()) renderMobileShell(); else openBookDetails(id);
+  showToast(entry.userTags.length ? 'Tags saved.' : 'Tags cleared.');
+}
+
+function chooseCover(id) {
+  if (!requireAdmin('change book covers')) return;
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/jpeg,image/png,image/webp,image/gif';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0]; if (!file) return;
+    const entry = library.find(item => item.id === id); if (!entry) return;
+    try {
+      const updated = await api.uploadCover(id, file);
+      entry.coverPath = updated.cover_path;
+      renderShelf();
+      if (window.isMobileShell?.()) renderMobileShell(); else openBookDetails(id);
+      showToast('Cover updated.');
+    } catch (error) { showToast(`Could not update the cover: ${error.message}`, 'error'); }
+  });
+  input.click();
+}
+
+// Suggest metadata from Open Library for an ISBN. The admin reviews every
+// field before anything is saved.
+async function lookupBookMetadata(id) {
+  if (!requireAdmin('edit shared book metadata')) return;
+  const entry = library.find(item => item.id === id); if (!entry) return;
+  const expectedAccountVersion = accountVersion;
+  let suggestion = null;
+  await openFormEditor({ title: 'Look up by ISBN', submitLabel: 'Look up', fields: [
+    { name: 'isbn', label: 'ISBN (sent to openlibrary.org)', value: entry.isbn || '', required: true },
+  ], onSave: async values => { suggestion = await api.lookupIsbn(id, values.isbn.trim(), { expectedAccountVersion }); }});
+  if (!suggestion || accountVersion !== expectedAccountVersion) return;
+  await openFormEditor({ title: 'Review details from Open Library', submitLabel: 'Save details', fields: [
+    { name: 'title', label: 'Title', value: suggestion.title || entry.name, required: true },
+    { name: 'author', label: 'Author', value: suggestion.author || entry.author || '' },
+    { name: 'series', label: 'Series', value: suggestion.series || entry.series || '' },
+    { name: 'isbn', label: 'ISBN', value: suggestion.isbn || entry.isbn || '' },
+    { name: 'tags', label: 'Tags (comma-separated)', value: suggestion.tags || entry.tags || '' },
+    { name: 'description', label: 'Description', value: suggestion.description || entry.description || '', multiline: true },
+  ], onSave: async values => {
+    const updated = await api.updateBook(id, { title: values.title.trim(), author: values.author, series: values.series, isbn: values.isbn, tags: values.tags, description: values.description }, { expectedAccountVersion });
+    if (accountVersion !== expectedAccountVersion) return;
+    Object.assign(entry, { name: updated.title, author: updated.author, description: plainDescription(updated.description), tags: updated.tags || '', series: updated.series || null, isbn: updated.isbn || '' });
+    renderShelf();
+    if (window.isMobileShell?.()) renderMobileShell(); else openBookDetails(id);
+    showToast('Book details updated from Open Library.');
+  }});
 }
 
 async function editBookMetadata(id) {
@@ -5509,10 +6343,72 @@ async function editBookMetadata(id) {
   }});
 }
 
+/* Export every highlight in the notebook. CSV uses Readwise's import columns
+   and JSON uses the shape of Readwise's highlights API, so either can be
+   imported there; Markdown is for reading or pasting into notes. */
+function csvCell(value) {
+  const text = String(value ?? '');
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function notebookExport(items, format) {
+  const sorted = [...items].sort((a, b) => (a.book_title || '').localeCompare(b.book_title || '') || String(a.created_at).localeCompare(String(b.created_at)));
+  if (format === 'csv') {
+    const rows = [['Highlight', 'Title', 'Author', 'URL', 'Note', 'Location', 'Date']];
+    for (const item of sorted) rows.push([item.excerpt, item.book_title, item.book_author, '', item.note, item.chapter, item.created_at]);
+    return { type: 'text/csv', extension: 'csv', body: rows.map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n' };
+  }
+  if (format === 'json') {
+    const highlights = sorted.map(item => ({
+      text: item.excerpt || '', title: item.book_title || '', author: item.book_author || '', source_type: 'endpaper', category: 'books',
+      note: item.note || '', location_type: 'order', highlighted_at: item.created_at ? new Date(String(item.created_at).replace(' ', 'T') + (String(item.created_at).includes('Z') ? '' : 'Z')).toISOString() : undefined,
+      tags: item.tags || [], chapter: item.chapter || '',
+    }));
+    return { type: 'application/json', extension: 'json', body: JSON.stringify({ highlights }, null, 2) };
+  }
+  let md = '# Endpaper notebook\n';
+  let currentBook = null;
+  for (const item of sorted) {
+    if (item.book_title !== currentBook) {
+      currentBook = item.book_title;
+      md += `\n## ${currentBook || 'Untitled book'}${item.book_author ? ` — ${item.book_author}` : ''}\n\n`;
+    }
+    md += String(item.excerpt || '').split(/\r?\n/).map(line => '> ' + line).join('\n') + '\n';
+    if (item.chapter) md += `\n*${item.chapter}*\n`;
+    if (item.note) md += `\n**Note:** ${item.note}\n`;
+    if (item.tags?.length) md += `\nTags: ${item.tags.join(', ')}\n`;
+    md += '\n---\n\n';
+  }
+  return { type: 'text/markdown', extension: 'md', body: md };
+}
+
+async function exportNotebook() {
+  let format = null;
+  await openFormEditor({ title: 'Export notebook', submitLabel: 'Download', fields: [
+    { name: 'format', label: 'Format', type: 'select', value: 'md', options: [
+      { value: 'md', label: 'Markdown (.md)' },
+      { value: 'csv', label: 'CSV for Readwise and spreadsheets (.csv)' },
+      { value: 'json', label: 'JSON, Readwise highlights format (.json)' },
+    ] },
+  ], onSave: async values => { format = values.format; }});
+  if (!format) return;
+  try {
+    const items = await api.getAllHighlights();
+    if (!items.length) { showToast('There are no highlights to export yet.'); return; }
+    const file = notebookExport(items, format);
+    const url = URL.createObjectURL(new Blob([file.body], { type: `${file.type};charset=utf-8` }));
+    const link = document.createElement('a');
+    link.href = url; link.download = `endpaper-notebook-${new Date().toISOString().slice(0, 10)}.${file.extension}`;
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Exported ${items.length} highlight${items.length === 1 ? '' : 's'}.`);
+  } catch (error) { showToast(`Could not export the notebook: ${error.message}`, 'error'); }
+}
+
 async function openNotebookModal() {
   notebookReturnFocus = document.activeElement;
   const modal = document.getElementById('notebook-modal'); modal.classList.add('show'); modal.setAttribute('aria-hidden', 'false');
-  document.getElementById('notebook-list').textContent = 'Loading highlights…';
+  document.getElementById('notebook-list').replaceChildren(loadingSkeleton('rows', 4, 'Loading highlights…'));
   const expectedAccountVersion = accountVersion;
   try {
     const items = await api.getAllHighlights();
@@ -5626,12 +6522,9 @@ function dismissInstallTip() { localStorage.setItem('endpaper_install_tip_dismis
 
 async function saveReadingGoals() {
   const goals = { dailyMinutes: Number(document.getElementById('goal-daily').value) || 0, weeklyHours: Number(document.getElementById('goal-weekly').value) || 0, booksPerYear: Number(document.getElementById('goal-books').value) || 0 };
-  await api.saveSettings({ 'reading-goals': goals }); showToast('Reading goals saved.');
+  await api.saveSettings({ 'reading-goals': goals }); showToast('Reading goals saved.'); refreshHomeGoals();
 }
 
-document.getElementById('shelf-search')?.setAttribute('oninput', 'scheduleShelfRender()');
-document.getElementById('shelf-filter')?.setAttribute('onchange', 'renderShelf()');
-document.getElementById('shelf-sort')?.setAttribute('onchange', 'renderShelf()');
 document.addEventListener('click', event => { if (!event.target.closest('#reader-more-menu,#reader-more-btn,#reader-bottom-actions')) closeReaderMoreMenu(); });
 document.addEventListener('keydown', event => {
   if (event.key !== 'Tab') return;
@@ -5642,9 +6535,15 @@ document.addEventListener('keydown', event => {
   else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
 });
 
-document.getElementById('tts-voice-select')?.addEventListener('change', event => { ttsVoiceURI = event.target.value; if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
-document.getElementById('tts-pitch')?.addEventListener('input', event => { ttsPitch = Number(event.target.value); if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
-document.getElementById('tts-sleep')?.addEventListener('change', event => { if (ttsSleepTimer) clearTimeout(ttsSleepTimer); const minutes = Number(event.target.value); if (minutes) ttsSleepTimer = setTimeout(() => { stopTts(); showToast('Sleep timer ended.'); }, minutes * 60_000); });
+document.getElementById('tts-voice-select')?.addEventListener('change', event => { ttsVoiceURI = event.target.value; saveTtsPreferences(); if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
+document.getElementById('tts-pitch')?.addEventListener('input', event => { ttsPitch = Number(event.target.value); saveTtsPreferences(); if (ttsQueue.length && !ttsIsPaused) speakCurrentTtsItem(); });
+document.getElementById('tts-sleep')?.addEventListener('change', event => { if (ttsSleepTimer) clearTimeout(ttsSleepTimer); ttsSleepTimer = null; const minutes = Number(event.target.value); if (minutes) ttsSleepTimer = setTimeout(() => { stopTts(); showToast('Sleep timer ended.'); }, minutes * 60_000); });
+{
+  const pitch = document.getElementById('tts-pitch');
+  if (pitch) pitch.value = String(ttsPitch);
+  const rateLabel = document.getElementById('tts-rate-label');
+  if (rateLabel) rateLabel.textContent = ttsRate + '×';
+}
 if ('speechSynthesis' in window) { populateTtsVoices(); speechSynthesis.addEventListener?.('voiceschanged', populateTtsVoices); }
 new MutationObserver(updateProgressEstimate).observe(document.getElementById('progress-pct'), { childList: true, characterData: true, subtree: true });
 

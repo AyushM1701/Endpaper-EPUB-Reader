@@ -82,10 +82,10 @@ function mobileHeading(title, kicker = '', back = false) {
 
 function mobileCover(entry, className = '') {
   const cover = mobileElement('div', `mobile-cover ${className}`);
-  cover.style.backgroundColor = /^#[0-9a-f]{3,8}$/i.test(entry.coverColor || '') ? entry.coverColor : '#554a3b';
+  cover.style.backgroundColor = safeCoverColor(entry.coverColor);
   if (entry.coverPath) {
     const image = mobileElement('img');
-    image.src = `/api/books/${encodeURIComponent(entry.id)}/cover`;
+    image.src = coverUrl(entry);
     image.alt = '';
     image.loading = 'lazy';
     cover.appendChild(image);
@@ -132,7 +132,7 @@ function mobileRail(title, entries, onSelect) {
 }
 
 function mobileHome(root) {
-  root.appendChild(mobileHeading('Your reading', 'ENDPAPER'));
+  root.appendChild(mobileHeading('Your reading', 'Endpaper'));
   if (offlineSession) {
     const notice = mobileElement('section', 'mobile-offline-home');
     notice.appendChild(mobileElement('strong', '', 'Reading offline'));
@@ -156,6 +156,14 @@ function mobileHome(root) {
     const fill = mobileElement('span'); fill.style.width = `${Math.max(0, Math.min(100, resume.progress))}%`;
     track.appendChild(fill); info.appendChild(track); card.appendChild(info); section.appendChild(card); root.appendChild(section);
   }
+  if (homeGoalSnapshot) {
+    const goals = goalProgressSection(homeGoalSnapshot.stats, homeGoalSnapshot.goals);
+    if (goals) {
+      const section = mobileElement('section', 'mobile-section home-goal-card');
+      section.append(mobileElement('h2', '', 'Your goals'), goals);
+      root.appendChild(section);
+    }
+  }
   const seen = new Set(resume ? [resume.id] : []);
   const recent = [...library].sort((a, b) => b.addedAt - a.addedAt).filter(entry => !seen.has(entry.id)).slice(0, 8);
   recent.forEach(entry => seen.add(entry.id));
@@ -175,6 +183,14 @@ function mobileHome(root) {
     card.appendChild(info); return card;
   });
   if (seriesRail) root.appendChild(seriesRail);
+  const highlighted = recentlyHighlightedIds.map(id => library.find(entry => entry.id === id)).filter(entry => entry && !seen.has(entry.id));
+  highlighted.forEach(entry => seen.add(entry.id));
+  const highlightedRail = mobileRail('Recently highlighted', highlighted);
+  if (highlightedRail) root.appendChild(highlightedRail);
+  const wanted = library.filter(entry => entry.wantToRead && mobileReadingStatus(entry) !== 'finished' && !seen.has(entry.id)).slice(0, 8);
+  wanted.forEach(entry => seen.add(entry.id));
+  const wantedRail = mobileRail('Want to read', wanted);
+  if (wantedRail) root.appendChild(wantedRail);
   const unread = library.filter(entry => mobileReadingStatus(entry) === 'unread' && !seen.has(entry.id)).slice(0, 8);
   const unreadRail = mobileRail('Unread picks', unread);
   if (unreadRail) root.appendChild(unreadRail);
@@ -206,14 +222,14 @@ function mobileFilteredLibrary() {
 }
 
 function mobileLibrary(root) {
-  root.appendChild(mobileHeading('Library', 'THE SHARED SHELF'));
+  root.appendChild(mobileHeading('Library', 'The shared shelf'));
   const tools = mobileElement('div', 'mobile-library-tools');
   tools.appendChild(mobileElement('span', '', `${library.length} book${library.length === 1 ? '' : 's'}`));
   tools.appendChild(mobileButton('Sort & filter', mobileLibraryActions, 'mobile-pill'));
   tools.appendChild(mobileButton('Add books', () => document.getElementById('file-input').click(), 'mobile-pill'));
   tools.appendChild(mobileButton(bulkMode ? 'Cancel selection' : 'Select books', () => toggleBulkMode(!bulkMode), 'mobile-pill'));
   const viewButton = mobileButton(mobileLibraryView === 'list' ? 'Grid' : 'List', () => {
-    mobileLibraryView = mobileLibraryView === 'list' ? 'grid' : 'list'; localStorage.setItem('endpaper-mobile-library-view', mobileLibraryView); renderMobileShell();
+    mobileLibraryView = mobileLibraryView === 'list' ? 'grid' : 'list'; localStorage.setItem('endpaper-mobile-library-view', mobileLibraryView); mobileLastRouteKey = ''; renderMobileShell();
   }, 'mobile-pill mobile-icon-label');
   viewButton.prepend(mobileControlIcon(mobileLibraryView === 'list' ? 'grid' : 'list'));
   tools.appendChild(viewButton);
@@ -291,7 +307,7 @@ function mobileLibraryActions(event) {
     const wrapper = mobileElement('label', 'mobile-select-label', label);
     const source = document.getElementById(sourceId);
     const select = source.cloneNode(true);
-    select.removeAttribute('id'); select.removeAttribute('onchange');
+    select.removeAttribute('id'); select.removeAttribute('data-onchange');
     if (sourceId === 'shelf-filter') {
       for (const [value, text] of [['reading', 'Reading'], ['downloaded', 'Downloaded']]) {
         if (![...source.options].some(option => option.value === value)) source.add(new Option(text, value));
@@ -305,7 +321,7 @@ function mobileLibraryActions(event) {
   sheet.appendChild(mobileButton('Collections', () => { close(); openCollectionsManager(); }, 'mobile-secondary-action'));
   sheet.appendChild(mobileButton('Downloaded books', () => { close(); document.getElementById('shelf-filter').value = 'downloaded'; renderShelf(); }, 'mobile-secondary-action'));
   sheet.appendChild(mobileButton('Select books', () => { close(); toggleBulkMode(true); }, 'mobile-secondary-action'));
-  sheet.appendChild(mobileButton(mobileLibraryView === 'list' ? 'Grid view' : 'List view', () => { mobileLibraryView = mobileLibraryView === 'list' ? 'grid' : 'list'; localStorage.setItem('endpaper-mobile-library-view', mobileLibraryView); close(); renderMobileShell(); }, 'mobile-secondary-action'));
+  sheet.appendChild(mobileButton(mobileLibraryView === 'list' ? 'Grid view' : 'List view', () => { mobileLibraryView = mobileLibraryView === 'list' ? 'grid' : 'list'; localStorage.setItem('endpaper-mobile-library-view', mobileLibraryView); close(); mobileLastRouteKey = ''; renderMobileShell(); }, 'mobile-secondary-action'));
   sheet.appendChild(mobileButton('Add books', () => { close(); document.getElementById('file-input').click(); }, 'mobile-secondary-action'));
   sheet.appendChild(mobileButton('Done', close, 'mobile-wide-action'));
   backdrop.appendChild(sheet);
@@ -329,12 +345,14 @@ function mobileSearchResults(root, query) {
   const matches = needle ? library.filter(entry => `${entry.name} ${entry.author || ''} ${entry.series || ''} ${entry.description || ''} ${entry.tags || ''} ${entry.isbn || ''}`.toLocaleLowerCase().includes(needle)) : [];
   root.appendChild(mobileElement('p', 'mobile-results-label', needle ? `${matches.length} result${matches.length === 1 ? '' : 's'}` : 'Search by title, author, series, tag, or ISBN'));
   matches.forEach(entry => root.appendChild(mobileBookCard(entry, 'list')));
+  const inside = mobileElement('section', 'text-search-results'); inside.hidden = true; root.appendChild(inside);
+  scheduleTextSearch(query, inside);
 }
 
 function mobileSearch(root) {
-  root.appendChild(mobileHeading('Search', 'FIND YOUR NEXT BOOK'));
+  root.appendChild(mobileHeading('Search', 'Find your next book'));
   const input = mobileElement('input', 'mobile-search-input');
-  input.type = 'search'; input.placeholder = 'Title, author, series, tag, or ISBN';
+  input.type = 'search'; input.placeholder = 'Title, author, tag, ISBN, or words in a book';
   input.setAttribute('aria-label', 'Search library'); input.value = mobileSearchQuery;
   const results = mobileElement('div', 'mobile-search-results');
   input.addEventListener('input', () => { mobileSearchQuery = input.value; mobileSearchResults(results, input.value); });
@@ -374,7 +392,7 @@ function mobileMore(root) {
     libraryActions.push(['Collections', 'folder', () => openCollectionsManager()], ['Import backup', 'upload', () => document.getElementById('import-input').click()], ['Export backup', 'download', () => exportLibrary()]);
     accountActions.push(['People & permissions', 'users', () => openAdminModal()]);
   }
-  accountActions.push(['Log out', 'log-out', () => logout()]);
+  accountActions.push(['Passphrase & devices', 'key-round', () => openAccountSecurity()], ['Log out', 'log-out', () => logout()]);
   for (const [heading, items] of [['Reading', reading], ['Library', libraryActions], ['Preferences & help', preferences], ['Account', accountActions]]) {
     const section = mobileElement('section', 'more-section');
     section.appendChild(mobileElement('h2', '', heading));
@@ -394,7 +412,7 @@ function mobileSeries(root, name) {
   const books = library.filter(entry => entry.series === name).sort((a, b) => (Number(a.seriesIndex) || 0) - (Number(b.seriesIndex) || 0));
   if (!books.length) return mobileNavigate('home');
   const hero = mobileElement('div', 'mobile-series-hero');
-  if (books[0].coverPath) hero.style.backgroundImage = `url('/api/books/${encodeURIComponent(books[0].id)}/cover')`;
+  if (books[0].coverPath) hero.style.backgroundImage = `url('${coverUrl(books[0])}')`;
   const stack = mobileElement('div', 'mobile-series-stack');
   books.slice(0, 3).forEach(entry => stack.appendChild(mobileCover(entry, 'mobile-series-cover')));
   hero.appendChild(stack);
@@ -450,8 +468,19 @@ function mobileBookDetail(root, id) {
   if (isCurrentUserAdmin()) {
     actions.appendChild(mobileButton('Collections', () => openBookCollectionsModal(id)));
     actions.appendChild(mobileButton('Edit details', () => editBookMetadata(id)));
+    actions.appendChild(mobileButton(entry.coverPath ? 'Replace cover' : 'Add cover', () => chooseCover(id)));
+    actions.appendChild(mobileButton('Look up by ISBN', () => lookupBookMetadata(id)));
   }
   root.appendChild(actions);
+  const rating = mobileElement('div', 'mobile-rating');
+  rating.appendChild(mobileElement('span', '', 'Your rating'));
+  for (let number = 1; number <= 5; number++) {
+    const star = mobileButton('', () => setBookRating(id, number === entry.rating ? null : number), `mobile-star${number <= (entry.rating || 0) ? ' filled' : ''}`);
+    star.setAttribute('aria-label', `Rate ${number} star${number === 1 ? '' : 's'}`);
+    star.setAttribute('aria-pressed', String(number <= (entry.rating || 0)));
+    star.appendChild(controlIcon('star')); rating.appendChild(star);
+  }
+  root.appendChild(rating);
   const statusLabel = mobileElement('label', 'mobile-status-label', 'Reading status');
   const statusSelect = mobileElement('select');
   for (const [value, label] of [['unread', 'Unread'], ['reading', 'Reading'], ['finished', 'Finished']]) {
@@ -468,19 +497,25 @@ function mobileBookDetail(root, id) {
     finally { statusSelect.disabled = false; }
   });
   statusLabel.appendChild(statusSelect); root.appendChild(statusLabel);
+  const want = mobileButton(entry.wantToRead ? 'Saved to Want to read' : 'Want to read', async () => {
+    want.disabled = true;
+    try {
+      const updated = await api.updateBook(id, { want_to_read: !entry.wantToRead }, { expectedAccountVersion });
+      if (!isActiveAccount(expectedAccountVersion)) return;
+      entry.wantToRead = Boolean(updated.want_to_read);
+      want.textContent = entry.wantToRead ? 'Saved to Want to read' : 'Want to read';
+      want.setAttribute('aria-pressed', String(entry.wantToRead));
+      renderShelf();
+    } catch (error) { if (isActiveAccount(expectedAccountVersion)) showToast(error.message || 'Could not update Want to read.', 'error'); }
+    finally { want.disabled = false; }
+  }, 'mobile-secondary-action');
+  want.setAttribute('aria-pressed', String(Boolean(entry.wantToRead)));
+  root.appendChild(want);
+  root.appendChild(mobileButton(entry.userTags?.length ? `Your tags: ${entry.userTags.join(', ')}` : 'Add your tags', () => editUserTags(id), 'mobile-secondary-action'));
   root.appendChild(mobileButton('Highlights & notes  ›', () => mobileNavigate('notebook', id), 'mobile-secondary-action'));
   root.appendChild(mobileButton('Read from beginning', () => { entry.lastLocationCfi = null; openBook(id); }, 'mobile-secondary-action'));
   if (isCurrentUserAdmin()) root.appendChild(mobileButton('Remove book', () => removeBook(id), 'mobile-secondary-action'));
-  const rating = mobileElement('div', 'mobile-rating');
-  rating.appendChild(mobileElement('span', '', 'Your rating'));
-  for (let number = 1; number <= 5; number++) {
-    const star = mobileButton('', () => setBookRating(id, number === entry.rating ? null : number), `mobile-star${number <= (entry.rating || 0) ? ' filled' : ''}`);
-    star.setAttribute('aria-label', `Rate ${number} star${number === 1 ? '' : 's'}`);
-    star.setAttribute('aria-pressed', String(number <= (entry.rating || 0)));
-    star.appendChild(controlIcon('star')); rating.appendChild(star);
-  }
-  root.appendChild(rating);
-  root.appendChild(mobileElement('p', 'mobile-detail-meta', `${entry.progress ? `${Math.round(entry.progress)}% read` : 'Unread'}${entry.wordCount ? ` · about ${formatMinutes(estimatedBookMinutes(entry))}` : ''}${entry.fileSize ? ` · ${(entry.fileSize / 1048576).toFixed(1)} MB` : ''}`));
+  root.appendChild(mobileElement('p', 'mobile-detail-meta', `${entry.progress ? `${Math.round(entry.progress)}% read` : 'Unread'}${entry.wordCount ? ` · about ${formatMinutes(estimatedBookMinutes(entry))}` : ''}${entry.fileSize ? ` · ${formatBytes(entry.fileSize)}` : ''}`));
   if (entry.description) root.appendChild(mobileElement('p', 'mobile-description', entry.description));
   if (entry.tags) root.appendChild(mobileElement('p', 'mobile-detail-meta', entry.tags));
   mobileRefreshPins().then(success => {
@@ -536,14 +571,14 @@ async function mobileOffline(root, version) {
     totalBytes += bytes;
     const row = mobileElement('div', 'mobile-offline-row');
     row.appendChild(mobileBookCard(entry, 'list'));
-    row.appendChild(mobileElement('small', 'mobile-offline-size', `${(bytes / 1048576).toFixed(1)} MB`));
+    row.appendChild(mobileElement('small', 'mobile-offline-size', formatBytes(bytes)));
     row.appendChild(mobileButton('Remove', async () => {
       try { await removeOfflineBook(entry.id); mobilePinnedIds.delete(entry.id); renderMobileShell(); }
       catch (error) { showToast(error.message || 'Could not remove download.'); }
     }, 'mobile-offline-remove'));
     list.appendChild(row);
   }
-  if (version === mobileRenderVersion && books.length) usage.textContent = `${books.length} downloaded · ${(totalBytes / 1048576).toFixed(1)} MB stored`;
+  if (version === mobileRenderVersion && books.length) usage.textContent = `${books.length} downloaded · ${formatBytes(totalBytes)} stored`;
 }
 
 async function mobileNotebook(root, version) {
@@ -552,9 +587,10 @@ async function mobileNotebook(root, version) {
   const search = mobileElement('input', 'mobile-search-input');
   search.type = 'search'; search.placeholder = 'Search highlights and notes'; search.setAttribute('aria-label', 'Search highlights and notes');
   search.value = mobileNotebookQuery; root.appendChild(search);
+  if (!bookId) root.appendChild(mobileButton('Export notebook…', () => exportNotebook(), 'mobile-secondary-action'));
   const tags = mobileElement('div', 'mobile-note-tags'); root.appendChild(tags);
   const list = mobileElement('div', 'mobile-notebook-list'); root.appendChild(list);
-  list.appendChild(mobileElement('p', 'mobile-empty', 'Loading highlights…'));
+  list.appendChild(loadingSkeleton('rows', 4, 'Loading highlights…'));
   try {
     const highlights = (await api.getAllHighlights()).filter(item => !bookId || item.book_id === bookId);
     if (version !== mobileRenderVersion) return;
@@ -578,10 +614,89 @@ async function mobileNotebook(root, version) {
   } catch (_) { list.textContent = 'Notebook is unavailable right now.'; }
 }
 
+/* ---------- Goals and reading history ---------- */
+function goalMeter(label, value, goal, formatValue) {
+  const meter = mobileElement('div', 'goal-meter');
+  const pct = goal > 0 ? Math.min(100, Math.round(value / goal * 100)) : 0;
+  const head = mobileElement('div', 'goal-meter-head');
+  head.append(mobileElement('span', '', label), mobileElement('strong', '', goal > 0 ? `${formatValue(value)} of ${formatValue(goal)}` : formatValue(value)));
+  const track = mobileElement('div', 'goal-meter-track');
+  track.setAttribute('role', 'progressbar'); track.setAttribute('aria-label', label);
+  track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100'); track.setAttribute('aria-valuenow', String(pct));
+  const fill = mobileElement('span', `goal-meter-fill${pct >= 100 ? ' complete' : ''}`); fill.style.width = `${pct}%`;
+  track.appendChild(fill);
+  meter.append(head, track);
+  return meter;
+}
+
+const formatGoalMinutes = seconds => formatMinutes(Math.round(seconds / 60)) || '0 min';
+
+function goalProgressSection(stats, goals) {
+  const section = mobileElement('section', 'goal-progress');
+  const daily = Number(goals.dailyMinutes) || 0;
+  const weekly = Number(goals.weeklyHours) || 0;
+  const yearly = Number(goals.booksPerYear) || 0;
+  if (!daily && !weekly && !yearly) return null;
+  if (daily) section.appendChild(goalMeter('Today', stats.today_seconds || 0, daily * 60, formatGoalMinutes));
+  if (weekly) section.appendChild(goalMeter('Last 7 days', stats.time_read_this_week || 0, weekly * 3600, formatGoalMinutes));
+  if (yearly) section.appendChild(goalMeter(`Books in ${new Date().getFullYear()}`, stats.books_finished_this_year || 0, yearly, value => String(value)));
+  return section;
+}
+
+// A GitHub-style calendar of the last 26 weeks; darker means more reading.
+function readingHeatmap(calendar) {
+  const days = (calendar || []).slice(-182);
+  if (!days.length) return null;
+  const max = Math.max(1, ...days.map(day => day.seconds || 0));
+  const grid = mobileElement('div', 'reading-heatmap');
+  grid.setAttribute('role', 'img');
+  const daysRead = days.filter(day => day.seconds > 0).length;
+  grid.setAttribute('aria-label', `Reading calendar: ${daysRead} of the last ${days.length} days had reading`);
+  const firstWeekday = new Date(`${days[0].date}T12:00:00`).getDay();
+  for (let pad = 0; pad < firstWeekday; pad++) grid.appendChild(mobileElement('span', 'heat-cell empty'));
+  for (const day of days) {
+    const level = day.seconds > 0 ? Math.min(4, Math.ceil(day.seconds / max * 4)) : 0;
+    const cell = mobileElement('span', `heat-cell level-${level}`);
+    cell.title = `${day.date}: ${formatGoalMinutes(day.seconds || 0)}`;
+    grid.appendChild(cell);
+  }
+  return grid;
+}
+
+function yearInReview(review) {
+  if (!review || (!review.seconds && !review.books_finished?.length)) return null;
+  const section = mobileElement('section', 'year-review');
+  section.appendChild(mobileElement('h2', '', `Your ${review.year} so far`));
+  const facts = mobileElement('div', 'year-review-facts');
+  for (const [value, label] of [
+    [formatGoalMinutes(review.seconds || 0), 'reading time'],
+    [String(review.days_read || 0), review.days_read === 1 ? 'day with reading' : 'days with reading'],
+    [String(review.books_finished?.length || 0), review.books_finished?.length === 1 ? 'book finished' : 'books finished'],
+  ]) {
+    const fact = mobileElement('div', 'year-review-fact');
+    fact.append(mobileElement('strong', '', value), mobileElement('small', '', label));
+    facts.appendChild(fact);
+  }
+  section.appendChild(facts);
+  const lines = [];
+  if (review.busiest_month) {
+    const name = new Date(`${review.busiest_month.month}-15T12:00:00`).toLocaleString(undefined, { month: 'long' });
+    lines.push(`Busiest month: ${name} (${formatGoalMinutes(review.busiest_month.seconds)})`);
+  }
+  if (review.top_book) lines.push(`Most time with: ${review.top_book.title}`);
+  for (const line of lines) section.appendChild(mobileElement('p', 'mobile-detail-meta', line));
+  if (review.books_finished?.length) {
+    const list = mobileElement('ol', 'year-review-books');
+    for (const book of review.books_finished.slice(0, 12)) list.appendChild(mobileElement('li', '', book.author ? `${book.title} — ${book.author}` : book.title));
+    section.appendChild(list);
+  }
+  return section;
+}
+
 async function mobileStats(root, version) {
   root.appendChild(mobileHeading('Reading stats', '', true));
   const content = mobileElement('div', 'mobile-stats'); root.appendChild(content);
-  content.textContent = 'Loading statistics…';
+  content.replaceChildren(loadingSkeleton('rows', 3, 'Loading statistics…'));
   try {
     const stats = await api.getStats();
     if (version !== mobileRenderVersion) return;
@@ -589,6 +704,22 @@ async function mobileStats(root, version) {
     for (const [value, label] of [[stats.reading_streak_days, 'Day streak'], [stats.books_finished, 'Books finished'], [formatMinutes(Math.round(stats.time_read_this_week / 60)) || '0 min', 'Last 7 days'], [formatMinutes(Math.round(stats.time_read_total / 60)) || '0 min', 'Total reading']]) {
       const card = mobileElement('div', 'mobile-stat'); card.appendChild(mobileElement('strong', '', String(value))); card.appendChild(mobileElement('small', '', label)); content.appendChild(card);
     }
+    const goals = await api.getSettings().then(prefs => prefs['reading-goals'] || {}).catch(() => ({}));
+    if (version !== mobileRenderVersion) return;
+    const goalSection = goalProgressSection(stats, goals);
+    if (goalSection) {
+      const goalsWrap = mobileElement('section', 'mobile-stats-detail');
+      goalsWrap.append(mobileElement('h2', '', 'Goals'), goalSection);
+      root.appendChild(goalsWrap);
+    }
+    const heatmap = readingHeatmap(stats.calendar);
+    if (heatmap) {
+      const calendarSection = mobileElement('section', 'mobile-stats-detail');
+      calendarSection.append(mobileElement('h2', '', 'Reading calendar'), heatmap);
+      root.appendChild(calendarSection);
+    }
+    const review = yearInReview(stats.year_review);
+    if (review) root.appendChild(review);
     const details = mobileElement('section', 'mobile-stats-detail'); root.appendChild(details);
     details.appendChild(mobileElement('h2', '', 'Last 14 days'));
     const days = Array.isArray(stats.daily) ? stats.daily : [];
@@ -607,9 +738,15 @@ async function mobileStats(root, version) {
       details.appendChild(mobileElement('h2', '', 'Recent months'));
       details.appendChild(mobileElement('p', 'mobile-detail-meta', stats.monthly.slice(-6).map(month => `${month.month}: ${formatMinutes(Math.round(month.seconds / 60)) || '0 min'}`).join(' · ')));
     }
-    if (stats.most_read?.length) {
-      details.appendChild(mobileElement('h2', '', 'Most read'));
-      for (const item of stats.most_read) details.appendChild(mobileElement('p', 'mobile-detail-meta', `${item.title} · ${formatMinutes(Math.round(item.seconds / 60))}`));
+    if (stats.per_book?.length) {
+      details.appendChild(mobileElement('h2', '', 'Time per book'));
+      const table = mobileElement('ul', 'per-book-time');
+      for (const item of stats.per_book.slice(0, 25)) {
+        const row = mobileElement('li');
+        row.append(mobileElement('span', '', item.title), mobileElement('small', '', `${formatGoalMinutes(item.seconds)} · ${item.sessions} session${item.sessions === 1 ? '' : 's'}`));
+        table.appendChild(row);
+      }
+      details.appendChild(table);
     }
     details.appendChild(mobileButton('View reading goals', () => mobileNavigate('goals'), 'mobile-wide-action'));
   } catch (_) { content.textContent = 'Statistics are unavailable right now.'; }
@@ -627,7 +764,7 @@ async function mobileGoals(root, version) {
   }
   const save = mobileButton('Save goals', async () => {
     const goals = Object.fromEntries(fields.map(([key]) => [key, Number(inputs[key].value) || 0]));
-    try { await api.saveSettings({ 'reading-goals': goals }); showToast('Reading goals saved.'); }
+    try { await api.saveSettings({ 'reading-goals': goals }); showToast('Reading goals saved.'); refreshHomeGoals(); }
     catch (error) { showToast(error.message || 'Could not save goals.'); }
   }, 'mobile-wide-action');
   form.appendChild(save); root.appendChild(form);
@@ -643,14 +780,17 @@ function mobilePreferences(root) {
   root.appendChild(mobileHeading('Appearance & reader defaults', '', true));
   root.appendChild(mobileButton(document.documentElement.classList.contains('dark-shell') ? 'Use light app appearance' : 'Use dark app appearance', () => { toggleShellTheme(); renderMobileShell(); }, 'mobile-secondary-action'));
   const fields = [
-    ['Reading theme', Object.keys(THEMES), settings.theme, value => setReadingTheme(value)],
+    ['Reading theme', Object.entries(THEMES).map(([key, theme]) => [key, theme.label]), settings.theme, value => setReadingTheme(value)],
     ['Layout', ['paginated', 'scrolled'], settings.layout, value => setLayout(value)],
     ['Typeface', FONTS.map(font => font.name), settings.font, value => { settings.font = value; applyTheme(); }],
   ];
   for (const [label, options, current, change] of fields) {
     const wrapper = mobileElement('label', 'mobile-select-label', label);
     const select = mobileElement('select');
-    for (const value of options) select.appendChild(new Option(value, value, false, value === current));
+    for (const option of options) {
+      const [value, text] = Array.isArray(option) ? option : [option, option];
+      select.appendChild(new Option(text, value, false, value === current));
+    }
     select.addEventListener('change', () => change(select.value));
     wrapper.appendChild(select); root.appendChild(wrapper);
   }
@@ -660,6 +800,7 @@ function mobilePreferences(root) {
   size.appendChild(slider); root.appendChild(size);
 }
 
+let mobileLastRouteKey = '';
 function renderMobileShell() {
   if (!isMobileShell()) { window.renderDesktopShell?.(); return; }
   const shell = document.getElementById('mobile-shell');
@@ -668,6 +809,10 @@ function renderMobileShell() {
   const version = ++mobileRenderVersion;
   root.replaceChildren();
   const { page, value } = mobileRoute;
+  // Animate page entry only when the route changes, not when the same page re-renders.
+  const routeKey = `${page}:${value ?? ''}`;
+  root.classList.toggle('route-enter', routeKey !== mobileLastRouteKey);
+  mobileLastRouteKey = routeKey;
   if (page === 'home') mobileHome(root);
   else if (page === 'library') mobileLibrary(root);
   else if (page === 'search') mobileSearch(root);

@@ -11,6 +11,8 @@ const parser = new XMLParser({
   attributeNamePrefix: '@_',
   textNodeName: '#text',
   isArray: (name) => ['item', 'itemref', 'reference', 'meta', 'dc:creator', 'dc:identifier'].includes(name),
+  // Keep metadata as text: an ISBN like 0123456789 or a numeric title must not become a number.
+  parseTagValue: false,
 });
 
 const MAX_XML_BYTES = 1 * 1024 * 1024;
@@ -72,6 +74,44 @@ function readEntry(zipfile, entry, maxBytes) {
   });
 }
 
+// Resolve a manifest href against the OPF directory the way a browser would:
+// drop any fragment, percent-decode (tolerating malformed escapes) and collapse
+// ./ and ../ segments. Returns null for paths that escape the archive root.
+function resolveArchivePath(baseDir, href) {
+  const withoutFragment = String(href || '').split('#')[0];
+  if (!withoutFragment) return null;
+  let decoded = withoutFragment;
+  try { decoded = decodeURIComponent(withoutFragment); } catch (_) { /* keep the raw href */ }
+  const resolved = path.posix.normalize(baseDir + decoded);
+  if (resolved.startsWith('../') || resolved.startsWith('/')) return null;
+  return resolved.toLowerCase();
+}
+
+const HTML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“' };
+
+function decodeEntity(match, entity) {
+  if (entity[0] === '#') {
+    const code = entity[1] === 'x' || entity[1] === 'X' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+    return Number.isInteger(code) && code > 0 && code <= 0x10FFFF ? String.fromCodePoint(code) : match;
+  }
+  return HTML_ENTITIES[entity.toLowerCase()] ?? match;
+}
+
+// Publisher blurbs are usually HTML. Store readable plain text with paragraph breaks.
+function htmlToText(value) {
+  const text = String(value || '');
+  if (!/<\/?[a-z][^>]*>/i.test(text)) return text.trim() || null;
+  return text
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|li|h[1-6]|blockquote|tr)>/gi, '\n\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, decodeEntity)
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim() || null;
+}
+
 async function validateEpub(epubPath) {
   const { zipfile, entries } = await openZip(epubPath);
   try {
@@ -104,9 +144,13 @@ async function validateEpub(epubPath) {
   }
 }
 
-async function extractMeta(epubPath, coverId, coversDir) {
+// Text kept per book for full-text search; enough for very long novels.
+const MAX_INDEXED_TEXT_CHARS = 8 * 1024 * 1024;
+
+async function extractMeta(epubPath, coverId, coversDir, { extractCover = true, collectText = false } = {}) {
   const { zipfile, entries } = await openZip(epubPath);
-  const result = { title: '', author: '', series: null, seriesIndex: null, description: null, isbn: null, tags: null, coverPath: null, wordCount: null };
+  const result = { title: '', author: '', series: null, seriesIndex: null, description: null, isbn: null, tags: null, coverPath: null, wordCount: null, textSections: collectText ? [] : undefined };
+  let indexedChars = 0;
 
   try {
     const containerEntry = entries.get('meta-inf/container.xml');
@@ -147,11 +191,22 @@ async function extractMeta(epubPath, coverId, coversDir) {
       const manifestItem = items.find(item => item['@_id'] === spineItem['@_idref']);
       const mediaType = String(manifestItem && manifestItem['@_media-type'] || '').toLowerCase();
       if (!manifestItem || !/(xhtml|html|xml)/.test(mediaType)) continue;
-      const entry = entries.get((opfDir + decodeURI(manifestItem['@_href'] || '')).toLowerCase());
+      const entryPath = resolveArchivePath(opfDir, manifestItem['@_href']);
+      const entry = entryPath && entries.get(entryPath);
       if (!entry || entry.uncompressedSize > MAX_WORD_COUNT_DOCUMENT_BYTES || countedBytes + entry.uncompressedSize > MAX_WORD_COUNT_BYTES) { wordCountIncomplete = true; continue; }
       const source = (await readEntry(zipfile, entry, MAX_WORD_COUNT_DOCUMENT_BYTES)).toString('utf8');
       countedBytes += Buffer.byteLength(source);
       const plain = source.replace(/<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>|<[^>]+>/gi, ' ').replace(/&(?:nbsp|amp|quot|#39|lt|gt);/gi, ' ');
+      if (collectText && indexedChars < MAX_INDEXED_TEXT_CHARS) {
+        const readable = source
+          .replace(/<head\b[^>]*>[\s\S]*?<\/head>|<script\b[^>]*>[\s\S]*?<\/script>|<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, decodeEntity)
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, MAX_INDEXED_TEXT_CHARS - indexedChars);
+        if (readable) { result.textSections.push({ href: manifestItem['@_href'] || '', text: readable }); indexedChars += readable.length; }
+      }
       const matches = plain.match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu);
       words += matches ? matches.length : 0;
     }
@@ -171,7 +226,7 @@ async function extractMeta(epubPath, coverId, coversDir) {
       }
     }
     const description = metadata['dc:description'];
-    if (description) result.description = typeof description === 'string' ? description : (description['#text'] || null);
+    if (description) result.description = htmlToText(typeof description === 'string' ? description : description['#text']);
     const subjects = metadata['dc:subject'];
     if (subjects) {
       const subjectList = Array.isArray(subjects) ? subjects : [subjects];
@@ -209,11 +264,9 @@ async function extractMeta(epubPath, coverId, coversDir) {
       if (covItem) coverHref = covItem['@_href'];
     }
 
-    if (coverHref) {
-      // url decode href in case it has spaces
-      coverHref = decodeURI(coverHref);
-      const coverZipPath = opfDir + coverHref;
-      const coverEntry = entries.get(coverZipPath.toLowerCase());
+    if (coverHref && extractCover) {
+      const coverZipPath = resolveArchivePath(opfDir, coverHref);
+      const coverEntry = coverZipPath && entries.get(coverZipPath);
       if (coverEntry) {
         const coverData = await readEntry(zipfile, coverEntry, MAX_COVER_BYTES);
         
@@ -234,7 +287,7 @@ async function extractMeta(epubPath, coverId, coversDir) {
             
           result.coverPath = coverFilename;
         } catch (e) {
-          console.error('Could not process/save cover image with sharp:', e.message);
+          console.error('Could not process/save cover image with sharp:', e.message); // runs in a worker thread
         }
       }
     }
@@ -245,4 +298,4 @@ async function extractMeta(epubPath, coverId, coversDir) {
   return result;
 }
 
-module.exports = { extractMeta, validateEpub };
+module.exports = { extractMeta, validateEpub, resolveArchivePath, htmlToText };

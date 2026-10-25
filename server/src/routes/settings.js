@@ -8,6 +8,7 @@ const router = express.Router();
 // Keys that must never be exposed or overwritten via the API
 const SENSITIVE_KEYS = ['passphrase_hash', 'session_token'];
 const SETTING_KEY_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
+const MAX_SETTING_KEYS = 50;
 
 /**
  * GET /api/settings
@@ -18,7 +19,8 @@ router.get('/api/settings', (req, res) => {
   const settings = {};
   for (const row of rows) {
     if (!SENSITIVE_KEYS.includes(row.key)) {
-      // Try to parse JSON values, fall back to string
+      // Values are stored as JSON. Rows written by older builds may hold a raw
+      // string, which is returned as-is.
       try {
         settings[row.key] = JSON.parse(row.value);
       } catch (e) {
@@ -47,11 +49,16 @@ router.put('/api/settings', (req, res) => {
     ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value
   `);
 
+  const countKeys = db.prepare('SELECT COUNT(*) AS n FROM settings WHERE user_id = ?');
+  const hasKey = db.prepare('SELECT 1 FROM settings WHERE user_id = ? AND key = ?');
   const runAll = db.transaction((entries) => {
+    // The app uses a handful of keys; cap them so one account cannot fill the disk.
+    const added = entries.filter(([key]) => !SENSITIVE_KEYS.includes(key) && !hasKey.get(req.user_id, key)).length;
+    if (countKeys.get(req.user_id).n + added > MAX_SETTING_KEYS) throw new Error(`At most ${MAX_SETTING_KEYS} settings can be stored`);
     for (const [key, value] of entries) {
       if (SENSITIVE_KEYS.includes(key)) continue;
       if (!SETTING_KEY_RE.test(key)) throw new Error(`Invalid setting key: ${key}`);
-      const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+      const serialized = JSON.stringify(value);
       if (serialized === undefined || serialized.length > 100_000) throw new Error(`Setting ${key} is too large or unsupported`);
       upsert.run(req.user_id, key, serialized);
     }

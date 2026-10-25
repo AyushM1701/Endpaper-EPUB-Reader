@@ -4,6 +4,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const { randomUUID } = require('crypto');
 const db = require('../db');
+const logger = require('../lib/logger');
 const { validateUuidParam } = require('../lib/validation');
 
 const router = express.Router();
@@ -40,7 +41,7 @@ router.post('/api/users', requireAdmin, async (req, res) => {
     if (!username || typeof username !== 'string' || username.trim().length === 0 || username.length > 255) {
       return res.status(400).json({ error: 'A valid username is required' });
     }
-    if (!passphrase || typeof passphrase !== 'string' || passphrase.length < 12 || passphrase.length > 1024) {
+    if (!passphrase || typeof passphrase !== 'string' || passphrase.trim().length < 12 || passphrase.length > 1024) {
       return res.status(400).json({ error: 'A valid passphrase (min 12 characters) is required' });
     }
     if (is_admin !== undefined && typeof is_admin !== 'boolean') {
@@ -63,7 +64,7 @@ router.post('/api/users', requireAdmin, async (req, res) => {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || (err.message && err.message.includes('UNIQUE constraint failed'))) {
       return res.status(409).json({ error: 'Username already exists' });
     }
-    console.error('Error creating user:', err);
+    logger.error({ err }, 'Error creating user');
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -99,7 +100,7 @@ router.patch('/api/users/:id', validateUuidParam('id'), requireAdmin, async (req
 
     let newHash = null;
     if (passphrase !== undefined) {
-      if (typeof passphrase !== 'string' || passphrase.length < 12 || passphrase.length > 1024) {
+      if (typeof passphrase !== 'string' || passphrase.trim().length < 12 || passphrase.length > 1024) {
         return res.status(400).json({ error: 'A valid passphrase (min 12 characters) is required' });
       }
       newHash = await bcrypt.hash(passphrase, 10);
@@ -107,7 +108,8 @@ router.patch('/api/users/:id', validateUuidParam('id'), requireAdmin, async (req
 
     db.transaction(() => {
       if (newHash !== null) {
-        db.prepare('UPDATE users SET is_admin = ?, passphrase_hash = ? WHERE id = ?').run(newAdmin, newHash, req.params.id);
+        // A reset is the recovery path for a lost authenticator too, so it also turns off two-step sign-in.
+        db.prepare('UPDATE users SET is_admin = ?, passphrase_hash = ?, totp_secret = NULL, totp_pending_secret = NULL, totp_last_step = NULL, totp_recovery = NULL WHERE id = ?').run(newAdmin, newHash, req.params.id);
         // Revoke active sessions on passphrase reset
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.params.id);
       } else {
@@ -118,7 +120,7 @@ router.patch('/api/users/:id', validateUuidParam('id'), requireAdmin, async (req
     const updated = db.prepare('SELECT id, username, is_admin, created_at FROM users WHERE id = ?').get(req.params.id);
     res.json(updated);
   } catch (err) {
-    console.error('Error updating user:', err);
+    logger.error({ err }, 'Error updating user');
     res.status(500).json({ error: 'Internal server error' });
   }
 });

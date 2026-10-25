@@ -7,8 +7,25 @@ const { validateUuidParam } = require('../lib/validation');
 
 const router = express.Router();
 
-function closeSession(session, endedAt) {
+// Clients heartbeat every minute while the reader is visible. A session that
+// was never ended (closed tab, killed PWA) only counts up to its last
+// heartbeat plus a short grace period, not until the next time a book opens.
+const IDLE_GRACE_MS = 2 * 60 * 1000;
+// Sessions from clients that predate heartbeats have no activity record.
+const UNTRACKED_SESSION_CAP_MS = 4 * 60 * 60 * 1000;
+
+function effectiveEnd(session, requestedEnd) {
+  const start = Date.parse(session.started_at);
+  const end = Date.parse(requestedEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return requestedEnd;
+  const lastActive = Date.parse(session.last_active_at || '');
+  const limit = Number.isFinite(lastActive) ? lastActive + IDLE_GRACE_MS : start + UNTRACKED_SESSION_CAP_MS;
+  return new Date(Math.max(start, Math.min(end, limit))).toISOString();
+}
+
+function closeSession(session, requestedEnd) {
   if (session.ended_at) return session;
+  const endedAt = effectiveEnd(session, requestedEnd);
   const duration = Math.max(0, Math.floor((new Date(endedAt).getTime() - new Date(session.started_at).getTime()) / 1000));
   const progress = db.prepare('SELECT progress_percent FROM user_books WHERE user_id = ? AND book_id = ?').get(session.user_id, session.book_id)?.progress_percent;
   db.prepare(`UPDATE reading_sessions SET ended_at = ?, duration_seconds = ?, end_progress_percent = ? WHERE id = ?`)
@@ -41,11 +58,22 @@ router.post('/api/sessions/start', (req, res) => {
     const openSessions = db.prepare('SELECT * FROM reading_sessions WHERE ended_at IS NULL AND user_id = ? AND COALESCE(client_id, ?) = ?').all(req.user_id, clientId, clientId);
     for (const session of openSessions) closeSession(session, started_at);
     const progress = db.prepare('SELECT progress_percent FROM user_books WHERE user_id = ? AND book_id = ?').get(req.user_id, book_id)?.progress_percent;
-    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at, client_id, start_progress_percent) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(id, req.user_id, book_id, started_at, clientId, progress ?? 0);
+    db.prepare('INSERT INTO reading_sessions (id, user_id, book_id, started_at, last_active_at, client_id, start_progress_percent) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, req.user_id, book_id, started_at, started_at, clientId, progress ?? 0);
   })();
 
   res.status(201).json({ id, book_id, started_at, client_id: clientId });
+});
+
+/**
+ * POST /api/sessions/:id/heartbeat
+ * Records that the reader is still on screen.
+ */
+router.post('/api/sessions/:id/heartbeat', validateUuidParam('id'), (req, res) => {
+  const result = db.prepare('UPDATE reading_sessions SET last_active_at = ? WHERE id = ? AND user_id = ? AND ended_at IS NULL')
+    .run(new Date().toISOString(), req.params.id, req.user_id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Session not found or already ended' });
+  res.json({ ok: true });
 });
 
 /**
@@ -82,9 +110,9 @@ router.get('/api/stats', (req, res) => {
     SELECT COALESCE(SUM(duration_seconds), 0) as total FROM reading_sessions WHERE user_id = ?
   `).get(req.user_id);
 
-  // Books finished (global completion threshold is 98%).
+  // Books finished: reaching 98% marks a book finished, and readers can also set it by hand.
   const finishedRow = db.prepare(`
-    SELECT COUNT(*) as total FROM user_books WHERE progress_percent >= 98 AND user_id = ?
+    SELECT COUNT(*) as total FROM user_books WHERE status = 'finished' AND user_id = ?
   `).get(req.user_id);
 
   // Timezone resolution: validate client timezone
@@ -110,7 +138,7 @@ router.get('/api/stats', (req, res) => {
   // Reading streak: every local date touched by a session counts, including a
   // session crossing midnight. There is no artificial historical cutoff.
   const sessionRows = db.prepare(`
-    SELECT rs.started_at, COALESCE(rs.ended_at, CURRENT_TIMESTAMP) AS ended_at,
+    SELECT rs.started_at, COALESCE(rs.ended_at, rs.last_active_at, rs.started_at) AS ended_at,
            COALESCE(rs.duration_seconds, 0) AS duration_seconds,
            rs.book_id, b.title
     FROM reading_sessions rs
@@ -219,7 +247,46 @@ router.get('/api/stats', (req, res) => {
     ? Math.max(120, Math.min(450, Math.round(estimatedWordsRead / (paceSeconds / 60))))
     : null;
 
+  // Goal progress, a year-long calendar, time per book and a year in review.
+  const todayKey2 = getLocalDateKey(new Date());
+  const thisYear = todayKey2.slice(0, 4);
+  const calendar = [];
+  for (let offset = 364; offset >= 0; offset--) {
+    const key = getLocalDateKey(new Date(Date.now() - offset * 86400000));
+    calendar.push({ date: key, seconds: dailySeconds.get(key) || 0 });
+  }
+  const finishedRows = db.prepare(`
+    SELECT ub.book_id, b.title, b.author, ub.finished_at FROM user_books ub JOIN books b ON b.id = ub.book_id
+    WHERE ub.user_id = ? AND ub.status = 'finished' AND ub.finished_at IS NOT NULL
+    ORDER BY ub.finished_at DESC
+  `).all(req.user_id);
+  const finishedThisYear = finishedRows.filter(row => {
+    const date = new Date(row.finished_at.includes('T') ? row.finished_at : `${row.finished_at.replace(' ', 'T')}Z`);
+    return !isNaN(date.getTime()) && getLocalDateKey(date).startsWith(thisYear);
+  });
+  const perBook = db.prepare(`
+    SELECT rs.book_id, b.title, b.author, SUM(COALESCE(rs.duration_seconds, 0)) AS seconds, COUNT(*) AS sessions, MAX(rs.started_at) AS last_read
+    FROM reading_sessions rs JOIN books b ON b.id = rs.book_id
+    WHERE rs.user_id = ? GROUP BY rs.book_id, b.title, b.author HAVING seconds > 0 ORDER BY seconds DESC
+  `).all(req.user_id);
+  const yearMonths = [...monthlySeconds.entries()].filter(([month]) => month.startsWith(thisYear));
+  const yearSeconds = yearMonths.reduce((sum, [, seconds]) => sum + seconds, 0);
+  const busiestMonth = yearMonths.sort(([, a], [, b]) => b - a)[0] || null;
+  const daysReadThisYear = [...dailySeconds.entries()].filter(([key, seconds]) => key.startsWith(thisYear) && seconds > 0).length;
+
   res.json({
+    today_seconds: dailySeconds.get(todayKey2) || 0,
+    books_finished_this_year: finishedThisYear.length,
+    calendar,
+    per_book: perBook,
+    year_review: {
+      year: Number(thisYear),
+      seconds: yearSeconds,
+      days_read: daysReadThisYear,
+      busiest_month: busiestMonth ? { month: busiestMonth[0], seconds: busiestMonth[1] } : null,
+      books_finished: finishedThisYear.slice(0, 50).map(row => ({ book_id: row.book_id, title: row.title, author: row.author, finished_at: row.finished_at })),
+      top_book: perBook.find(row => String(row.last_read || '').startsWith(thisYear)) || null,
+    },
     time_read_this_week: weekRow.total,
     time_read_total: totalRow.total,
     books_finished: finishedRow.total,

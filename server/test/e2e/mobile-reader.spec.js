@@ -162,7 +162,7 @@ test('library sheet traps focus and supports reading and downloaded filters', as
   await expect(page.getByRole('button', { name: 'Sort & filter' })).toBeFocused();
 });
 
-test('mobile status reflects server normalization', async ({ page }) => {
+test('mobile status keeps a manual choice over saved progress', async ({ page }) => {
   await page.evaluate(async () => {
     const entry = library.find(book => book.name === 'Three Chapter Test Book');
     const updated = await api.updateBook(entry.id, { progress_percent: 99 });
@@ -172,7 +172,8 @@ test('mobile status reflects server normalization', async ({ page }) => {
   await page.getByRole('button', { name: 'Details for Three Chapter Test Book' }).click();
   await page.getByRole('combobox', { name: 'Reading status', exact: true }).click();
   await page.getByRole('option', { name: 'Unread', exact: true }).click();
-  await expect(page.locator('.mobile-status-label select')).toHaveValue('finished');
+  await expect(page.locator('.mobile-status-label select')).toHaveValue('unread');
+  expect(await page.evaluate(() => library.find(book => book.name === 'Three Chapter Test Book').status)).toBe('unread');
 });
 
 test('offline pinning waits for worker acknowledgement and stores the EPUB', async ({ page }) => {
@@ -285,7 +286,7 @@ test('scrolling hides reader controls and a native text tap restores them', asyn
 test('immersive reading always exposes a route back to settings', async ({ page }) => {
   // Account preferences survive between tests; this check explicitly exercises dark mode.
   await page.evaluate(() => { if (!document.documentElement.classList.contains('dark-shell')) toggleShellTheme(); });
-  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black');
+  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute('content', 'black-translucent');
   const tabbar = page.locator('#mobile-tabbar');
   const bottomGap = await tabbar.evaluate(element => window.innerHeight - element.getBoundingClientRect().bottom);
   expect(bottomGap).toBeLessThanOrEqual(50);
@@ -358,18 +359,21 @@ test('immersive reading always exposes a route back to settings', async ({ page 
   await expect.poll(() => page.locator('#settings-drawer').evaluate(element => Math.round(element.getBoundingClientRect().bottom))).toBeLessThanOrEqual(852);
   await page.screenshot({ path: 'test-results/mobile-reader-settings.png' });
   await expect(page.locator('#settings-drawer .mobile-reading-quick')).toBeVisible();
-  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(6);
+  await expect(page.locator('#settings-drawer .theme-swatch')).toHaveCount(9);
   await expect(page.locator('#settings-drawer .layout-options')).toBeHidden();
   const initialFontSize = await page.evaluate(() => settings.fontSize);
   await page.locator('.mobile-reading-quick').getByRole('button', { name: 'Increase font size' }).click();
   expect(await page.evaluate(() => settings.fontSize)).toBeGreaterThan(initialFontSize);
   for (const [name, background] of Object.entries({
-    original: 'rgb(5, 5, 5)',
-    quiet: 'rgb(8, 8, 8)',
+    original: 'rgb(17, 17, 16)',
+    quiet: 'rgb(19, 19, 18)',
     paper: 'rgb(41, 41, 43)',
-    bold: 'rgb(6, 6, 6)',
+    bold: 'rgb(15, 15, 15)',
     calm: 'rgb(68, 59, 49)',
     focus: 'rgb(36, 32, 23)',
+    light: 'rgb(250, 247, 240)',
+    sepia: 'rgb(241, 228, 202)',
+    white: 'rgb(255, 255, 255)',
   })) {
     await page.locator(`#settings-drawer .theme-swatch.${name}`).click();
     await expect(page.locator(`#settings-drawer .theme-swatch.${name}`)).toHaveAttribute('aria-checked', 'true');
@@ -377,7 +381,8 @@ test('immersive reading always exposes a route back to settings', async ({ page 
     if (name === 'bold') await expect(page.frameLocator('#viewer iframe').locator('body')).toHaveCSS('font-weight', '600');
   }
   await page.locator('#settings-drawer .theme-swatch.paper').click();
-  expect(await page.evaluate(() => { settings.theme = 'sepia'; normalizeSettings(); return settings.theme; })).toBe('calm');
+  expect(await page.evaluate(() => { settings.theme = 'sepia'; normalizeSettings(); return settings.theme; })).toBe('sepia');
+  expect(await page.evaluate(() => { settings.theme = 'night'; normalizeSettings(); return settings.theme; })).toBe('original');
   await page.locator('#settings-drawer .theme-swatch.paper').click();
   await page.getByRole('button', { name: 'Customize reading' }).click();
   await expect(page.locator('#settings-drawer .layout-options')).toBeVisible();

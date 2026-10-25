@@ -4,9 +4,8 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = process.env.ENDPAPER_DATA_DIR
-  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
-  : path.resolve(__dirname, '../../data');
+const { DATA_DIR } = require('./lib/paths');
+const logger = require('./lib/logger');
 const DB_PATH = path.join(DATA_DIR, 'endpaper.db');
 
 // Ensure data directories exist
@@ -35,7 +34,8 @@ if (existingTableCount > 0 && startingSchemaVersion < TARGET_SCHEMA_VERSION && f
   const earlyBackupDir = path.join(DATA_DIR, 'backups');
   fs.mkdirSync(earlyBackupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  fs.copyFileSync(DB_PATH, path.join(earlyBackupDir, `endpaper-pre-migration-v${startingSchemaVersion}-to-v${TARGET_SCHEMA_VERSION}-${stamp}.db`));
+  // VACUUM INTO writes a consistent snapshot, including pages still in the WAL.
+  db.prepare('VACUUM INTO ?').run(path.join(earlyBackupDir, `endpaper-pre-migration-v${startingSchemaVersion}-to-v${TARGET_SCHEMA_VERSION}-${stamp}.db`));
 }
 
 // ---------- Schema migration ----------
@@ -55,7 +55,7 @@ if (settingsTableExists) {
 }
 
 if (needsMigration) {
-  console.log("Migrating database to multi-user schema...");
+  logger.info('Migrating database to multi-user schema...');
   // 1. Add user_id column to existing tables. Guard each ALTER TABLE with a
   // column-existence check so this step is safe to re-run if the process is
   // killed after this point but before the data migration below commits —
@@ -200,6 +200,23 @@ addColumnIfMissing('highlights', 'tags TEXT');
 addColumnIfMissing('reading_sessions', 'client_id TEXT');
 addColumnIfMissing('reading_sessions', 'start_progress_percent REAL');
 addColumnIfMissing('reading_sessions', 'end_progress_percent REAL');
+addColumnIfMissing('reading_sessions', 'last_active_at TEXT');
+// Personal shelving: a "want to read" flag and the reader's own tags (JSON array).
+addColumnIfMissing('user_books', 'want_to_read INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('user_books', 'user_tags TEXT');
+// Bookmarks can carry a short note as well as a custom label.
+addColumnIfMissing('bookmarks', 'note TEXT');
+// When a book was finished, for yearly goals and the year in review. Older
+// finished rows fall back to the last time the book was opened.
+addColumnIfMissing('user_books', 'finished_at TEXT');
+// App key for OPDS reading apps (SHA-256 hash only; the key is shown once).
+addColumnIfMissing('users', 'opds_key_hash TEXT');
+// Optional two-factor sign-in (TOTP). The pending secret waits for a confirming code.
+addColumnIfMissing('users', 'totp_secret TEXT');
+addColumnIfMissing('users', 'totp_pending_secret TEXT');
+addColumnIfMissing('users', 'totp_last_step INTEGER');
+addColumnIfMissing('users', 'totp_recovery TEXT');
+db.prepare("UPDATE user_books SET finished_at = COALESCE(last_opened_at, datetime('now')) WHERE status = 'finished' AND finished_at IS NULL").run();
 
 // Authentication sessions are server-side records as well as browser cookies.
 // Older databases did not record an expiry, so add and backfill the column
@@ -207,7 +224,7 @@ addColumnIfMissing('reading_sessions', 'end_progress_percent REAL');
 // expired below rather than leaving an indefinitely valid legacy token behind.
 const sessionCols = db.pragma('table_info(sessions)');
 if (!sessionCols.some(column => column.name === 'expires_at')) {
-  console.log('Migrating sessions table to add server-side expiry...');
+  logger.info('Migrating sessions table to add server-side expiry...');
   db.exec('ALTER TABLE sessions ADD COLUMN expires_at TEXT;');
 }
 db.prepare(`
@@ -222,6 +239,10 @@ db.prepare(`
      OR datetime(expires_at) <= CURRENT_TIMESTAMP
 `).run();
 db.exec('CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON sessions(expires_at);');
+// Shown in Account → Signed-in devices so people can spot and revoke old logins.
+addColumnIfMissing('sessions', 'last_seen_at TEXT');
+addColumnIfMissing('sessions', 'device_label TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON sessions(user_id);');
 
 if (needsMigration) {
   const crypto = require('crypto');
@@ -245,7 +266,7 @@ if (needsMigration) {
         SELECT ?, id, status, rating, progress_percent, last_location_cfi, last_opened_at FROM books
       `).run(defaultUserId);
     } catch (e) {
-      console.error("Migration warning on user_books", e);
+      logger.warn({ err: e }, 'Migration warning on user_books');
     }
     
     // 4. Update other tables
@@ -263,7 +284,7 @@ const settingsCols = db.pragma('table_info(settings)');
 const settingsHasUserId = settingsCols.some(c => c.name === 'user_id');
 
 if (!settingsHasUserId) {
-  console.log("Migrating settings table to user-scoped schema...");
+  logger.info('Migrating settings table to user-scoped schema...');
   db.transaction(() => {
     // Read existing global settings
     const globalSettings = db.prepare('SELECT key, value FROM settings').all();
@@ -301,7 +322,7 @@ const collectionsCols = db.pragma('table_info(collections)');
 const collectionsHasUserId = collectionsCols.some(c => c.name === 'user_id');
 
 if (collectionsHasUserId) {
-  console.log("Migrating collections table back to global schema...");
+  logger.info('Migrating collections table back to global schema...');
   db.transaction(() => {
     const legacyCollections = db.prepare('SELECT id, name FROM collections ORDER BY id').all();
     const canonicalByName = new Map();
@@ -341,7 +362,7 @@ if (collectionsHasUserId) {
 // ---------- 4. Books table migration (add file_hash) ----------
 const bookCols = db.pragma('table_info(books)');
 if (!bookCols.some(c => c.name === 'file_hash')) {
-  console.log('Migrating books table to add file_hash column...');
+  logger.info('Migrating books table to add file_hash column...');
   db.exec('ALTER TABLE books ADD COLUMN file_hash TEXT;');
 }
 // Function to create a pre-migration backup before any structural data changes
@@ -352,11 +373,11 @@ function backupDatabaseBeforeMigration(label) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupTarget = path.join(BACKUP_DIR, `endpaper-pre-migration-${label}-${timestamp}.db`);
     if (fs.existsSync(DB_PATH)) {
-      fs.copyFileSync(DB_PATH, backupTarget);
-      console.log(`[Migration] Safety backup created at ${backupTarget}`);
+      db.prepare('VACUUM INTO ?').run(backupTarget);
+      logger.info({ backupTarget }, '[Migration] Safety backup created');
     }
   } catch (e) {
-    console.error(`[Migration] Warning: Pre-migration backup failed:`, e);
+    logger.warn({ err: e }, '[Migration] Pre-migration backup failed');
   }
 }
 
@@ -369,7 +390,7 @@ const duplicateHashes = db.prepare(`
 `).all();
 
 if (duplicateHashes.length > 0) {
-  console.log(`[Migration] Found ${duplicateHashes.length} duplicate book group(s). Consolidating dependent data...`);
+  logger.info(`[Migration] Found ${duplicateHashes.length} duplicate book group(s). Consolidating dependent data...`);
   backupDatabaseBeforeMigration('books-deduplication');
 
   db.transaction(() => {
@@ -449,7 +470,7 @@ if (duplicateHashes.length > 0) {
           if (fs.existsSync(c)) { try { fs.unlinkSync(c); } catch (e) {} }
         }
 
-        console.log(`[Migration] Safely merged duplicate book "${dupBook.title}" (${dupBook.id}) into "${targetBook.title}" (${targetBook.id}) with all annotations preserved.`);
+        logger.info(`[Migration] Safely merged duplicate book "${dupBook.title}" (${dupBook.id}) into "${targetBook.title}" (${targetBook.id}) with all annotations preserved.`);
       }
     }
   })();
@@ -466,7 +487,7 @@ const duplicateUsers = db.prepare(`
 `).all();
 
 if (duplicateUsers.length > 0) {
-  console.log(`[Migration] Found ${duplicateUsers.length} case-collision user group(s). Backing up and renaming...`);
+  logger.info(`[Migration] Found ${duplicateUsers.length} case-collision user group(s). Backing up and renaming...`);
   backupDatabaseBeforeMigration('users-uniqueness');
 }
 
@@ -493,7 +514,7 @@ const duplicateCollections = db.prepare(`
 `).all();
 
 if (duplicateCollections.length > 0) {
-  console.log(`[Migration] Found ${duplicateCollections.length} case-collision collection group(s). Backing up and renaming...`);
+  logger.info(`[Migration] Found ${duplicateCollections.length} case-collision collection group(s). Backing up and renaming...`);
   backupDatabaseBeforeMigration('collections-uniqueness');
 }
 
@@ -529,12 +550,31 @@ setImmediate(async () => {
         stream.on('end', resolve);
         stream.on('error', reject);
       });
-      updateHash.run(hash.digest('hex'), item.id);
+      const digest = hash.digest('hex');
+      try { updateHash.run(digest, item.id); } catch (error) {
+        if (error.code !== 'SQLITE_CONSTRAINT_UNIQUE') throw error;
+        // A legacy upload of the same file: leave it unhashed and say which book it duplicates.
+        const original = db.prepare('SELECT id, title FROM books WHERE file_hash = ?').get(digest);
+        logger.warn({ bookId: item.id, duplicateOf: original?.id, title: original?.title }, 'Book file duplicates another book; remove one copy to silence this');
+      }
     } catch (error) {
-      console.error('Could not hash book', item.filename, error);
+      logger.error({ err: error, filename: item.filename }, 'Could not hash book');
     }
   }
 });
+
+// ---------- Hash stored session tokens ----------
+// Older builds stored the cookie value itself. Hash those rows in place so
+// existing logins keep working while the table no longer holds live tokens.
+{
+  const { hashSessionToken, isHashedSessionToken } = require('./lib/sessionToken');
+  const plainRows = db.prepare('SELECT token FROM sessions').all().filter(row => !isHashedSessionToken(row.token));
+  if (plainRows.length > 0) {
+    const rehash = db.prepare('UPDATE OR IGNORE sessions SET token = ? WHERE token = ?');
+    db.transaction(() => { for (const row of plainRows) rehash.run(hashSessionToken(row.token), row.token); })();
+    logger.info(`Hashed ${plainRows.length} stored session token(s).`);
+  }
+}
 
 // ---------- Periodic session pruning ----------
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
@@ -547,10 +587,13 @@ function runSessionPruning() {
          OR datetime(expires_at) <= CURRENT_TIMESTAMP
     `).run();
     if (result.changes > 0) {
-      console.log(`Pruned ${result.changes} expired session(s).`);
+      logger.info(`Pruned ${result.changes} expired session(s).`);
     }
+    // Idempotency receipts only need to outlive an offline queue replay.
+    const receipts = db.prepare("DELETE FROM client_operations WHERE created_at < datetime('now', '-30 days')").run();
+    if (receipts.changes > 0) logger.info(`Pruned ${receipts.changes} old idempotency receipt(s).`);
   } catch (e) {
-    console.error('Session pruning error:', e);
+    logger.error({ err: e }, 'Session pruning error');
   }
 }
 runSessionPruning();
@@ -559,6 +602,7 @@ setInterval(runSessionPruning, PRUNE_INTERVAL_MS);
 // ---------- Automatic daily backup ----------
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const MAX_BACKUPS = 5;
+const DAILY_BACKUP_RE = /^endpaper-\d{4}-\d{2}-\d{2}\.db$/;
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function runBackup() {
@@ -568,19 +612,20 @@ function runBackup() {
     if (fs.existsSync(backupFile)) return; // already backed up today
     db.backup(backupFile)
       .then(() => {
-        console.log(`Database backed up to ${backupFile}`);
+        logger.info({ backupFile }, 'Database backed up');
         // Rotate: keep only the newest MAX_BACKUPS files
         const files = fs.readdirSync(BACKUP_DIR)
-          .filter(f => f.startsWith('endpaper-') && f.endsWith('.db'))
+          // Only dated daily backups rotate; named ones such as endpaper-before-*.db are kept and never fill a slot.
+          .filter(f => DAILY_BACKUP_RE.test(f))
           .sort()
           .reverse();
         for (const old of files.slice(MAX_BACKUPS)) {
           try { fs.unlinkSync(path.join(BACKUP_DIR, old)); } catch (e) { /* skip */ }
         }
       })
-      .catch(err => console.error('Database backup failed:', err));
+      .catch(err => logger.error({ err }, 'Database backup failed'));
   } catch (e) {
-    console.error('Database backup error:', e);
+    logger.error({ err: e }, 'Database backup error');
   }
 }
 

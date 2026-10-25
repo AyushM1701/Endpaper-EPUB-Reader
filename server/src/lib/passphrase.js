@@ -45,13 +45,14 @@ async function main() {
 
   if (existing) {
     db.transaction(() => {
-      db.prepare('UPDATE users SET passphrase_hash = ? WHERE id = ?').run(hash, existing.id);
+      // Also the recovery path for a lost authenticator, so two-step sign-in is turned off.
+      db.prepare('UPDATE users SET passphrase_hash = ?, totp_secret = NULL, totp_pending_secret = NULL, totp_last_step = NULL, totp_recovery = NULL WHERE id = ?').run(hash, existing.id);
       // A reset is commonly used to revoke access, so invalidate every
       // browser session for this account rather than leaving it usable until
       // its normal expiry.
       db.prepare('DELETE FROM sessions WHERE user_id = ?').run(existing.id);
     })();
-    console.log(`✓ Passphrase reset for existing user "${username}".`);
+    console.log(`✓ Passphrase reset for existing user "${username}". Two-step sign-in is off for this account.`);
   } else {
     const id = randomUUID();
     db.prepare('INSERT INTO users (id, username, passphrase_hash, is_admin) VALUES (?, ?, ?, 1)').run(id, username, hash);

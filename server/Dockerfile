@@ -1,4 +1,4 @@
-FROM node:20-alpine AS dependencies
+FROM node:22-alpine AS dependencies
 
 # better-sqlite3 requires build tools
 RUN apk add --no-cache python3 make g++
@@ -11,12 +11,15 @@ ENV NODE_ENV=production \
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 WORKDIR /app
 
+# The image only holds server/; data and the frontend are bind-mounted here.
 ENV NODE_ENV=production \
-    PORT=3000
+    PORT=3000 \
+    ENDPAPER_DATA_DIR=/app/data \
+    ENDPAPER_PUBLIC_DIR=/app/public
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package*.json ./

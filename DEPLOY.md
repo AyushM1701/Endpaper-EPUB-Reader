@@ -76,7 +76,7 @@ The username defaults to `admin`. A new username creates an admin account; an ex
 
 Open `https://books.yourdomain.com` and sign in with the username and passphrase from the previous step.
 
-Your first account is an admin. Use **Admin Settings** to add friends and family as readers. Readers can browse, read, and contribute new books to the shared catalogue, while progress, annotations, ratings, sessions, and settings remain private. Only admins can manage users, remove shared books, edit shared metadata, organize collections, or use backup import/export.
+Your first account is an admin. Open **Account → People & permissions** to add friends and family as readers. Readers can browse, read, and contribute new books to the shared catalogue, while progress, annotations, ratings, sessions, and settings remain private. Only admins can manage users, remove shared books, edit shared metadata, organize collections, or use backup import/export.
 
 ## Updating
 
@@ -91,12 +91,22 @@ docker compose up -d
 
 Your persistent data remains in the bind-mounted `data/` directory.
 
+> **Upgrading from a build before October 2026:** older images ignored the bind mounts and wrote the library to `/data` inside the container, which is lost when the container is recreated. If your current container is still running, copy that data out **before** rebuilding:
+>
+> ```bash
+> docker compose cp app:/data ./data-recovered
+> ```
+>
+> Then merge `data-recovered/` into `data/` (or replace `data/` with it if `data/` is empty) and run `docker compose up -d`.
+
 ## Native Deployment with PM2 (Alternative to Docker)
 
-If you prefer not to use Docker, you can run Endpaper natively on your VPS using Node.js and PM2.
+If you prefer not to use Docker, you can run Endpaper natively on your VPS using Node.js 22 or newer and PM2. (Node 20 reached end of life in April 2026.) The README's [Google Cloud guide](README.md#option-1-always-free-google-cloud-vm--pm2-recommended--no-docker-needed) walks through the same steps on a fresh VM.
 
 1. **Clone the repository:**
    ```bash
+   # /opt is owned by root, so create the folder and hand it to your user first
+   sudo mkdir -p /opt/endpaper && sudo chown "$USER": /opt/endpaper
    git clone <your-repo-url> /opt/endpaper
    cd /opt/endpaper/server
    ```
@@ -108,11 +118,13 @@ If you prefer not to use Docker, you can run Endpaper natively on your VPS using
 
 3. **Start the app with PM2:**
    ```bash
-   npm install -g pm2
-   pm2 start src/index.js --name "endpaper"
+   sudo npm install -g pm2
+   NODE_ENV=production pm2 start src/index.js --name "endpaper"
+   pm2 startup        # prints a sudo command: copy and run it so PM2 starts after a reboot
    pm2 save
-   pm2 startup
    ```
+
+   Endpaper trusts `X-Forwarded-For`/`X-Forwarded-Proto` only from a proxy on the same machine (`TRUST_PROXY=loopback` is the default), which matches a Caddy or nginx reverse proxy on localhost. If your proxy runs on a different host, set `TRUST_PROXY` to its address instead.
 
 4. **Create the first admin account:**
    Instead of using `docker compose exec`, you can run the script natively:
@@ -126,6 +138,7 @@ If you prefer not to use Docker, you can run Endpaper natively on your VPS using
    npm ci --omit=dev
    pm2 restart endpaper
    ```
+   The first update past the October 2026 security release needs a few one-time steps (Node 22, `--update-env`, an HTTPS check). See [Upgrading a PM2 install](README.md#upgrading-a-pm2-install-from-before-october-2026).
 
 ## Backups
 
@@ -146,11 +159,13 @@ scp endpaper-backup-*.tar.gz your-local-machine:/backups/
 crontab -e
 ```
 
-Add a daily full-data backup:
+Add a daily full-library backup. `npm run backup` writes a consistent, restorable archive even while readers are online (copying the live SQLite file with `tar` can capture a half-written database):
 
 ```text
-0 3 * * * cd /opt/endpaper && tar czf /backups/endpaper-$(date +\%Y\%m\%d).tar.gz data/
+0 3 * * * cd /opt/endpaper/server && npm run backup --silent && cp ../data/backups/full/$(ls -t ../data/backups/full | head -1) /backups/
 ```
+
+With Docker, run it inside the container: `docker compose exec app npm run backup`. Alternatively set `FULL_BACKUP_EVERY_DAYS=1` and copy `data/backups/full/` off the machine.
 
 ### Option 3: In-app export
 

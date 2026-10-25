@@ -6,9 +6,7 @@ const path = require('path');
 const db = require('../db');
 const { extractMeta } = require('./epubMeta');
 
-const dataDir = process.env.ENDPAPER_DATA_DIR
-  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
-  : path.resolve(__dirname, '../../../data');
+const { DATA_DIR: dataDir } = require('./paths');
 const booksDir = path.join(dataDir, 'books');
 
 async function main() {
@@ -16,7 +14,8 @@ async function main() {
   const update = db.prepare('UPDATE books SET word_count = ? WHERE id = ?');
   for (const row of rows) {
     try {
-      const meta = await extractMeta(path.join(booksDir, row.filename), row.id, path.join(dataDir, 'covers'));
+      // Only the word count is needed; leave stored covers untouched.
+      const meta = await extractMeta(path.join(booksDir, row.filename), row.id, path.join(dataDir, 'covers'), { extractCover: false });
       update.run(Number.isFinite(meta.wordCount) && meta.wordCount > 0 ? meta.wordCount : null, row.id);
       console.log(`Indexed ${row.filename}: ${meta.wordCount || 'unavailable'} words`);
     } catch (error) {

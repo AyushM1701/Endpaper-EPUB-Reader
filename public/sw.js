@@ -1,4 +1,4 @@
-const BUILD_VERSION = 'v15.6.3-20261002';
+const BUILD_VERSION = 'v15.8.5-20261025';
 const CACHE_NAME = `endpaper-shell-${BUILD_VERSION}`;
 const RUNTIME_CACHE_NAME = `endpaper-runtime-${BUILD_VERSION}`;
 const PINNED_BOOK_CACHE_NAME = 'endpaper-pinned-books';
@@ -11,7 +11,10 @@ const STATIC_ASSETS = [
   `/control-icons.js?v=${BUILD_VERSION}`,
   `/mobile.js?v=${BUILD_VERSION}`,
   `/ui.js?v=${BUILD_VERSION}`,
+  `/html-actions.js?v=${BUILD_VERSION}`,
+  `/sw-register.js?v=${BUILD_VERSION}`,
   `/ui.css?v=${BUILD_VERSION}`,
+  `/polish.css?v=${BUILD_VERSION}`,
   `/jszip.min.js?v=${BUILD_VERSION}`,
   `/epub.min.js?v=${BUILD_VERSION}`,
   '/fonts/AtkinsonHyperlegible-Regular.woff2',
@@ -137,7 +140,9 @@ self.addEventListener('fetch', (e) => {
 
   // Book files and covers: Network first with runtime cache fallback and background cache write
   if (url.pathname.includes('/api/books/') && (url.pathname.includes('/file') || url.pathname.includes('/cover'))) {
-    const cacheRequest = new Request(e.request.url, { credentials: 'same-origin' });
+    // Cache under the plain path: cover URLs carry ?v=<file> so browsers refetch replacements,
+    // and pinned offline copies are stored without it.
+    const cacheRequest = new Request(url.origin + url.pathname, { credentials: 'same-origin' });
     e.respondWith(
       fetch(e.request).then(async (fetchRes) => {
         if (fetchRes && fetchRes.status === 200) {

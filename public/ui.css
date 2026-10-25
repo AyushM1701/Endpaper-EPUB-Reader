@@ -37,10 +37,10 @@ button:disabled { cursor: default; opacity: .55; }
 input::placeholder,textarea::placeholder { color: var(--ink-soft); opacity: 1; }
 * { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
 [hidden],#tts-player-bar[hidden] { display: none !important; }
-.primary-action,#book-details-actions .primary-action { background: var(--gold-bright); color: #201C16; border-color: transparent; font-weight: 650; }
+.primary-action,#book-details-actions .primary-action { background: var(--gold-bright); color: var(--on-accent, #201C16); border-color: transparent; font-weight: 650; }
 .primary-action:hover { filter: brightness(1.08); }
 .spine-badge { background: var(--gold-bright); }
-.tts-ctrl-btn.main { background: var(--gold-bright); color: #201C16; border-color: transparent; }
+.tts-ctrl-btn.main { background: var(--gold-bright); color: var(--on-accent, #201C16); border-color: transparent; }
 #desktop-nav,#desktop-page-header,#desktop-content,#desktop-account-menu { display: none; }
 
 /* Reader panels use the active reading theme on every input type. */
@@ -69,7 +69,7 @@ body.reader-active .drawer {
   border-radius: var(--radius-panel);
   background: var(--paper-card);
   color: var(--ink);
-  box-shadow: 0 18px 56px #0005;
+  box-shadow: 0 18px 56px var(--shadow-strong);
   z-index: 130;
   transform: translateX(calc(100% + 48px));
 }
@@ -119,11 +119,12 @@ body.reader-active :is(#toc-drawer,#search-drawer,#bookmarks-drawer) { display: 
 .annotation-swatch { position: absolute; top: 11px; left: 0; width: 10px; height: 10px; border-radius: 50%; }
 .annotation-location { display: block; color: var(--ink-soft); font: 12px/1.5 var(--font-ui); }
 .highlight-excerpt { margin: 8px 0; font: 17px/1.5 var(--font-display); overflow-wrap: anywhere; }
+#highlights-list .highlight-excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
 .annotation-note { margin: 10px 0 0; font: 14px/1.6 var(--font-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
 .annotation-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-left: 22px; }
 .annotation-tags { flex: 1; color: var(--ink-soft); font-size: 12px; overflow-wrap: anywhere; }
 .annotation-footer button { min-height: 44px; }
-.form-editor { width: min(580px,calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 28px; border: 0; border-radius: var(--radius-panel); background: var(--paper-card); color: var(--ink); box-shadow: 0 18px 56px #0005; overflow: auto; }
+.form-editor { width: min(580px,calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 28px; border: 0; border-radius: var(--radius-panel); background: var(--paper-card); color: var(--ink); box-shadow: 0 18px 56px var(--shadow-strong); overflow: auto; }
 .form-editor::backdrop { background: #0008; }
 .form-editor h2 { font: 600 26px/1.2 var(--font-display); margin: 0 0 20px; }
 .form-editor>p { color: var(--ink-soft); line-height: 1.5; }
@@ -133,8 +134,16 @@ body.reader-active :is(#toc-drawer,#search-drawer,#bookmarks-drawer) { display: 
 .editor-field input[type=range] { padding: 0; accent-color: var(--gold); }
 .editor-actions { display: flex; gap: 12px; justify-content: end; margin-top: 24px; }
 .editor-actions button { min-height: 44px; padding: 10px 20px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper); color: var(--ink); font: 600 14px var(--font-ui); cursor: pointer; }
-.editor-actions .primary-action { background: var(--gold-bright); color: #201C16; border-color: transparent; }
+.editor-actions .primary-action { background: var(--gold-bright); color: var(--on-accent, #201C16); border-color: transparent; }
 .editor-error { color: #BA4439; font-size: 14px; }
+.account-security .account-security-change,.account-security .account-revoke-others,.account-device-revoke { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper); color: var(--ink); font: 600 14px var(--font-ui); cursor: pointer; }
+.account-devices-title { margin: 28px 0 8px; font: 600 15px/1.4 var(--font-ui); color: var(--ink); }
+.account-device-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.account-device { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.account-device-details { display: grid; gap: 2px; min-width: 0; }
+.account-device-details strong { font: 500 15px/1.4 var(--font-ui); color: var(--ink); overflow-wrap: anywhere; }
+.account-device-details span { font: 13px/1.4 var(--font-ui); color: var(--ink-soft); }
+.account-security .account-revoke-others { margin-top: 16px; }
 html.dark-shell .editor-error { color: #F0A9A1; }
 #audio-options :is(#tts-voice-select,#tts-pitch,#tts-sleep) { display: block; }
 #tts-player-bar .tts-controls { flex-shrink: 0; }
@@ -144,6 +153,8 @@ html.dark-shell .editor-error { color: #F0A9A1; }
 .detail-status select { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--paper); color: var(--ink); }
 #book-details-actions .destructive-action { margin-left: auto; color: #BA4439; }
 html.dark-shell #book-details-actions .destructive-action { color: #F0A9A1; }
+.mobile-destructive-action { color: #BA4439 !important; border-color: color-mix(in srgb, #BA4439 40%, transparent) !important; }
+html.dark-shell .mobile-destructive-action { color: #F0A9A1 !important; border-color: color-mix(in srgb, #F0A9A1 40%, transparent) !important; }
 
 @media (min-width:701px) and (pointer:fine), (min-width:901px) {
   #topbar { padding: 18px 32px; min-height: 80px; }
@@ -197,7 +208,7 @@ html.dark-shell #book-details-actions .destructive-action { color: #F0A9A1; }
   #smart-sections { gap: 36px; }
   .smart-rail { display: flex; gap: 24px; overflow-x: auto; padding: 2px 0 16px; scrollbar-width: thin; }
   .smart-book { flex: 0 0 150px; min-width: 0; max-width: none; width: 150px; border: 0; border-radius: 0; padding: 0; background: none; text-align: left; color: var(--ink); }
-  .smart-cover { display: flex; flex-direction: column; justify-content: center; align-items: center; width: 150px; aspect-ratio: 2/3; border-radius: 7px; overflow: hidden; color: #F5EFE5; box-shadow: 0 8px 20px #0003; }
+  .smart-cover { display: flex; flex-direction: column; justify-content: center; align-items: center; width: 150px; aspect-ratio: 2/3; border-radius: 7px; overflow: hidden; color: #F5EFE5; box-shadow: 0 8px 20px var(--shadow); }
   .smart-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .smart-cover .spine-title { padding: 16px; text-align: center; }
   .smart-cover .spine-author { padding: 0 12px 16px; }
@@ -223,7 +234,7 @@ html.dark-shell #book-details-actions .destructive-action { color: #F0A9A1; }
   #desktop-content .mobile-note-tags { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
   #desktop-content .mobile-pill { min-height: 44px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper-card); color: var(--ink); }
   #desktop-content :is(.mobile-wide-action,.mobile-secondary-action,.mobile-offline-setup button) { min-height: 48px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-card); color: var(--ink); font: 600 14px var(--font-ui); cursor: pointer; }
-  #desktop-content :is(.mobile-wide-action,.mobile-offline-setup button) { background: var(--gold-bright); color: #201C16; border: 0; }
+  #desktop-content :is(.mobile-wide-action,.mobile-offline-setup button) { background: var(--gold-bright); color: var(--on-accent, #201C16); border: 0; }
   #desktop-content .mobile-offline-access { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
   #desktop-content .mobile-offline-access h2 { font: 600 24px var(--font-display); }
   #desktop-content .mobile-offline-access p { max-width: 65ch; color: var(--ink-soft); font: 15px/1.6 var(--font-ui); }
@@ -268,7 +279,7 @@ html.dark-shell #book-details-actions .destructive-action { color: #F0A9A1; }
   .mobile-detail-meta,.mobile-detail-hero p,.mobile-rating,.mobile-stat small,.mobile-status-label,.mobile-results-label,.mobile-empty { color: var(--ink-soft); }
   .mobile-description { color: var(--ink); }
   .mobile-pill { background: var(--paper-card); color: var(--ink); border-color: var(--line); }
-  .mobile-wide-action,.mobile-offline-setup button { background: var(--gold-bright); color: #201C16; border-color: transparent; }
+  .mobile-wide-action,.mobile-offline-setup button { background: var(--gold-bright); color: var(--on-accent, #201C16); border-color: transparent; }
   .mobile-actions-sheet { background: var(--paper-card); color: var(--ink); }
   html:not(.dark-shell) #mobile-tabbar { background: color-mix(in srgb,var(--paper-card) 94%,transparent); border-color: var(--line); }
   html:not(.dark-shell) #mobile-tabbar button { color: var(--ink-soft); }
@@ -285,15 +296,21 @@ html.dark-shell #book-details-actions .destructive-action { color: #F0A9A1; }
 #desktop-topbar-title,#desktop-browse-library,.continue-reading-action,.continue-description { display:none; }
 body:not(.reader-active) {
     --paper:#f7f7f2; --paper-card:#f3f4ee; --ink:#283431; --ink-soft:#626f67;
-    --line:#e4e6df; --gold:#4e7162; --gold-bright:#4e7162; --cloth:#4e7162; --cloth-deep:#3b574b;
+    --line:#e4e6df; --gold:#4a6c5d; --gold-bright:#4a6c5d; --cloth:#4e7162; --cloth-deep:#3b574b;
     --dashboard-sidebar:#eeefe8; --dashboard-selected:#e0e8df; --dashboard-hero:#e8eee7;
-    --dashboard-coral:#c77b62; --focus-ring:#4e7162;
+    --dashboard-coral:#c77b62; --focus-ring:#4a6c5d;
+    /* Text on the green accent: dark text on #4e7162 is only 3.1:1. */
+    --on-accent:#ffffff;
+    /* Shadows tinted toward the shell ink instead of neutral black. */
+    --shadow:rgba(40,52,49,0.14); --shadow-strong:rgba(40,52,49,0.26);
   }
 html.dark-shell body:not(.reader-active) {
     --paper:#171d19; --paper-card:#272f29; --ink:#e4e9e1; --ink-soft:#a5b0a5;
     --line:#354039; --gold:#a1c3aa; --gold-bright:#5b7e68; --cloth:#4e7162; --cloth-deep:#3b574b;
     --dashboard-sidebar:#202722; --dashboard-selected:#34483c; --dashboard-hero:#293731;
     --dashboard-coral:#dc9b7b; --focus-ring:#a1c3aa;
+    --on-accent:#ffffff;
+    --shadow:rgba(3,10,6,0.45); --shadow-strong:rgba(3,10,6,0.65);
   }
 @media (min-width:701px) and (pointer:fine), (min-width:901px) {
   body:not(.reader-active) { --font-display:'Instrument Serif',Georgia,serif; --font-ui:'DM Sans',system-ui,sans-serif; }
@@ -380,7 +397,7 @@ body:not(.reader-active) .mobile-progress-track { background:var(--line); }
 body:not(.reader-active) .mobile-progress-track span { background:var(--gold); }
 body:not(.reader-active) .mobile-series-hero { background-color:var(--dashboard-hero); background-image:none; }
 body:not(.reader-active) .mobile-series-hero::before { background:color-mix(in srgb,var(--paper) 88%,transparent); }
-body:not(.reader-active) #mobile-tabbar { background:color-mix(in srgb,var(--paper-card) 94%,transparent); border-color:var(--line); box-shadow:0 8px 26px #0002; }
+body:not(.reader-active) #mobile-tabbar { background:color-mix(in srgb,var(--paper-card) 94%,transparent); border-color:var(--line); box-shadow:0 8px 26px var(--shadow); }
 body:not(.reader-active) #mobile-tabbar button { color:var(--ink-soft); }
 body:not(.reader-active) #mobile-tabbar button.active { background:var(--dashboard-selected); color:var(--ink); }
 body:not(.reader-active) :is(input,textarea,select) { accent-color:var(--gold); }
@@ -401,7 +418,7 @@ body:not(.reader-active) .mobile-offline-size { color:var(--ink-soft); }
 .select-trigger[aria-expanded=true] svg { transform:rotate(180deg); }
 .select-trigger:hover:not(:disabled) { background:color-mix(in srgb,var(--ink) 5%,var(--paper-card)); border-color:var(--gold); }
 .select-trigger:disabled { opacity:.55; cursor:default; }
-.select-menu { position:fixed; inset:auto; margin:0; box-sizing:border-box; padding:6px; overflow-y:auto; overscroll-behavior:contain; background:var(--paper-card); color:var(--ink); border:0; border-radius:12px; box-shadow:0 10px 32px #0003; z-index:400; font:500 14px/1.4 var(--font-ui); transform-origin:top; }
+.select-menu { position:fixed; inset:auto; margin:0; box-sizing:border-box; padding:6px; overflow-y:auto; overscroll-behavior:contain; background:var(--paper-card); color:var(--ink); border:0; border-radius:12px; box-shadow:0 10px 32px var(--shadow); z-index:var(--z-popover); font:500 14px/1.4 var(--font-ui); transform-origin:top; }
 .select-menu[data-direction=up] { transform-origin:bottom; }
 .select-menu:popover-open,.select-menu:not([popover]):not([hidden]) { display:block; animation:menu-unfold 180ms cubic-bezier(.16,1,.3,1); }
 .select-menu [role=option] { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:44px; padding:10px 12px; border-radius:7px; cursor:pointer; }
@@ -416,7 +433,7 @@ body:not(.reader-active) .mobile-offline-size { color:var(--ink-soft); }
 .detail-status .polished-select { min-width:140px; }
 
 /* Action menus share spacing, focus and feedback with the select menus. */
-:is(.dropdown-menu,.desktop-account-actions,.reader-more-menu) { border:0; border-radius:12px; padding:6px; box-shadow:0 10px 32px #0003; max-width:calc(100vw - 24px); overflow-y:auto; overscroll-behavior:contain; }
+:is(.dropdown-menu,.desktop-account-actions,.reader-more-menu) { border:0; border-radius:12px; padding:6px; box-shadow:0 10px 32px var(--shadow); max-width:calc(100vw - 24px); overflow-y:auto; overscroll-behavior:contain; }
 :is(.dropdown-menu,.desktop-account-actions,.reader-more-menu) button { min-height:44px; border-radius:7px; font-size:14px; }
 :is(.dropdown-menu,.desktop-account-actions,.reader-more-menu) button:is(:hover,:focus-visible) { background:color-mix(in srgb,var(--gold) 12%,var(--paper-card)); color:var(--ink); }
 #desktop-account-menu summary { display:flex; align-items:center; gap:9px; list-style:none; border-radius:var(--radius-control); }
@@ -430,7 +447,7 @@ body:not(.reader-active) .mobile-offline-size { color:var(--ink-soft); }
 .form-editor[open] { animation:menu-unfold 180ms cubic-bezier(.16,1,.3,1); }
 body:not(.reader-active) :is(button,summary),.select-trigger,.select-menu [role=option] { transition:background-color 150ms ease,color 150ms ease,border-color 150ms ease,box-shadow 150ms ease; }
 body:not(.reader-active) :is(.mobile-wide-action,.primary-action,#upload-btn):hover:not(:disabled) { background:var(--cloth-deep); }
-body:not(.reader-active) :is(.mobile-wide-action,.primary-action,#upload-btn):active:not(:disabled) { box-shadow:inset 0 2px 5px #0003; }
+body:not(.reader-active) :is(.mobile-wide-action,.primary-action,#upload-btn):active:not(:disabled) { box-shadow:inset 0 2px 5px var(--shadow); }
 @media (max-width:700px), (max-width:900px) and (pointer:coarse) {
   .select-trigger,.select-menu { font-size:16px; }
   .mobile-status-label { display:grid; gap:8px; }
@@ -468,8 +485,8 @@ body:not(.reader-active) .modal.show .modal-card { animation:surface-arrive 220m
 }
 @media (hover:hover) and (pointer:fine) {
   body:not(.reader-active) #shelf-view :is(.smart-book,.book-card):hover { opacity:1; }
-  body:not(.reader-active) :is(.smart-book:hover .smart-cover,.book-card:hover .spine,.continue-item:hover .spine,.mobile-book:hover .mobile-cover) { transform:translateY(-3px); box-shadow:0 10px 22px #0003; }
-  body:not(.reader-active) :is(.primary-action,#upload-btn,.mobile-wide-action,#desktop-browse-library):hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 5px 14px #0002; }
+  body:not(.reader-active) :is(.smart-book:hover .smart-cover,.book-card:hover .spine,.continue-item:hover .spine,.mobile-book:hover .mobile-cover) { transform:translateY(-3px); box-shadow:0 10px 22px var(--shadow); }
+  body:not(.reader-active) :is(.primary-action,#upload-btn,.mobile-wide-action,#desktop-browse-library):hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 5px 14px var(--shadow); }
   body:not(.reader-active) :is(.file-link-btn,.mobile-pill,.book-menu-btn,.mobile-book-menu):hover:not(:disabled) { transform:translateY(-1px); }
   body:not(.reader-active) #desktop-nav button:not(#desktop-brand):hover svg { transform:translateX(2px); }
   body:not(.reader-active) :is(#desktop-browse-library:hover,.continue-item:hover .continue-reading-action) svg { transform:translateX(3px); }
@@ -530,3 +547,186 @@ body:not(.reader-active) .mobile-more-list .more-section button:last-child { bor
   #desktop-content .more-account { max-width:960px; }
   #desktop-content .more-version { max-width:960px; }
 }
+
+/* ---------- Typography system ----------
+   Instrument Serif (one weight) carries page and section headings only; DM Sans
+   carries everything else with a clear 400 / 500 / 600 step. Numbers that change
+   in place use tabular figures so they do not jitter. */
+button, input, select, textarea { font-family: inherit; }
+h1, h2, h3, .modal-title h3, .book-meta-under .title, .smart-book strong { text-wrap: balance; }
+p, .book-description, .continue-description, .mobile-description, .highlight-excerpt { text-wrap: pretty; }
+:is(#progress-pct, #progress-remaining, .progress-text, .bookmark-pct, .sync-status, .stats-bar span, .mobile-stat strong,
+  #stats-modal strong, .annotation-location, .book-progress, #font-size-val, #line-height-val, .account-device-details span) { font-variant-numeric: tabular-nums; }
+
+/* Book titles under covers: readable interface type with weight, not display type. */
+#shelf .book-meta-under .title, .smart-book strong { font: 600 15px/1.3 var(--font-ui); letter-spacing: -0.005em; }
+.book-meta-under .author, .smart-book span { font-weight: 400; }
+
+/* Headings everywhere use the display face at its only weight, never faux bold. */
+:is(#stats-modal, #collections-modal, #admin-modal, #book-details-modal, #notebook-modal, #shortcuts-modal, #confirm-modal, #reset-passphrase-modal) .modal-title h3,
+#admin-modal #admin-title, .form-editor h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.01em; }
+
+@media (max-width:700px), (max-width:900px) and (pointer:coarse) {
+  .mobile-heading h1 { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.02em; }
+  :is(.mobile-section, .mobile-detail-hero, .mobile-actions-sheet, .mobile-stats-detail, .mobile-offline-access) h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.01em; }
+  .mobile-cover-title { font-family: var(--font-display); font-weight: 400; }
+  :is(.mobile-book-info, .mobile-continue-info, .mobile-offline-home) strong, #upload-progress-text strong { font: 600 15px/1.3 var(--font-ui); }
+  .mobile-stat strong { font-family: var(--font-display); font-weight: 400; }
+  .mobile-description { font: 15px/1.6 var(--font-ui); }
+  .mobile-note blockquote { font-family: var(--font-display); font-style: italic; }
+  #mobile-tabbar button { font-family: var(--font-ui); }
+  .mobile-kicker { font-family: var(--font-ui); font-weight: 600; }
+}
+/* Small caps are kept for compact labels (settings groups, badges); covers and page eyebrows use sentence case. */
+.spine-author, .mobile-cover-author { text-transform: none; letter-spacing: 0; }
+@media (max-width:700px), (max-width:900px) and (pointer:coarse) {
+  .mobile-kicker { text-transform: none; letter-spacing: 0.01em; font-size: 13px; }
+}
+
+/* Stacking ladder. Page chrome sits at 30–45, drawers 75–90, modals 100–140;
+   these named layers are the ones that must win over everything else. */
+:root { --z-sheet: 250; --z-popover: 400; --z-tooltip: 450; --z-banner: 500; }
+
+/* ---------- Layout and states ---------- */
+@media (min-width:701px) and (pointer:fine), (min-width:901px) {
+  /* One cover shape everywhere (2:3). Real covers crop to fill it, so titles under
+     real and generated covers start on the same line. */
+  #shelf-view :is(.spine, .smart-cover) { aspect-ratio: 2 / 3; }
+  #shelf-view :is(.spine, .smart-cover) img { object-fit: cover; }
+  .smart-rail { align-items: flex-start; }
+  /* Denser library grid: columns fill the row and the cover fills its column, so
+     the meta and progress rule never run past the cover. */
+  #shelf { max-width: none; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 40px 28px; }
+  #shelf.compact { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 28px 20px; }
+  #shelf .book-card .spine { max-width: none; width: 100%; }
+  /* Keep generated cover titles clear of the card's "…" menu button. */
+  #shelf .book-card .spine-title { padding-right: 52px; }
+}
+
+/* Press feedback for touch and mouse: a short, subtle sink. */
+@media (prefers-reduced-motion: no-preference) {
+  :is(button, [role=button], .book-card, .smart-book, summary) { transition-property: transform, opacity, background-color, border-color, color, box-shadow; }
+  /* Navigation tabs are left out: their animated highlight already responds, and a
+     scaled tab would misalign it (touch browsers can keep :active after a tap). */
+  :is(button, [role=button], summary):not(:disabled):not(#mobile-tabbar button, #desktop-nav button):active { transform: translateY(1px) scale(0.98); }
+  :is(.book-card, .smart-book):active { transform: scale(0.985); }
+}
+:is(button, [role=button]):not(:disabled):active { filter: brightness(0.94); }
+
+/* Skip link: hidden until focused from the keyboard. */
+.skip-link { position: fixed; left: 16px; top: 12px; z-index: 600; padding: 10px 16px; border-radius: 10px; background: var(--ink); color: var(--paper); font: 600 14px var(--font-ui); text-decoration: none; transform: translateY(-160%); transition: transform .15s ease; }
+.skip-link:focus { transform: translateY(0); outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Skeleton loaders */
+.skeleton { display: grid; gap: 18px; margin: 8px auto; width: 100%; }
+.skeleton-covers { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 28px 22px; max-width: 900px; text-align: left; }
+.skeleton-item { display: grid; gap: 8px; }
+.skeleton-cover, .skeleton-line { display: block; border-radius: 6px; background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.skeleton-cover { aspect-ratio: 2 / 3; }
+.skeleton-line { height: 12px; }
+.skeleton-line.short { width: 60%; }
+.skeleton-rows .skeleton-item { padding: 14px 0; border-bottom: 1px solid var(--line); }
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton-cover, .skeleton-line { animation: skeleton-fade 1.4s ease-in-out infinite alternate; }
+}
+@keyframes skeleton-fade { from { opacity: 1; } to { opacity: .45; } }
+
+/* ---------- Desktop reader chrome ---------- */
+.brand-back, #reader-topbar-title { display: none; }
+@media (min-width:769px) and (hover:hover) and (pointer:fine) {
+  /* A labelled way back to the library instead of the brand mark alone. */
+  body.reader-active #brand .brand-name, body.reader-active #brand .mark { display: none; }
+  body.reader-active #brand .brand-back { display: inline; font: 600 14px var(--font-ui); color: var(--ink); padding: 8px 12px; border-radius: 10px; }
+  body.reader-active #brand:hover .brand-back { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+  /* What you are reading, centred in the bar. */
+  body.reader-active #reader-topbar-title { display: block; position: absolute; left: 50%; transform: translateX(-50%); max-width: min(46vw, 640px); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 500 14px var(--font-ui); color: var(--ink-soft); pointer-events: none; }
+  /* Page-turn arrows stay faintly visible while the controls are shown. */
+  /* Only the arrow shows, not the zone itself (no band or shadow over the page). */
+  body.reader-active #reader-view:not(.scrolled) .nav-zone { opacity: 1; background: transparent !important; box-shadow: none !important; }
+  body.reader-active #reader-view:not(.scrolled) .nav-zone svg { opacity: 0; transition: opacity .15s ease; }
+  body.reader-active #app:not(.chrome-hidden) #reader-view:not(.scrolled) .nav-zone svg { opacity: .35; }
+  body.reader-active #reader-view:not(.scrolled) .nav-zone:hover svg { opacity: .9; }
+}
+/* A larger font-size stepper in the settings drawer. */
+#settings-drawer .stepper button { min-width: 52px; min-height: 44px; font-size: 18px; }
+#settings-drawer .stepper .val { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
+.setting-select { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); font: 15px var(--font-ui); }
+.typesetting-settings label, #setting-book-only-row label, .gesture-settings label { display: flex; align-items: center; gap: 10px; min-height: 40px; color: var(--ink); font: 14px var(--font-ui); }
+@media (max-width:768px) { .desktop-only-setting { display: none !important; } }
+
+/* Checkboxes in the reader settings use the native control, tinted. */
+#settings-drawer input[type=checkbox] { appearance: auto; -webkit-appearance: checkbox; width: 18px; height: 18px; margin: 0; flex: none; accent-color: var(--gold); }
+
+/* ---------- Library states ---------- */
+.shelf-no-results { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 28px 0; color: var(--ink-soft); font: 15px/1.5 var(--font-ui); }
+.shelf-no-results p { margin: 0; }
+.spine-badge.want { background: var(--gold-bright) !important; color: var(--on-accent, #201C16) !important; }
+/* List view: a small cover thumbnail, title and author in a row. */
+#shelf.list-layout { display: flex; flex-direction: column; gap: 8px; max-width: 980px; }
+#shelf.list-layout .book-card { flex-direction: row; align-items: center; gap: 16px; padding: 10px 14px; }
+#shelf.list-layout .book-card .spine { display: flex; flex: none; width: 44px !important; max-width: 44px; aspect-ratio: 2 / 3; padding: 0; border-radius: 4px; }
+#shelf.list-layout .book-card .spine :is(.spine-title, .spine-author, .spine-badge, .book-menu-btn) { display: none; }
+#shelf.list-layout .book-meta-under { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; align-items: center; gap: 4px 18px; }
+#shelf.list-layout .book-meta-under .title { min-height: 0; -webkit-line-clamp: 1; }
+#shelf.list-layout .book-meta-under .series-tag { grid-column: 1 / -1; }
+
+/* Bookmark notes and the notebook toolbar */
+.bookmark-note { display: block; margin-top: 4px; color: var(--ink-soft); font: 13px/1.45 var(--font-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.bookmark-meta { display: flex; gap: 6px; }
+.notebook-toolbar { display: flex; gap: 10px; align-items: center; }
+.notebook-toolbar #notebook-search { flex: 1; min-width: 0; }
+
+/* ---------- Goals, calendar and year in review ---------- */
+.goal-progress { display: grid; gap: 14px; margin: 0 0 24px; padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper-card); }
+.goal-meter-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: var(--ink-soft); font: 13px/1.4 var(--font-ui); }
+.goal-meter-head strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.goal-meter-track { height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 10%, transparent); overflow: hidden; }
+.goal-meter-fill { display: block; height: 100%; border-radius: inherit; background: var(--gold); }
+.goal-meter-fill.complete { background: var(--cloth); }
+.stats-section-title { margin: 8px 0 12px; font: 400 23px/1.2 var(--font-display); color: var(--ink); }
+.reading-heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 12px); grid-auto-columns: 12px; gap: 3px; overflow-x: auto; padding: 4px 0 12px; }
+.heat-cell { width: 12px; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.heat-cell.empty { background: transparent; }
+.heat-cell.level-1 { background: color-mix(in srgb, var(--cloth) 35%, transparent); }
+.heat-cell.level-2 { background: color-mix(in srgb, var(--cloth) 60%, transparent); }
+.heat-cell.level-3 { background: color-mix(in srgb, var(--cloth) 82%, transparent); }
+.heat-cell.level-4 { background: var(--cloth); }
+.year-review { margin: 8px 0 24px; padding: 20px; border-radius: 18px; background: color-mix(in srgb, var(--gold) 12%, var(--paper-card)); }
+.year-review h2 { margin: 0 0 14px; font: 400 26px/1.15 var(--font-display); color: var(--ink); }
+.year-review-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
+.year-review-fact strong { display: block; font: 400 28px/1.1 var(--font-display); color: var(--ink); font-variant-numeric: tabular-nums; }
+.year-review-fact small { color: var(--ink-soft); font: 12px/1.4 var(--font-ui); }
+.year-review-books { margin: 10px 0 0; padding-left: 20px; color: var(--ink); font: 14px/1.6 var(--font-ui); }
+.per-book-time { margin: 0; padding: 0; list-style: none; }
+.per-book-time li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--ink); font: 14px/1.4 var(--font-ui); }
+.per-book-time small { flex: none; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.home-goal-card .goal-progress { margin-bottom: 0; }
+
+/* ---------- Search inside books ---------- */
+.text-search-results { margin: 0 0 28px; }
+.text-search-results h2 { margin: 0 0 12px; font: 400 23px/1.2 var(--font-display); color: var(--ink); }
+.text-search-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.text-search-hit { display: grid; gap: 2px; width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-card); color: var(--ink); text-align: left; cursor: pointer; }
+.text-search-hit:hover { border-color: var(--gold); }
+.text-search-hit strong { font: 600 14px/1.35 var(--font-ui); }
+.text-search-hit small { color: var(--ink-soft); font: 12px/1.4 var(--font-ui); }
+.text-search-snippet { margin-top: 6px; color: var(--ink); font: 14px/1.55 var(--font-ui); }
+.text-search-snippet mark { padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--gold) 35%, transparent); color: inherit; }
+
+/* Large libraries: let the browser skip layout and paint for off-screen cards. */
+#shelf .book-card { content-visibility: auto; contain-intrinsic-size: auto 320px; }
+#shelf.compact .book-card { contain-intrinsic-size: auto 240px; }
+#shelf.list-layout .book-card { contain-intrinsic-size: auto 72px; }
+
+/* Reading apps (OPDS) */
+.reading-apps { margin-top: 28px; }
+.reading-apps-help { margin: 6px 0 10px; color: var(--ink-soft); font: 13px/1.5 var(--font-ui); overflow-wrap: anywhere; }
+.reading-apps-key { display: flex; gap: 8px; }
+.reading-apps-key input { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); color: var(--ink); font: 14px var(--font-mono); }
+.reading-apps-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+/* Admin activity (audit log) */
+.admin-activity { margin-top: 28px; }
+.admin-activity-list { display: grid; margin: 8px 0 0; padding: 0; list-style: none; max-height: 320px; overflow: auto; }
+.admin-activity-list li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--ink); font: 13px/1.45 var(--font-ui); }
+.admin-activity-list time { flex: none; color: var(--ink-soft); font-variant-numeric: tabular-nums; }

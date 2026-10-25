@@ -23,18 +23,41 @@ function tags(value) {
   return JSON.stringify(normalized);
 }
 
+const MAX_HIGHLIGHT_PAGE = 500;
+
+function firstQueryString(value) {
+  const first = Array.isArray(value) ? value[0] : value;
+  return typeof first === 'string' ? first.trim() : '';
+}
+
+/**
+ * GET /api/highlights?q=&tag=&limit=&offset=
+ * Filters in SQL and returns one page, newest first. X-Total-Count carries the
+ * number of matches so clients can fetch further pages.
+ */
 router.get('/api/highlights', (req, res) => {
-  const query = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
-  const tag = typeof req.query.tag === 'string' ? req.query.tag.trim().toLowerCase() : '';
-  let rows = db.prepare(`
+  const query = firstQueryString(req.query.q).toLowerCase();
+  const tag = firstQueryString(req.query.tag).toLowerCase();
+  const limit = Math.min(MAX_HIGHLIGHT_PAGE, Math.max(1, parseInt(firstQueryString(req.query.limit), 10) || MAX_HIGHLIGHT_PAGE));
+  const offset = Math.max(0, parseInt(firstQueryString(req.query.offset), 10) || 0);
+  const where = ['h.user_id = ?'];
+  const params = [req.user_id];
+  if (query) {
+    where.push("lower(COALESCE(h.excerpt, '') || ' ' || COALESCE(h.note, '') || ' ' || COALESCE(h.chapter, '') || ' ' || COALESCE(b.title, '')) LIKE ? ESCAPE '\\'");
+    params.push(`%${query.replace(/[\\%_]/g, '\\$&')}%`);
+  }
+  if (tag) {
+    where.push('EXISTS (SELECT 1 FROM json_each(h.tags) WHERE json_each.value = ?)');
+    params.push(tag);
+  }
+  const from = `FROM highlights h JOIN books b ON b.id = h.book_id WHERE ${where.join(' AND ')}`;
+  const total = db.prepare(`SELECT COUNT(*) AS n ${from}`).get(...params).n;
+  const rows = db.prepare(`
     SELECT h.*, b.title AS book_title, b.author AS book_author
-    FROM highlights h JOIN books b ON b.id = h.book_id
-    WHERE h.user_id = ? ORDER BY h.created_at DESC
-  `).all(req.user_id);
-  rows = rows.map(row => ({ ...row, tags: row.tags ? JSON.parse(row.tags) : [] }));
-  if (query) rows = rows.filter(row => `${row.excerpt || ''} ${row.note || ''} ${row.chapter || ''} ${row.book_title || ''}`.toLowerCase().includes(query));
-  if (tag) rows = rows.filter(row => row.tags.includes(tag));
-  res.json(rows);
+    ${from} ORDER BY h.created_at DESC LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
+  res.set('X-Total-Count', String(total));
+  res.json(rows.map(row => ({ ...row, tags: row.tags ? JSON.parse(row.tags) : [] })));
 });
 
 /**

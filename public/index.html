@@ -5,57 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="description" content="Endpaper is a shared, self-hosted EPUB library and reader.">
 <meta name="theme-color" content="#171d19">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Endpaper">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=v15.6.3-20261002">
-<link rel="icon" type="image/svg+xml" sizes="any" href="/icons/favicon.svg?v=v15.6.3-20261002">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=v15.8.5-20261025">
+<link rel="icon" type="image/svg+xml" sizes="any" href="/icons/favicon.svg?v=v15.8.5-20261025">
 <link rel="manifest" href="/manifest.json">
 <title>Endpaper — an EPUB reader</title>
-<script src="/jszip.min.js?v=v15.6.3-20261002"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
-<script src="/epub.min.js?v=v15.6.3-20261002"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
-<link rel="stylesheet" href="/app.css?v=v15.6.3-20261002">
-<link rel="stylesheet" href="/ui.css?v=v15.6.3-20261002">
+<script src="/jszip.min.js?v=v15.8.5-20261025"></script><!-- JSZip 3.10.1, self-hosted for EPUB.js and offline startup. -->
+<script src="/epub.min.js?v=v15.8.5-20261025"></script><!-- epubjs built from upstream commit eee359d (2026-09-22), includes mobile continuous-scroll jitter fix (171f7ec). Self-hosted for PWA offline support and CDN independence. -->
+<link rel="stylesheet" href="/app.css?v=v15.8.5-20261025">
+<link rel="stylesheet" href="/ui.css?v=v15.8.5-20261025">
+<link rel="stylesheet" href="/polish.css?v=v15.8.5-20261025">
 
-  <script>
-    if ('serviceWorker' in navigator) {
-      let refreshing = false;
-      let hadController = Boolean(navigator.serviceWorker.controller);
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        // clients.claim() also fires during the first install. There is no old
-        // application shell to replace in that case, so avoid a surprise reload.
-        if (!hadController) {
-          hadController = true;
-          return;
-        }
-        if (refreshing) return;
-        refreshing = true;
-        if (document.body.classList.contains('reader-active')) {
-          window.__reloadAfterReader = true;
-        } else {
-          window.location.reload();
-        }
-      });
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').then((reg) => {
-          const announce = () => {
-            if (!reg.waiting) return;
-            window.__pendingServiceWorker = reg.waiting;
-            if (!document.body.classList.contains('reader-active')) document.getElementById('update-banner')?.removeAttribute('hidden');
-          };
-          announce();
-          reg.addEventListener('updatefound', () => {
-            const installing = reg.installing;
-            installing?.addEventListener('statechange', () => {
-              if (installing.state === 'installed' && navigator.serviceWorker.controller) announce();
-            });
-          });
-          reg.update().catch(() => {});
-        }).catch(err => console.error('SW registration failed:', err));
-      });
-    }
-  </script>
+  <script src="/sw-register.js?v=v15.8.5-20261025"></script>
 </head>
 <body>
 
@@ -64,64 +29,80 @@
   <div id="login-card">
     <div class="mark"></div>
     <h1>Endpaper</h1>
-    <p>Enter your passphrase to access your library.</p>
-    <form id="login-form" onsubmit="return handleLogin(event)">
-      <input type="text" id="username-input" placeholder="Username" autocomplete="username" autofocus style="margin-bottom: 14px; width:100%; padding:11px 14px; border:1px solid var(--line); border-radius: var(--radius); background: var(--paper); color: var(--ink); font-family: var(--font-ui); font-size:14px; outline:none; text-align:center; letter-spacing:1px;">
-      <input type="password" id="passphrase-input" placeholder="Passphrase" autocomplete="current-password">
-      <button type="submit" id="login-btn">Unlock</button>
+    <p>Sign in with your username and passphrase to open your library.</p>
+    <form id="login-form" data-onsubmit="return handleLogin(event)">
+      <label class="login-field" for="username-input">Username</label>
+      <input type="text" id="username-input" class="login-input" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required>
+      <label class="login-field" for="passphrase-input">Passphrase</label>
+      <div class="login-passphrase">
+        <input type="password" id="passphrase-input" class="login-input" autocomplete="current-password" required aria-describedby="caps-lock-warning">
+        <button type="button" id="passphrase-visibility" class="login-visibility" aria-controls="passphrase-input" aria-pressed="false">Show</button>
+      </div>
+      <p id="caps-lock-warning" class="login-caps" hidden>Caps Lock is on.</p>
+      <div id="login-code-row" hidden>
+        <label class="login-field" for="login-code-input">Code from your authenticator app</label>
+        <input type="text" id="login-code-input" class="login-input" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" placeholder="123456 or a recovery code">
+      </div>
+      <button type="submit" id="login-btn">Sign in</button>
       <div id="login-error"></div>
       <p id="login-offline-hint" hidden>Reading offline? Use the same username and passphrase you used when setting up your downloads.</p>
     </form>
   </div>
 </div>
 
+<a class="skip-link" id="skip-link" href="#shelf-view">Skip to content</a>
 <div id="app">
 
   <div id="topbar">
-    <button id="brand" type="button" onclick="showShelf()" title="Back to shared library" aria-label="Back to shared library">
+    <button id="brand" type="button" data-onclick="showShelf()" title="Back to shared library" aria-label="Back to shared library">
       <div class="mark"></div>
       <span class="brand-name">Endpaper</span>
+      <span class="brand-back" aria-hidden="true">‹ Library</span>
       <span id="current-user-context" hidden aria-live="polite">
         <span id="current-user-name" class="account-context-name"></span>
         <span id="current-user-role" class="role-badge"></span>
       </span>
     </button>
     <span id="desktop-topbar-title">Your library</span>
+    <span id="reader-topbar-title" aria-live="polite"></span>
     <div id="topbar-actions" role="group" aria-label="Reader and library actions">
-      <button class="icon-btn" id="toc-toggle" title="Contents" aria-label="Table of contents" aria-controls="toc-drawer" aria-expanded="false" data-drawer-toggle="toc" style="display:none;" onclick="toggleDrawer('toc')">
+      <button class="icon-btn" id="toc-toggle" title="Contents" aria-label="Table of contents" aria-controls="toc-drawer" aria-expanded="false" data-drawer-toggle="toc" style="display:none;" data-onclick="toggleDrawer('toc')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
       </button>
-      <button class="icon-btn" id="search-toggle" title="Search this book" aria-label="Search this book" aria-controls="search-drawer" aria-expanded="false" data-drawer-toggle="search" style="display:none;" onclick="toggleDrawer('search')">
+      <button class="icon-btn" id="search-toggle" title="Search this book" aria-label="Search this book" aria-controls="search-drawer" aria-expanded="false" data-drawer-toggle="search" style="display:none;" data-onclick="toggleDrawer('search')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </button>
-      <button class="icon-btn" id="settings-toggle" title="Text & theme settings" aria-label="Reading settings" aria-controls="settings-drawer" aria-expanded="false" data-drawer-toggle="settings" style="display:none;" onclick="toggleDrawer('settings')">
+      <button class="icon-btn" id="settings-toggle" title="Text & theme settings" aria-label="Reading settings" aria-controls="settings-drawer" aria-expanded="false" data-drawer-toggle="settings" style="display:none;" data-onclick="toggleDrawer('settings')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 0 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 0 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 0 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 0 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg>
       </button>
-      <button class="icon-btn" id="bookmarks-toggle" title="Bookmarks & highlights" aria-label="Bookmarks and highlights" aria-controls="bookmarks-drawer" aria-expanded="false" data-drawer-toggle="bookmarks" style="display:none;" onclick="toggleDrawer('bookmarks')">
+      <button class="icon-btn" id="bookmarks-toggle" title="Bookmarks & highlights" aria-label="Bookmarks and highlights" aria-controls="bookmarks-drawer" aria-expanded="false" data-drawer-toggle="bookmarks" style="display:none;" data-onclick="toggleDrawer('bookmarks')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4.5 3h7a.5.5 0 0 1 .5.5v12l-4-2.5L4 15.5v-12a.5.5 0 0 1 .5-.5z"/><path d="M10.5 6.5H18a.5.5 0 0 1 .5.5v12l-4-2.5-1.5.94" stroke-opacity="0.5"/></svg>
       </button>
-      <button class="icon-btn" id="bookmark-toggle" title="Bookmark this page" aria-label="Bookmark this page" style="display:none;" onclick="toggleBookmark()">
+      <button class="icon-btn" id="bookmark-toggle" title="Bookmark this page" aria-label="Bookmark this page" style="display:none;" data-onclick="toggleBookmark()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3.5h12a.5.5 0 0 1 .5.5v17l-6.5-4-6.5 4V4a.5.5 0 0 1 .5-.5z"/></svg>
       </button>
       <button class="icon-btn" id="tts-btn" title="Read aloud" aria-label="Read aloud" style="display:none;">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
       </button>
-      <button class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Toggle fullscreen" style="display:none;" onclick="toggleFullscreen()">
+      <button class="icon-btn" id="fullscreen-btn" title="Fullscreen" aria-label="Toggle fullscreen" style="display:none;" data-onclick="toggleFullscreen()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M8 21H4a1 1 0 0 1-1-1v-4M16 21h4a1 1 0 0 0 1-1v-4"/></svg>
       </button>
-      <button class="icon-btn" id="reader-more-btn" title="More reading tools" aria-label="More reading tools" aria-expanded="false" style="display:none;" onclick="toggleReaderMoreMenu(event)">
+      <button class="icon-btn" id="reader-more-btn" title="More reading tools" aria-label="More reading tools" aria-expanded="false" style="display:none;" data-onclick="toggleReaderMoreMenu(event)">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
       </button>
-      <button class="icon-btn" id="help-toggle" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" onclick="openShortcutsModal()">
+      <button class="icon-btn" id="help-toggle" title="Keyboard shortcuts" aria-label="Keyboard shortcuts" data-onclick="openShortcutsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.5 2.5 0 0 1 4.8 1c0 1.7-2.3 1.7-2.3 3.3"/><line x1="12" y1="17" x2="12" y2="17.1"/></svg>
       </button>
-      <button class="icon-btn" id="shell-theme-toggle" title="Use dark app appearance" aria-label="Use dark app appearance" aria-pressed="false" onclick="toggleShellTheme()">
+      <button class="icon-btn" id="shell-theme-toggle" title="Use dark app appearance" aria-label="Use dark app appearance" aria-pressed="false" data-onclick="toggleShellTheme()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       </button>
-      <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out" onclick="logout()">
+      <button class="icon-btn" id="account-security-toggle" type="button" title="Passphrase and devices" aria-label="Passphrase and devices">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>
+      </button>
+      <button class="icon-btn" id="logout-btn" title="Log out" aria-label="Log out" data-onclick="logout()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M21 3v18H10"/></svg>
       </button>
-      <button class="icon-btn" id="admin-toggle" title="People and library settings" aria-label="People and library settings" data-admin-only hidden onclick="openAdminModal()">
+      <button class="icon-btn" id="admin-toggle" title="People and library settings" aria-label="People and library settings" data-admin-only hidden data-onclick="openAdminModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
           <circle cx="9" cy="7" r="4"></circle>
@@ -129,28 +110,29 @@
           <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
         </svg>
       </button>
-      <button id="upload-btn" hidden onclick="document.getElementById('file-input').click()">
+      <button id="upload-btn" hidden data-onclick="document.getElementById('file-input').click()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
         Add book
       </button>
       <input type="file" id="file-input" accept=".epub" multiple hidden>
+      <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
       <input type="file" id="import-input" accept=".zip" style="display:none;" data-admin-only hidden>
     </div>
     <span id="sync-status" class="sync-status" data-state="saved" hidden aria-live="polite"></span>
     <div id="reader-more-menu" class="reader-more-menu" hidden>
-      <button type="button" onclick="toggleDrawer('search'); closeReaderMoreMenu()">Search book</button>
-      <button type="button" onclick="toggleDrawer('bookmarks'); closeReaderMoreMenu()">Notebook</button>
-      <button type="button" onclick="document.getElementById('tts-btn').click(); closeReaderMoreMenu()">Read aloud</button>
-      <button type="button" onclick="openAudioOptions(); closeReaderMoreMenu()">Audio options</button>
-      <button type="button" onclick="toggleFullscreen(); closeReaderMoreMenu()">Fullscreen</button>
-      <button type="button" onclick="openShortcutsModal(); closeReaderMoreMenu()">Help</button>
+      <button type="button" data-onclick="toggleDrawer('search'); closeReaderMoreMenu()">Search book</button>
+      <button type="button" data-onclick="toggleDrawer('bookmarks'); closeReaderMoreMenu()">Notebook</button>
+      <button type="button" data-onclick="document.getElementById('tts-btn').click(); closeReaderMoreMenu()">Read aloud</button>
+      <button type="button" data-onclick="openAudioOptions(); closeReaderMoreMenu()">Audio options</button>
+      <button type="button" data-onclick="toggleFullscreen(); closeReaderMoreMenu()">Fullscreen</button>
+      <button type="button" data-onclick="openShortcutsModal(); closeReaderMoreMenu()">Help</button>
     </div>
   </div>
 
   <!-- Library -->
   <div id="shelf-view">
     <nav id="desktop-nav" aria-label="Library navigation">
-      <button type="button" id="desktop-brand" aria-label="Endpaper home" onclick="navigateDesktop('home')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h13v18H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 0v18M8 7h6M8 10h4"/></svg><span>Endpaper</span></button>
+      <button type="button" id="desktop-brand" aria-label="Endpaper home" data-onclick="navigateDesktop('home')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h13v18H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 0v18M8 7h6M8 10h4"/></svg><span>Endpaper</span></button>
       <button type="button" data-desktop-page="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8v9h-6v-6H9v6H3z"/></svg>Home</button>
       <button type="button" data-desktop-page="library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h7a3 3 0 0 1 3 3v13a3 3 0 0 0-3-3H3zM21 4h-5a3 3 0 0 0-3 3v13a3 3 0 0 1 3-3h5z"/></svg>Library</button>
       <button type="button" data-desktop-page="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>Search</button>
@@ -161,7 +143,7 @@
       </div>
       <span id="desktop-account-name"></span>
     </nav>
-    <header id="desktop-page-header"><h1 id="desktop-heading">Your reading</h1><p id="desktop-description"></p><button type="button" id="desktop-browse-library" class="file-link-btn" onclick="navigateDesktop('library')">Browse library <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button></header>
+    <header id="desktop-page-header"><h1 id="desktop-heading">Your reading</h1><p id="desktop-description"></p><button type="button" id="desktop-browse-library" class="file-link-btn" data-onclick="navigateDesktop('library')">Browse library <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></button></header>
     <div id="desktop-content"></div>
     <section id="mobile-shell" aria-label="Endpaper mobile library">
       <main id="mobile-content" class="mobile-page"></main>
@@ -181,7 +163,7 @@
       <h1>The shared shelf is empty</h1>
       <p id="empty-shelf-copy">Loading the shared library…</p>
       <div id="dropzone" hidden>Drag an .epub file here, or use "Add book" above</div>
-      <p id="empty-import-row" data-admin-only hidden style="margin-top:18px; font-size:13px;">Already have a backup? <button class="file-link-btn" onclick="document.getElementById('import-input').click()">Import backup</button></p>
+      <p id="empty-import-row" data-admin-only hidden style="margin-top:18px; font-size:13px;">Already have a backup? <button class="file-link-btn" data-onclick="document.getElementById('import-input').click()">Import backup</button></p>
     </div>
     <div id="continue-card" class="continue-rail" style="display:none;"></div>
     <div id="smart-sections" style="display:none;"></div>
@@ -191,15 +173,17 @@
         <span id="shelf-count" class="shelf-badge"></span>
       </div>
       <div class="shelf-controls">
-        <input id="shelf-search" class="shelf-select" type="search" placeholder="Search books…" aria-label="Search library" oninput="scheduleShelfRender()">
-        <select id="shelf-filter" class="shelf-select" aria-label="Filter books" onchange="renderShelf()">
+        <input id="shelf-search" class="shelf-select" type="search" placeholder="Search books…" aria-label="Search library" data-oninput="scheduleShelfRender()">
+        <select id="shelf-filter" class="shelf-select" aria-label="Filter books" data-onchange="renderShelf()">
           <option value="all">All Books</option>
           <option value="unread">Unread</option>
           <option value="reading">Reading</option>
           <option value="finished">Finished</option>
+          <option value="want">Want to read</option>
+          <optgroup label="Your tags" id="shelf-filter-user-tags" hidden></optgroup>
           <optgroup label="Collections" id="shelf-filter-collections"></optgroup>
         </select>
-        <select id="shelf-sort" class="shelf-select" aria-label="Sort books" onchange="renderShelf()">
+        <select id="shelf-sort" class="shelf-select" aria-label="Sort books" data-onchange="renderShelf()">
           <option value="recent">Recently Added</option>
           <option value="opened">Recently Read</option>
           <option value="series">Series</option>
@@ -207,32 +191,37 @@
           <option value="author">Author</option>
           <option value="progress">Progress</option>
         </select>
-        <select id="shelf-density" class="shelf-select" aria-label="Shelf density" onchange="renderShelf()">
+        <select id="shelf-density" class="shelf-select" aria-label="Shelf density" data-onchange="renderShelf()">
           <option value="comfortable">Comfortable</option>
           <option value="compact">Compact</option>
+          <option value="list">List</option>
         </select>
-        <button type="button" class="file-link-btn" onclick="openStatsModal()" title="Reading statistics">
+        <button type="button" class="file-link-btn" data-onclick="openStatsModal()" title="Reading statistics">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px; height:13px; margin-right:4px;"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
           Stats
         </button>
-        <button type="button" class="file-link-btn" onclick="openNotebookModal()">Notebook</button>
-        <button type="button" class="file-link-btn" id="bulk-select-btn" onclick="toggleBulkMode()">Select</button>
+        <button type="button" class="file-link-btn" data-onclick="openNotebookModal()">Notebook</button>
+        <button type="button" class="file-link-btn" id="bulk-select-btn" data-onclick="toggleBulkMode()">Select</button>
         <div class="admin-library-tools dropdown-wrap" data-admin-only hidden role="group" aria-label="Shared library tools">
-          <button type="button" class="file-link-btn dropdown-toggle" id="library-tools-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleLibraryToolsMenu(event)">
+          <button type="button" class="file-link-btn dropdown-toggle" id="library-tools-btn" aria-haspopup="true" aria-expanded="false" data-onclick="toggleLibraryToolsMenu(event)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:13px; height:13px; margin-right:4px;"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
             Library tools
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:11px; height:11px; margin-left:3px;"><path d="M6 9l6 6 6-6"/></svg>
           </button>
           <div class="dropdown-menu" id="library-tools-menu" role="menu">
-            <button type="button" class="dropdown-item" id="collections-manager-btn" role="menuitem" onclick="openCollectionsManager(); closeLibraryToolsMenu();">
+            <button type="button" class="dropdown-item" id="collections-manager-btn" role="menuitem" data-onclick="openCollectionsManager(); closeLibraryToolsMenu();">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
               Manage collections
             </button>
-            <button type="button" class="dropdown-item" role="menuitem" onclick="exportLibrary(); closeLibraryToolsMenu();">
+            <button type="button" class="dropdown-item" role="menuitem" data-onclick="document.getElementById('folder-input').click(); closeLibraryToolsMenu();" title="Adds every EPUB in a folder, such as a Calibre library">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 11v6M9 14h6"/></svg>
+              Add a folder of books
+            </button>
+            <button type="button" class="dropdown-item" role="menuitem" data-onclick="exportLibrary(); closeLibraryToolsMenu();">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Export backup
             </button>
-            <button type="button" class="dropdown-item" role="menuitem" onclick="document.getElementById('import-input').click(); closeLibraryToolsMenu();">
+            <button type="button" class="dropdown-item" role="menuitem" data-onclick="document.getElementById('import-input').click(); closeLibraryToolsMenu();">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Import backup
             </button>
@@ -242,23 +231,24 @@
     </div>
     <div id="bulk-toolbar" hidden aria-live="polite">
       <span id="bulk-count">0 selected</span>
-      <button type="button" onclick="bulkDownloadOffline()">Download offline</button>
-      <button type="button" data-admin-only hidden onclick="bulkAddToCollection()">Add to collection</button>
-      <button type="button" data-admin-only hidden onclick="bulkRemoveFromCollection()">Remove from collection</button>
-      <button type="button" data-admin-only hidden onclick="bulkEditSeries()">Edit series</button>
-      <button type="button" data-admin-only hidden onclick="bulkDeleteBooks()">Remove</button>
-      <button type="button" onclick="toggleBulkMode(false)">Cancel</button>
+      <button type="button" data-onclick="bulkDownloadOffline()">Download offline</button>
+      <button type="button" data-admin-only hidden data-onclick="bulkAddToCollection()">Add to collection</button>
+      <button type="button" data-admin-only hidden data-onclick="bulkRemoveFromCollection()">Remove from collection</button>
+      <button type="button" data-admin-only hidden data-onclick="bulkEditSeries()">Edit series</button>
+      <button type="button" data-admin-only hidden data-onclick="bulkDeleteBooks()">Remove</button>
+      <button type="button" data-onclick="toggleBulkMode(false)">Cancel</button>
     </div>
+    <section id="text-search-results" class="text-search-results" aria-live="polite" hidden></section>
     <div id="shelf"></div>
   </div>
 
   <!-- Reader -->
   <div id="reader-view">
     <span id="reader-immersive-chapter" aria-hidden="true"></span>
-    <button type="button" id="reader-reveal-controls" onclick="showImmersiveTools()" aria-label="Show reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    <button type="button" id="reader-reveal-controls" data-onclick="showImmersiveTools()" aria-label="Show reading controls"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <span id="reader-immersive-progress" aria-hidden="true"></span>
     <div id="mobile-reader-controls" aria-label="Reading controls">
-      <button type="button" id="mobile-reader-back" onclick="showShelf()" aria-label="Close reader"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+      <button type="button" id="mobile-reader-back" data-onclick="showShelf()" aria-label="Close reader"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
       <span id="mobile-reader-chapter-pages" aria-live="polite"></span>
       <span id="mobile-reader-title"></span>
       <button type="button" id="mobile-reader-tools-button" aria-label="Reading tools" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
@@ -269,7 +259,7 @@
         <button type="button" class="mobile-reader-tool-main" data-reader-tool="audio"><span>Audio options</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></button>
         <div class="mobile-reader-tool-shortcuts">
           <button type="button" data-reader-tool="share" aria-label="Share book" title="Share book"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m0 0L8 7m4-4 4 4M5 13v7h14v-7"/></svg></button>
-          <button type="button" data-reader-tool="bookmarks" aria-label="Bookmarks &amp; highlights" title="Bookmarks &amp; highlights"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"/></svg></button>
+          <button type="button" data-reader-tool="bookmarks" aria-label="Bookmarks &amp; highlights" title="Bookmarks &amp; highlights"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M9 9h6M9 13h6"/></svg></button>
           <button type="button" data-reader-tool="bookmark" aria-label="Bookmark page" title="Bookmark page"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v18l-5-4-5 4z"/></svg></button>
           <button type="button" data-reader-tool="tts" aria-label="Read aloud" title="Read aloud"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9zM17 8c2 2 2 6 0 8m3-11c4 4 4 10 0 14"/></svg></button>
           <button type="button" data-reader-tool="fullscreen" aria-label="Fullscreen" title="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg></button>
@@ -287,18 +277,18 @@
       <span id="progress-pct">0%</span>
       <span id="progress-remaining" aria-live="polite"></span>
       <div id="reader-bottom-actions">
-        <button type="button" onclick="toggleDrawer('settings')" aria-label="Reading appearance">Aa</button>
-        <button type="button" onclick="toggleBookmark()" aria-label="Bookmark this page"><svg class="endpaper-icon" data-icon="lucide:bookmark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/></svg></button>
-        <button type="button" onclick="toggleDrawer('toc')" aria-label="Contents"><svg class="endpaper-icon" data-icon="lucide:list" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13"/></svg></button>
-        <button type="button" onclick="toggleReaderMoreMenu(event)" aria-label="More"><svg class="endpaper-icon" data-icon="lucide:ellipsis" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
+        <button type="button" data-onclick="toggleDrawer('settings')" aria-label="Reading appearance">Aa</button>
+        <button type="button" data-onclick="toggleBookmark()" aria-label="Bookmark this page"><svg class="endpaper-icon" data-icon="lucide:bookmark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/></svg></button>
+        <button type="button" data-onclick="toggleDrawer('toc')" aria-label="Contents"><svg class="endpaper-icon" data-icon="lucide:list" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13"/></svg></button>
+        <button type="button" data-onclick="toggleReaderMoreMenu(event)" aria-label="More"><svg class="endpaper-icon" data-icon="lucide:ellipsis" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
       </div>
     </div>
     <div id="viewer-wrap">
       <div id="viewer"></div>
-      <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" onclick="turnPage('prev')">
+      <button type="button" class="nav-zone left" title="Previous page" aria-label="Previous page" aria-controls="viewer" data-onclick="turnPage('prev')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
       </button>
-      <button type="button" class="nav-zone right" title="Next page" aria-label="Next page" aria-controls="viewer" onclick="turnPage('next')">
+      <button type="button" class="nav-zone right" title="Next page" aria-label="Next page" aria-controls="viewer" data-onclick="turnPage('next')">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
       </button>
       <div id="loading-overlay" aria-live="polite" aria-busy="true">
@@ -309,24 +299,24 @@
         <h2>Could not render this book</h2>
         <p id="reader-error-message">Please try again.</p>
         <div class="reader-error-actions">
-          <button type="button" onclick="retryReaderLoad(false)">Retry</button>
-          <button type="button" onclick="retryReaderLoad(true)">Open from beginning</button>
-          <button type="button" onclick="showShelf()">Back to library</button>
+          <button type="button" data-onclick="retryReaderLoad(false)">Retry</button>
+          <button type="button" data-onclick="retryReaderLoad(true)">Open from beginning</button>
+          <button type="button" data-onclick="showShelf()">Back to library</button>
         </div>
       </section>
       <div id="chrome-hint">Tap the page to show controls again</div>
-      <button type="button" id="fullscreen-exit-control" aria-label="Exit fullscreen reading" title="Exit fullscreen reading" onclick="exitImmersiveReading()">
+      <button type="button" id="fullscreen-exit-control" aria-label="Exit fullscreen reading" title="Exit fullscreen reading" data-onclick="exitImmersiveReading()">
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4"/></svg>
         <span>Exit</span>
       </button>
     </div>
 
     <!-- Table of contents drawer -->
-    <div id="drawer-backdrop" aria-hidden="true" onclick="closeDrawers()"></div>
+    <div id="drawer-backdrop" aria-hidden="true" data-onclick="closeDrawers()"></div>
     <aside class="drawer toc" id="toc-drawer" aria-label="Table of contents" aria-hidden="true" inert>
       <div class="drawer-title">
         Contents
-        <button type="button" aria-label="Close table of contents" title="Close" onclick="toggleDrawer('toc')">
+        <button type="button" aria-label="Close table of contents" title="Close" data-onclick="toggleDrawer('toc')">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -337,7 +327,7 @@
     <aside class="drawer toc" id="search-drawer" aria-label="Search this book" aria-hidden="true" inert>
       <div class="drawer-title">
         Search this book
-        <button type="button" aria-label="Close book search" title="Close" onclick="toggleDrawer('search')">
+        <button type="button" aria-label="Close book search" title="Close" data-onclick="toggleDrawer('search')">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -353,13 +343,13 @@
     <aside class="drawer" id="bookmarks-drawer" aria-label="Bookmarks and highlights" aria-hidden="true" inert>
       <div class="drawer-title">
         Bookmarks & highlights
-        <button type="button" aria-label="Close bookmarks and highlights" title="Close" onclick="toggleDrawer('bookmarks')">
+        <button type="button" aria-label="Close bookmarks and highlights" title="Close" data-onclick="toggleDrawer('bookmarks')">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="marks-tabs" role="tablist" aria-label="Saved reading marks">
-        <button type="button" class="marks-tab active" id="bookmarks-tab" role="tab" aria-selected="true" aria-controls="bookmarks-pane" data-tab="bookmarks-pane" onclick="setMarksTab('bookmarks-pane')">Bookmarks</button>
-        <button type="button" class="marks-tab" id="highlights-tab" role="tab" aria-selected="false" aria-controls="highlights-pane" data-tab="highlights-pane" onclick="setMarksTab('highlights-pane')">Highlights</button>
+        <button type="button" class="marks-tab active" id="bookmarks-tab" role="tab" aria-selected="true" aria-controls="bookmarks-pane" data-tab="bookmarks-pane" data-onclick="setMarksTab('bookmarks-pane')">Bookmarks</button>
+        <button type="button" class="marks-tab" id="highlights-tab" role="tab" aria-selected="false" aria-controls="highlights-pane" data-tab="highlights-pane" data-onclick="setMarksTab('highlights-pane')">Highlights</button>
       </div>
       <div class="marks-pane active" id="bookmarks-pane" role="tabpanel" aria-labelledby="bookmarks-tab">
         <div id="bookmarks-list" aria-live="polite"></div>
@@ -379,7 +369,7 @@
     <aside class="drawer" id="settings-drawer" aria-label="Reading settings" aria-hidden="true" inert>
       <div class="drawer-title">
         Themes &amp; settings
-        <button type="button" aria-label="Close reading settings" title="Close" onclick="toggleDrawer('settings')">
+        <button type="button" aria-label="Close reading settings" title="Close" data-onclick="toggleDrawer('settings')">
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -387,11 +377,11 @@
       <div class="setting-group" role="radiogroup" aria-label="Reading layout">
         <span class="setting-label">Layout</span>
         <div class="layout-options">
-          <button type="button" class="layout-option" role="radio" aria-checked="true" data-layout="paginated" onclick="setLayout('paginated')">
+          <button type="button" class="layout-option" role="radio" aria-checked="true" data-layout="paginated" data-onclick="setLayout('paginated')">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/></svg>
             Paginated
           </button>
-          <button type="button" class="layout-option" role="radio" aria-checked="false" data-layout="scrolled" onclick="setLayout('scrolled')">
+          <button type="button" class="layout-option" role="radio" aria-checked="false" data-layout="scrolled" data-onclick="setLayout('scrolled')">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="13" y2="16"/></svg>
             Scrolled
           </button>
@@ -399,23 +389,26 @@
       </div>
 
       <div class="mobile-reading-quick" role="group" aria-label="Quick reading controls">
-        <button type="button" aria-label="Decrease font size" onclick="stepFontSize(-1)">A−</button>
-        <button type="button" aria-label="Increase font size" onclick="stepFontSize(1)">A+</button>
+        <button type="button" aria-label="Decrease font size" data-onclick="stepFontSize(-1)">A−</button>
+        <button type="button" aria-label="Increase font size" data-onclick="stepFontSize(1)">A+</button>
       </div>
 
       <div class="setting-group mobile-theme-group" role="radiogroup" aria-label="Book page theme">
         <span class="setting-label">Page theme</span>
         <div class="theme-swatches">
-          <button type="button" class="theme-swatch original" role="radio" aria-checked="false" data-theme="original" onclick="setReadingTheme('original')">Original</button>
-          <button type="button" class="theme-swatch quiet" role="radio" aria-checked="false" data-theme="quiet" onclick="setReadingTheme('quiet')">Quiet</button>
-          <button type="button" class="theme-swatch paper" role="radio" aria-checked="true" data-theme="paper" onclick="setReadingTheme('paper')">Paper</button>
-          <button type="button" class="theme-swatch bold" role="radio" aria-checked="false" data-theme="bold" onclick="setReadingTheme('bold')">Bold</button>
-          <button type="button" class="theme-swatch calm" role="radio" aria-checked="false" data-theme="calm" onclick="setReadingTheme('calm')">Calm</button>
-          <button type="button" class="theme-swatch focus" role="radio" aria-checked="false" data-theme="focus" onclick="setReadingTheme('focus')">Focus</button>
+          <button type="button" class="theme-swatch original" role="radio" aria-checked="false" data-theme="original" data-onclick="setReadingTheme('original')">Original</button>
+          <button type="button" class="theme-swatch quiet" role="radio" aria-checked="false" data-theme="quiet" data-onclick="setReadingTheme('quiet')">Quiet</button>
+          <button type="button" class="theme-swatch paper" role="radio" aria-checked="true" data-theme="paper" data-onclick="setReadingTheme('paper')">Graphite</button>
+          <button type="button" class="theme-swatch bold" role="radio" aria-checked="false" data-theme="bold" data-onclick="setReadingTheme('bold')">Bold</button>
+          <button type="button" class="theme-swatch calm" role="radio" aria-checked="false" data-theme="calm" data-onclick="setReadingTheme('calm')">Calm</button>
+          <button type="button" class="theme-swatch focus" role="radio" aria-checked="false" data-theme="focus" data-onclick="setReadingTheme('focus')">Focus</button>
+          <button type="button" class="theme-swatch light" role="radio" aria-checked="false" data-theme="light" data-onclick="setReadingTheme('light')">Light</button>
+          <button type="button" class="theme-swatch sepia" role="radio" aria-checked="false" data-theme="sepia" data-onclick="setReadingTheme('sepia')">Sepia</button>
+          <button type="button" class="theme-swatch white" role="radio" aria-checked="false" data-theme="white" data-onclick="setReadingTheme('white')">Paper white</button>
         </div>
       </div>
 
-      <button type="button" id="mobile-reading-customize" aria-expanded="false" onclick="toggleMobileReadingCustomize()">Customize reading <svg class="endpaper-icon" data-icon="lucide:chevron-down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9l6 6l6-6"/></svg></button>
+      <button type="button" id="mobile-reading-customize" aria-expanded="false" data-onclick="toggleMobileReadingCustomize()">Customize reading <svg class="endpaper-icon" data-icon="lucide:chevron-down" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9l6 6l6-6"/></svg></button>
 
       <div class="setting-group">
         <span class="setting-label">Typeface</span>
@@ -425,9 +418,9 @@
       <div class="setting-group">
         <span class="setting-label">Font size</span>
         <div class="stepper">
-          <button type="button" aria-label="Decrease font size" onclick="stepFontSize(-1)">A−</button>
+          <button type="button" aria-label="Decrease font size" data-onclick="stepFontSize(-1)">A−</button>
           <span class="val" id="font-size-val" aria-live="polite">100%</span>
-          <button type="button" aria-label="Increase font size" onclick="stepFontSize(1)">A+</button>
+          <button type="button" aria-label="Increase font size" data-onclick="stepFontSize(1)">A+</button>
         </div>
       </div>
 
@@ -445,11 +438,28 @@
         <label class="setting-label" for="letter-spacing-slider">Letter spacing — <span id="letter-spacing-val">Normal</span></label>
         <input type="range" class="setting-slider mini" id="letter-spacing-slider" min="0" max="3" step="1" value="0" aria-valuetext="Normal letter spacing">
       </div>
+      <div class="setting-group">
+        <label class="setting-label" for="setting-font-weight">Text weight</label>
+        <select id="setting-font-weight" class="setting-select" data-onchange="setReaderTypesetting('fontWeight', this.value)">
+          <option value="400">Regular</option>
+          <option value="500">Medium</option>
+          <option value="600">Semibold</option>
+        </select>
+      </div>
+      <div class="setting-group typesetting-settings">
+        <span class="setting-label">Typesetting</span>
+        <label><input type="checkbox" id="setting-justify" data-onchange="setReaderTypesetting('justify', this.checked)"> Justify text</label>
+        <label><input type="checkbox" id="setting-hyphenate" data-onchange="setReaderTypesetting('hyphenate', this.checked)"> Hyphenate long words</label>
+        <label class="desktop-only-setting"><input type="checkbox" id="setting-spread" data-onchange="setReaderSpread(this.checked)"> Two pages side by side on wide screens</label>
+      </div>
+      <div class="setting-group" id="setting-book-only-row" hidden>
+        <label><input type="checkbox" id="setting-book-only" data-onchange="setBookSpecificSettings(this.checked)"> Keep these text settings for this book only</label>
+      </div>
       <div class="setting-group gesture-settings">
         <span class="setting-label">Gestures &amp; tap zones</span>
-        <label><input type="checkbox" id="gesture-swipe" checked onchange="updateGestureSettings()"> Swipe to turn pages</label>
-        <label><input type="checkbox" id="gesture-edge" checked onchange="updateGestureSettings()"> Edge tap zones</label>
-        <label><input type="checkbox" id="gesture-center" checked onchange="updateGestureSettings()"> Center tap toggles controls</label>
+        <label><input type="checkbox" id="gesture-swipe" checked data-onchange="updateGestureSettings()"> Swipe to turn pages</label>
+        <label><input type="checkbox" id="gesture-edge" checked data-onchange="updateGestureSettings()"> Edge tap zones</label>
+        <label><input type="checkbox" id="gesture-center" checked data-onchange="updateGestureSettings()"> Center tap toggles controls</label>
       </div>
     </aside>
   </div>
@@ -457,19 +467,19 @@
 </div>
 
 <div id="highlight-popup" role="dialog" aria-modal="false" aria-label="Choose highlight color or action" aria-hidden="true">
-  <button type="button" class="swatch-btn" style="background:#F2D94E" aria-label="Highlight in yellow" title="Highlight in yellow" onclick="applyHighlight('#F2D94E')"></button>
-  <button type="button" class="swatch-btn" style="background:#8FD19E" aria-label="Highlight in green" title="Highlight in green" onclick="applyHighlight('#8FD19E')"></button>
-  <button type="button" class="swatch-btn" style="background:#8FC1E3" aria-label="Highlight in blue" title="Highlight in blue" onclick="applyHighlight('#8FC1E3')"></button>
-  <button type="button" class="swatch-btn" style="background:#E8A0BF" aria-label="Highlight in pink" title="Highlight in pink" onclick="applyHighlight('#E8A0BF')"></button>
-  <button type="button" id="highlight-listen-btn" class="popup-action-btn" title="Listen from here" aria-label="Listen from here" onclick="readAloudFromSelection()">
+  <button type="button" class="swatch-btn" style="background:#F2D94E" aria-label="Highlight in yellow" title="Highlight in yellow" data-onclick="applyHighlight('#F2D94E')"></button>
+  <button type="button" class="swatch-btn" style="background:#8FD19E" aria-label="Highlight in green" title="Highlight in green" data-onclick="applyHighlight('#8FD19E')"></button>
+  <button type="button" class="swatch-btn" style="background:#8FC1E3" aria-label="Highlight in blue" title="Highlight in blue" data-onclick="applyHighlight('#8FC1E3')"></button>
+  <button type="button" class="swatch-btn" style="background:#E8A0BF" aria-label="Highlight in pink" title="Highlight in pink" data-onclick="applyHighlight('#E8A0BF')"></button>
+  <button type="button" id="highlight-listen-btn" class="popup-action-btn" title="Listen from here" aria-label="Listen from here" data-onclick="readAloudFromSelection()">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="width:13px; height:13px; margin-right:3px;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
     <span>Listen</span>
   </button>
-  <button type="button" class="popup-action-btn" onclick="addNoteToSelection()">Note</button>
-  <button type="button" class="popup-action-btn" onclick="lookupSelectedWord()">Define</button>
-  <button type="button" class="popup-action-btn" onclick="copySelectionText()">Copy</button>
-  <button type="button" class="popup-action-btn" onclick="shareSelectionText()">Share</button>
-  <button type="button" id="highlight-remove-btn" style="display:none;" onclick="removeCurrentHighlight()">Remove</button>
+  <button type="button" class="popup-action-btn" data-onclick="addNoteToSelection()">Note</button>
+  <button type="button" class="popup-action-btn" title="Looks up the word at dictionaryapi.dev" data-onclick="lookupSelectedWord()">Define</button>
+  <button type="button" class="popup-action-btn" data-onclick="copySelectionText()">Copy</button>
+  <button type="button" class="popup-action-btn" data-onclick="shareSelectionText()">Share</button>
+  <button type="button" id="highlight-remove-btn" style="display:none;" data-onclick="removeCurrentHighlight()">Remove</button>
 </div>
 
 <!-- Floating Read Aloud Player Bar -->
@@ -483,21 +493,21 @@
       <span id="tts-active-text" class="tts-snippet"></span>
     </div>
     <div class="tts-controls">
-      <button type="button" class="tts-ctrl-btn" id="tts-prev-btn" title="Previous sentence" aria-label="Previous sentence" onclick="ttsPrevSentence()">
+      <button type="button" class="tts-ctrl-btn" id="tts-prev-btn" title="Previous sentence" aria-label="Previous sentence" data-onclick="ttsPrevSentence()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/><polyline points="19 18 13 12 19 6"/></svg>
       </button>
-      <button type="button" class="tts-ctrl-btn main" id="tts-play-btn" title="Pause speech" aria-label="Pause speech" onclick="toggleTtsPause()">
+      <button type="button" class="tts-ctrl-btn main" id="tts-play-btn" title="Pause speech" aria-label="Pause speech" data-onclick="toggleTtsPause()">
         <svg id="tts-play-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
         <svg id="tts-pause-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
       </button>
-      <button type="button" class="tts-ctrl-btn" id="tts-next-btn" title="Next sentence" aria-label="Next sentence" onclick="ttsNextSentence()">
+      <button type="button" class="tts-ctrl-btn" id="tts-next-btn" title="Next sentence" aria-label="Next sentence" data-onclick="ttsNextSentence()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/><polyline points="5 18 11 12 5 6"/></svg>
       </button>
-      <button type="button" class="tts-ctrl-btn rate-btn" id="tts-rate-btn" title="Change speech rate" aria-label="Change speech rate" onclick="cycleTtsRate()">
+      <button type="button" class="tts-ctrl-btn rate-btn" id="tts-rate-btn" title="Change speech rate" aria-label="Change speech rate" data-onclick="cycleTtsRate()">
         <span id="tts-rate-label">1.0×</span>
       </button>
-      <button type="button" class="tts-ctrl-btn" onclick="openAudioOptions()" aria-label="Audio options" title="Audio options"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></button>
-      <button type="button" class="tts-ctrl-btn stop-btn" id="tts-stop-btn" title="Stop reading aloud" aria-label="Stop reading aloud" onclick="stopTts()">
+      <button type="button" class="tts-ctrl-btn" data-onclick="openAudioOptions()" aria-label="Audio options" title="Audio options"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg></button>
+      <button type="button" class="tts-ctrl-btn stop-btn" id="tts-stop-btn" title="Stop reading aloud" aria-label="Stop reading aloud" data-onclick="stopTts()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -513,11 +523,11 @@
   <div class="editor-actions"><button type="button" id="audio-options-close">Done</button></div>
 </dialog>
 
-<div id="stats-modal" class="modal" role="dialog" aria-modal="true" aria-label="Reading statistics" aria-hidden="true" onclick="if(event.target===this) closeStatsModal()">
+<div id="stats-modal" class="modal" role="dialog" aria-modal="true" aria-label="Reading statistics" aria-hidden="true" data-onclick="if(event.target===this) closeStatsModal()">
   <div id="stats-card" class="modal-card">
     <div class="modal-title">
       <h3>Reading stats</h3>
-      <button type="button" class="modal-close" aria-label="Close reading statistics" title="Close" onclick="closeStatsModal()">
+      <button type="button" class="modal-close" aria-label="Close reading statistics" title="Close" data-onclick="closeStatsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -547,38 +557,38 @@
       <label>Daily minutes <input id="goal-daily" type="number" min="0" max="1440" step="5"></label>
       <label>Weekly hours <input id="goal-weekly" type="number" min="0" max="168" step="0.5"></label>
       <label>Books per year <input id="goal-books" type="number" min="0" max="1000"></label>
-      <button type="button" onclick="saveReadingGoals()">Save goals</button>
+      <button type="button" data-onclick="saveReadingGoals()">Save goals</button>
     </div>
-    <div class="close-row" style="text-align:right;"><button type="button" class="new-collection-btn" onclick="closeStatsModal()">Close</button></div>
+    <div class="close-row" style="text-align:right;"><button type="button" class="new-collection-btn" data-onclick="closeStatsModal()">Close</button></div>
   </div>
 </div>
 
-<div id="collections-modal" class="modal" role="dialog" aria-modal="true" aria-label="Manage collections" aria-hidden="true" onclick="if(event.target===this) closeCollectionsModal()">
+<div id="collections-modal" class="modal" role="dialog" aria-modal="true" aria-label="Manage collections" aria-hidden="true" data-onclick="if(event.target===this) closeCollectionsModal()">
   <div id="collections-card" class="modal-card">
     <div class="modal-title">
       <h3 id="collections-title">Collections</h3>
-      <button type="button" class="modal-close" aria-label="Close collections" title="Close" onclick="closeCollectionsModal()">
+      <button type="button" class="modal-close" aria-label="Close collections" title="Close" data-onclick="closeCollectionsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <p class="collections-intro">Create groups for your shared library. Everyone can browse them.</p>
     <div class="new-collection-row">
-      <input type="text" id="new-collection-input" class="new-collection-input" placeholder="New collection..." onkeydown="if(event.key==='Enter') createCollection()">
-      <button type="button" class="new-collection-btn" onclick="createCollection()">Create</button>
+      <input type="text" id="new-collection-input" class="new-collection-input" placeholder="New collection..." data-onkeydown="if(event.key==='Enter') createCollection()">
+      <button type="button" class="new-collection-btn" data-onclick="createCollection()">Create</button>
     </div>
     <div class="collection-list" id="collection-list"></div>
-    <div class="close-row" style="text-align:right; margin-top:16px;"><button type="button" class="new-collection-btn" onclick="closeCollectionsModal()">Done</button></div>
+    <div class="close-row" style="text-align:right; margin-top:16px;"><button type="button" class="new-collection-btn" data-onclick="closeCollectionsModal()">Done</button></div>
   </div>
 </div>
 
-<div id="admin-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="admin-title" aria-describedby="admin-description" aria-hidden="true" onclick="if(event.target===this) closeAdminModal()">
+<div id="admin-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="admin-title" aria-describedby="admin-description" aria-hidden="true" data-onclick="if(event.target===this) closeAdminModal()">
   <div id="admin-card" class="modal-card">
     <div class="admin-modal-header">
       <div>
         <p class="admin-eyebrow">Shared library</p>
         <h3 id="admin-title">People &amp; permissions</h3>
       </div>
-      <button type="button" class="modal-close" aria-label="Close people and permissions" title="Close" onclick="closeAdminModal()">
+      <button type="button" class="modal-close" aria-label="Close people and permissions" title="Close" data-onclick="closeAdminModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -589,7 +599,7 @@
       <div class="collection-list" id="user-list" role="list" aria-live="polite"></div>
     </section>
 
-    <form id="add-user-form" class="admin-create-form" onsubmit="createUser(event); return false;">
+    <form id="add-user-form" class="admin-create-form" data-onsubmit="createUser(event); return false;">
       <h4 class="admin-section-title">Add a person</h4>
       <div class="admin-fields">
         <div class="admin-field">
@@ -612,6 +622,11 @@
         <button type="submit" class="new-collection-btn">Add account</button>
       </div>
     </form>
+    <section class="admin-activity" aria-labelledby="admin-activity-title">
+      <h4 class="admin-section-title" id="admin-activity-title">Recent activity</h4>
+      <p class="admin-description">Changes to the shared library and to accounts, newest first. Kept for a year.</p>
+      <ol id="admin-activity-list" class="admin-activity-list"></ol>
+    </section>
   </div>
 </div>
 
@@ -637,18 +652,18 @@
   <div class="modal-card" style="max-width: 400px;">
     <div class="modal-title">
       <h3 id="reset-passphrase-title">Reset Passphrase</h3>
-      <button type="button" class="modal-close" aria-label="Close reset passphrase dialog" title="Close" onclick="closeResetPassphraseModal()">
+      <button type="button" class="modal-close" aria-label="Close reset passphrase dialog" title="Close" data-onclick="closeResetPassphraseModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
-    <form id="reset-passphrase-form" onsubmit="handleResetPassphraseSubmit(event); return false;">
+    <form id="reset-passphrase-form" data-onsubmit="handleResetPassphraseSubmit(event); return false;">
       <p id="reset-passphrase-user-label" style="font-size: 13px; color: var(--ink-soft); margin: 8px 0 14px;"></p>
       <div class="admin-field">
         <label for="reset-passphrase-input">New Passphrase</label>
         <input type="password" id="reset-passphrase-input" class="new-collection-input" autocomplete="new-password" minlength="12" required placeholder="Minimum 12 characters">
       </div>
       <div class="admin-create-actions" style="margin-top: 16px; display: flex; justify-content: flex-end; gap: 8px;">
-        <button type="button" class="file-link-btn" onclick="closeResetPassphraseModal()" style="padding: 8px 12px;">Cancel</button>
+        <button type="button" class="file-link-btn" data-onclick="closeResetPassphraseModal()" style="padding: 8px 12px;">Cancel</button>
         <button type="submit" class="new-collection-btn" style="padding: 8px 14px;">Save Passphrase</button>
       </div>
     </form>
@@ -657,7 +672,7 @@
 
 <div id="book-details-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="book-details-title" aria-hidden="true">
   <div class="modal-card book-details-card">
-    <div class="modal-title"><h3 id="book-details-title">Book details</h3><button type="button" class="modal-close" onclick="closeBookDetails()" aria-label="Close"><svg class="endpaper-icon" data-icon="lucide:x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <div class="modal-title"><h3 id="book-details-title">Book details</h3><button type="button" class="modal-close" data-onclick="closeBookDetails()" aria-label="Close"><svg class="endpaper-icon" data-icon="lucide:x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
     <div id="book-details-content"></div>
     <div id="book-details-actions" class="modal-actions"></div>
   </div>
@@ -665,8 +680,11 @@
 
 <div id="notebook-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="notebook-title" aria-hidden="true">
   <div class="modal-card notebook-card">
-    <div class="modal-title"><h3 id="notebook-title">Notebook</h3><button type="button" class="modal-close" onclick="closeNotebookModal()" aria-label="Close"><svg class="endpaper-icon" data-icon="lucide:x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
-    <input id="notebook-search" type="search" placeholder="Search highlights, notes, books, or tags…" oninput="renderNotebook()">
+    <div class="modal-title"><h3 id="notebook-title">Notebook</h3><button type="button" class="modal-close" data-onclick="closeNotebookModal()" aria-label="Close"><svg class="endpaper-icon" data-icon="lucide:x" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+    <div class="notebook-toolbar">
+      <input id="notebook-search" type="search" placeholder="Search highlights, notes, books, or tags…" aria-label="Search notebook" data-oninput="renderNotebook()">
+      <button type="button" class="file-link-btn" data-onclick="exportNotebook()">Export…</button>
+    </div>
     <div id="notebook-tags"></div>
     <div id="notebook-list"></div>
   </div>
@@ -675,22 +693,22 @@
 <div id="install-tip" class="install-tip" hidden>
   <strong>Install Endpaper</strong>
   <span>In Safari, tap Share, then “Add to Home Screen” for fullscreen reading and reliable offline access.</span>
-  <button type="button" onclick="dismissInstallTip()">Got it</button>
+  <button type="button" data-onclick="dismissInstallTip()">Got it</button>
 </div>
 
 <div id="update-banner" class="update-banner" hidden>
   <span>A new Endpaper version is ready.</span>
-  <button type="button" onclick="applyAppUpdate()">Update now</button>
-  <button type="button" onclick="this.parentElement.hidden=true">Later</button>
+  <button type="button" data-onclick="applyAppUpdate()">Update now</button>
+  <button type="button" data-onclick="this.parentElement.hidden=true">Later</button>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
-<div id="shortcuts-modal" class="modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" aria-hidden="true" onclick="if(event.target===this) closeShortcutsModal()">
+<div id="shortcuts-modal" class="modal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" aria-hidden="true" data-onclick="if(event.target===this) closeShortcutsModal()">
   <div id="shortcuts-card" class="modal-card">
     <div class="modal-title">
       <h3>Keyboard shortcuts</h3>
-      <button type="button" class="modal-close" aria-label="Close keyboard shortcuts" title="Close" onclick="closeShortcutsModal()">
+      <button type="button" class="modal-close" aria-label="Close keyboard shortcuts" title="Close" data-onclick="closeShortcutsModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -708,7 +726,7 @@
         <tr><td>Close panel / exit fullscreen</td><td><kbd>Esc</kbd></td></tr>
       </tbody>
     </table>
-    <div class="close-row" style="margin-top:18px; text-align:right;"><button type="button" class="new-collection-btn" onclick="closeShortcutsModal()">Got it</button></div>
+    <div class="close-row" style="margin-top:18px; text-align:right;"><button type="button" class="new-collection-btn" data-onclick="closeShortcutsModal()">Got it</button></div>
   </div>
 </div>
 
@@ -719,11 +737,12 @@
   </div>
 </div>
 
-<script src="/reader-index-cache.js?v=v15.6.3-20261002"></script>
-<script src="/control-icons.js?v=v15.6.3-20261002"></script>
-<script src="/app.js?v=v15.6.3-20261002"></script>
-<script src="/mobile.js?v=v15.6.3-20261002"></script>
-<script src="/ui.js?v=v15.6.3-20261002"></script>
+<script src="/reader-index-cache.js?v=v15.8.5-20261025"></script>
+<script src="/control-icons.js?v=v15.8.5-20261025"></script>
+<script src="/app.js?v=v15.8.5-20261025"></script>
+<script src="/mobile.js?v=v15.8.5-20261025"></script>
+<script src="/ui.js?v=v15.8.5-20261025"></script>
+<script src="/html-actions.js?v=v15.8.5-20261025"></script>
 
   <div id="dict-tooltip" class="hidden"></div>
 </body>

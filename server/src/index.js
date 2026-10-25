@@ -1,21 +1,19 @@
 'use strict';
 
 const express = require('express');
-const pino = require('pino');
 const pinoHttp = require('pino-http');
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+const logger = require('./lib/logger');
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
-const { isUuid, isBookFilename, isCoverFilename } = require('./lib/validation');
+const { BOOK_TEXT_LIMITS, isUuid, isBookFilename, isCoverFilename, isHexColor, userTags } = require('./lib/validation');
 
 // Initialize database (runs schema migration on require)
 const db = require('./db');
 
 // ---------- Startup: clean stale tmp files ----------
-const DATA_DIR = process.env.ENDPAPER_DATA_DIR
-  ? path.resolve(process.env.ENDPAPER_DATA_DIR)
-  : path.resolve(__dirname, '../../data');
+const { DATA_DIR, PUBLIC_DIR } = require('./lib/paths');
+const { writeLibraryArchive, writeFullBackup } = require('./lib/libraryArchive');
 const TMP_DIR = path.join(DATA_DIR, 'tmp');
 try {
   const ONE_HOUR = 60 * 60 * 1000;
@@ -37,6 +35,8 @@ const { requireAdmin } = require('./routes/users');
 
 // Routes
 const authRoutes = require('./routes/auth');
+const accountRoutes = require('./routes/account');
+const opdsRoutes = require('./routes/opds');
 const booksRoutes = require('./routes/books');
 const bookmarksRoutes = require('./routes/bookmarks');
 const highlightsRoutes = require('./routes/highlights');
@@ -50,9 +50,10 @@ const trustProxyVal = process.env.TRUST_PROXY;
 if (trustProxyVal !== undefined) {
   app.set('trust proxy', isNaN(Number(trustProxyVal)) ? (trustProxyVal === 'true' ? true : (trustProxyVal === 'false' ? false : trustProxyVal)) : Number(trustProxyVal));
 } else {
-  // Direct deployments must not trust spoofable forwarding headers. The
-  // supplied Docker/Caddy deployment sets TRUST_PROXY=1 explicitly.
-  app.set('trust proxy', false);
+  // Trust forwarding headers only from a proxy on this machine (Caddy or nginx
+  // in front of PM2). A direct client can never connect from loopback, so it
+  // cannot spoof its IP, while login rate limits still see real client IPs.
+  app.set('trust proxy', 'loopback');
 }
 const PORT = process.env.PORT || 3001;
 const MAX_IMPORT_BYTES = Math.min(Math.max(Number(process.env.IMPORT_MAX_BYTES) || 500 * 1024 * 1024, 1), 2 * 1024 * 1024 * 1024);
@@ -62,6 +63,9 @@ app.disable('x-powered-by');
 
 // ---------- Middleware ----------
 app.use(express.json({ limit: '10mb' }));
+// Express 5 leaves req.body undefined when a request has no JSON body; routes
+// read fields from it directly, so give them an empty object instead.
+app.use((req, res, next) => { if (req.body === undefined) req.body = {}; next(); });
 app.use(cookieParser());
 
 // Request logging
@@ -76,9 +80,9 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.dictionaryapi.dev; media-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://api.dictionaryapi.dev; media-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  if (process.env.NODE_ENV === 'production') {
+  if (req.secure) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
   next();
@@ -88,12 +92,24 @@ app.use((req, res, next) => {
 // reverse proxy can tell a sleeping process from a logged-out user.
 app.get('/healthz', (req, res) => res.json({ ok: true }));
 
+// Prometheus metrics, only when METRICS_TOKEN is set (see src/lib/metrics.js).
+const { countRequests, metricsHandler } = require('./lib/metrics');
+app.use(countRequests);
+app.get('/metrics', metricsHandler);
+
 // Auth middleware on all /api/* routes (auth route handler skips /api/login internally)
+// OPDS feeds for reading apps use their own HTTP Basic app-key auth.
+app.use(opdsRoutes);
+
 app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
 app.use('/api', authMiddleware);
+// Record successful admin and account changes (see src/lib/auditLog.js).
+const { auditMiddleware, listAudit, pruneAudit } = require('./lib/auditLog');
+app.use('/api', auditMiddleware);
+
 
 // Deduplicate replayed offline writes after an uncertain network outcome.
 // The frontend sends a stable UUID for every queued mutation.
@@ -121,6 +137,7 @@ app.use('/api', (req, res, next) => {
 
 // ---------- API Routes ----------
 app.use(authRoutes);
+app.use(accountRoutes);
 app.use(booksRoutes);
 app.use(bookmarksRoutes);
 app.use(highlightsRoutes);
@@ -130,8 +147,6 @@ app.use(settingsRoutes);
 app.use(usersRoutes);
 
 // ---------- Export / Import endpoints ----------
-const archiver = require('archiver');
-const createZipArchive = (opts) => typeof archiver === 'function' ? archiver('zip', opts) : new archiver.ZipArchive(opts);
 
 function importError(message) {
   const error = new Error(message);
@@ -164,6 +179,19 @@ function backupText(value, name, { required = false, max = 10000 } = {}) {
   const normalized = value.trim();
   if (required && !normalized) throw importError(`Invalid ${name} in backup`);
   return normalized || null;
+}
+
+// Book metadata the app itself may have stored unbounded (older uploads) is
+// truncated rather than rejected, so one long blurb cannot block a restore.
+function backupMetadataText(value, name, field, adjustments, { required = false } = {}) {
+  if (value == null && !required) return null;
+  if (typeof value !== 'string') throw importError(`Invalid ${name} in backup`);
+  const normalized = value.trim();
+  if (required && !normalized) throw importError(`Invalid ${name} in backup`);
+  const max = BOOK_TEXT_LIMITS[field];
+  if (normalized.length <= max) return normalized || null;
+  adjustments.push(`Shortened ${name} to ${max} characters`);
+  return normalized.slice(0, max).trim() || null;
 }
 
 function backupNumber(value, name, {
@@ -211,7 +239,7 @@ function normalizeBackupUser(value) {
   return { id: value.id, username: backupText(value.username, 'username', { required: true, max: 255 }) };
 }
 
-function normalizeBackupBook(value) {
+function normalizeBackupBook(value, adjustments) {
   assertObject(value, 'book');
   if (!isUuid(value.id) || !isBookFilename(value.filename)) throw importError('Invalid book in backup');
   const fileFormat = backupText(value.file_format, 'book format', { max: 16 }) || 'epub';
@@ -220,23 +248,43 @@ function normalizeBackupBook(value) {
 
   return {
     id: value.id,
-    title: backupText(value.title, 'book title', { required: true, max: 500 }),
-    author: backupText(value.author, 'book author', { max: 500 }),
-    series: backupText(value.series, 'book series', { max: 500 }),
+    title: backupMetadataText(value.title, 'book title', 'title', adjustments, { required: true }),
+    author: backupMetadataText(value.author, 'book author', 'author', adjustments),
+    series: backupMetadataText(value.series, 'book series', 'series', adjustments),
     series_index: backupNumber(value.series_index, 'book series index', { min: -1_000_000, max: 1_000_000 }),
-    description: backupText(value.description, 'book description', { max: 5000 }),
-    isbn: backupText(value.isbn, 'book ISBN', { max: 500 }),
-    tags: backupText(value.tags, 'book tags', { max: 500 }),
+    description: backupMetadataText(value.description, 'book description', 'description', adjustments),
+    isbn: backupMetadataText(value.isbn, 'book ISBN', 'isbn', adjustments),
+    tags: backupMetadataText(value.tags, 'book tags', 'tags', adjustments),
     filename: value.filename,
     file_format: 'epub',
     file_size: backupNumber(value.file_size, 'book file size', { min: 0, max: MAX_IMPORT_BYTES, integer: true }),
     cover_path: value.cover_path || null,
-    cover_color: backupText(value.cover_color, 'book cover color', { max: 32 }),
+    cover_color: normalizeCoverColor(value.cover_color, adjustments),
     added_at: backupTimestamp(value.added_at, 'book added time', { fallback: new Date().toISOString() }),
   };
 }
 
-function normalizeUserBook(value) {
+function normalizeCoverColor(value, adjustments) {
+  if (value == null || isHexColor(value)) return value ?? null;
+  adjustments.push('Reset an invalid book cover color');
+  return null;
+}
+
+// Older builds accepted fractional ratings; round them rather than reject the backup.
+function normalizeRating(value, adjustments) {
+  const rating = backupNumber(value, 'book rating', { min: 1, max: 5 });
+  if (rating == null || Number.isInteger(rating)) return rating;
+  adjustments.push(`Rounded a ${rating}-star rating to ${Math.round(rating)}`);
+  return Math.round(rating);
+}
+
+function normalizeBackupUserTags(value, adjustments) {
+  if (value == null || value === '') return null;
+  try { return userTags(typeof value === 'string' && value.startsWith('[') ? JSON.parse(value) : value); }
+  catch (_) { adjustments.push('Dropped invalid personal tags'); return null; }
+}
+
+function normalizeUserBook(value, adjustments) {
   assertObject(value, 'user_book');
   if (!isUuid(value.book_id)) throw importError('Invalid user_book in backup');
   const status = backupText(value.status, 'book status', { max: 16 }) || 'unread';
@@ -245,8 +293,10 @@ function normalizeUserBook(value) {
     user_id: optionalUserId(value.user_id, 'user_book user'),
     book_id: value.book_id,
     status,
-    rating: backupNumber(value.rating, 'book rating', { min: 1, max: 5, integer: true }),
+    rating: normalizeRating(value.rating, adjustments),
     progress_percent: backupNumber(value.progress_percent, 'book progress', { min: 0, max: 100, fallback: 0 }),
+    want_to_read: value.want_to_read ? 1 : 0,
+    user_tags: normalizeBackupUserTags(value.user_tags, adjustments),
     last_location_cfi: backupText(value.last_location_cfi, 'book location', { max: 10000 }),
     last_opened_at: backupTimestamp(value.last_opened_at, 'book last-opened time'),
   };
@@ -261,6 +311,7 @@ function normalizeBookmark(value) {
     book_id: value.book_id,
     cfi: backupText(value.cfi, 'bookmark CFI', { required: true, max: 10000 }),
     label: backupText(value.label, 'bookmark label', { max: 500 }),
+    note: backupText(value.note, 'bookmark note', { max: 2000 }),
     chapter: backupText(value.chapter, 'bookmark chapter', { max: 500 }),
     progress_percent: backupNumber(value.progress_percent, 'bookmark progress', { min: 0, max: 100, fallback: 0 }),
     created_at: backupTimestamp(value.created_at, 'bookmark created time', { fallback: new Date().toISOString() }),
@@ -325,9 +376,10 @@ function normalizeSetting(value) {
 
 function validateBackupDump(dump) {
   if (!dump || typeof dump !== 'object' || Array.isArray(dump)) throw importError('Backup database is invalid');
+  const adjustments = [];
   const users = assertArray(dump.users, 'users').map(normalizeBackupUser);
-  const userBooks = assertArray(dump.user_books, 'user_books').map(normalizeUserBook);
-  const books = assertArray(dump.books, 'books').map(normalizeBackupBook);
+  const userBooks = assertArray(dump.user_books, 'user_books').map(row => normalizeUserBook(row, adjustments));
+  const books = assertArray(dump.books, 'books').map(book => normalizeBackupBook(book, adjustments));
   const bookmarks = assertArray(dump.bookmarks, 'bookmarks').map(normalizeBookmark);
   const highlights = assertArray(dump.highlights, 'highlights').map(normalizeHighlight);
   const sessions = assertArray(dump.reading_sessions, 'reading_sessions').map(normalizeReadingSession);
@@ -356,7 +408,7 @@ function validateBackupDump(dump) {
     }
   }
 
-  return { users, userBooks, books, bookmarks, highlights, sessions, collections, bookCollections, settings };
+  return { users, userBooks, books, bookmarks, highlights, sessions, collections, bookCollections, settings, adjustments };
 }
 
 function isRegularFile(filePath) {
@@ -398,18 +450,6 @@ function validateArchiveAssets(files, backup, booksDir, coversDir) {
   }
 }
 
-function addLibraryAsset(archive, assetDir, filename, seenAssets) {
-  const assetPath = path.join(DATA_DIR, assetDir, filename);
-  if (!isRegularFile(assetPath)) {
-    throw new Error(`Cannot export: library asset ${assetDir}/${filename} is missing`);
-  }
-  const assetKey = `${assetDir}/${filename}`;
-  if (!seenAssets.has(assetKey)) {
-    archive.file(assetPath, { name: `${assetDir}/${filename}` });
-    seenAssets.add(assetKey);
-  }
-}
-
 function createUserIdMap(backupUsers) {
   // Only match identities that already exist locally. Import never inserts a
   // user or accepts a password hash/admin flag from a backup.
@@ -443,10 +483,12 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
   `);
   const listBookIds = db.prepare('SELECT id FROM books');
   const insertUserBook = db.prepare(`
-    INSERT INTO user_books (user_id, book_id, status, rating, progress_percent, last_location_cfi, last_opened_at)
-    VALUES (@user_id, @book_id, @status, @rating, @progress_percent, @last_location_cfi, @last_opened_at)
+    INSERT INTO user_books (user_id, book_id, status, rating, progress_percent, last_location_cfi, last_opened_at, want_to_read, user_tags)
+    VALUES (@user_id, @book_id, @status, @rating, @progress_percent, @last_location_cfi, @last_opened_at, @want_to_read, @user_tags)
     ON CONFLICT(user_id, book_id) DO UPDATE SET
       status = excluded.status,
+      want_to_read = excluded.want_to_read,
+      user_tags = excluded.user_tags,
       rating = excluded.rating,
       progress_percent = excluded.progress_percent,
       last_location_cfi = excluded.last_location_cfi,
@@ -454,8 +496,8 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
     WHERE excluded.last_opened_at > user_books.last_opened_at OR user_books.last_opened_at IS NULL
   `);
   const insertBookmark = db.prepare(`
-    INSERT OR IGNORE INTO bookmarks (id, user_id, book_id, cfi, label, chapter, progress_percent, created_at)
-    VALUES (@id, @user_id, @book_id, @cfi, @label, @chapter, @progress_percent, @created_at)
+    INSERT OR IGNORE INTO bookmarks (id, user_id, book_id, cfi, label, note, chapter, progress_percent, created_at)
+    VALUES (@id, @user_id, @book_id, @cfi, @label, @note, @chapter, @progress_percent, @created_at)
   `);
   const insertHighlight = db.prepare(`
     INSERT OR IGNORE INTO highlights (id, user_id, book_id, cfi_range, excerpt, note, color, chapter, tags, created_at)
@@ -568,84 +610,38 @@ function importBackupData(backup, backupUserIds, unmatchedUsers) {
 }
 
 /**
- * POST /api/export
+ * POST /api/export (POST only: it is a privileged action, even though SameSite=Strict already blocks cross-site use)
  * Streams a zip of the shared library plus user data. User records intentionally contain
  * identities only, so passphrase hashes, roles, and auth sessions never leave
  * this server.
  */
-app.all('/api/export', requireAdmin, (req, res) => {
+/**
+ * GET /api/admin/audit?limit=&before= — the audit log, newest first (admins only).
+ */
+app.get('/api/admin/audit', requireAdmin, (req, res) => {
+  const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit || '100'), 10) || 100));
+  const before = parseInt(String(req.query.before || ''), 10) || null;
+  res.json({ entries: listAudit({ limit, before }) });
+});
+setInterval(() => { try { pruneAudit(); } catch (_) {} }, 24 * 60 * 60 * 1000).unref();
+
+app.post('/api/export', requireAdmin, (req, res) => {
+  let started;
   try {
-    const books = db.prepare('SELECT * FROM books').all();
-
-    // Pre-flight validation: ensure all referenced book and cover files exist before streaming
-    for (const book of books) {
-      const bookPath = path.join(DATA_DIR, 'books', book.filename);
-      if (!isRegularFile(bookPath)) {
-        return res.status(500).json({
-          error: `Cannot export: book file for "${book.title || book.id}" (${book.filename}) is missing on disk`
-        });
-      }
-      if (book.cover_path) {
-        const coverPath = path.join(DATA_DIR, 'covers', book.cover_path);
-        if (!isRegularFile(coverPath)) {
-          return res.status(500).json({
-            error: `Cannot export: cover file for "${book.title || book.id}" (${book.cover_path}) is missing on disk`
-          });
-        }
-      }
-    }
-
     const filename = `endpaper-backup-${new Date().toISOString().slice(0, 10)}.zip`;
-
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    const archive = createZipArchive({ zlib: { level: 9 } });
-
-    archive.on('error', (err) => {
-      logger.error('Export archive error:', err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Export failed' });
-      } else {
-        res.destroy(err);
-      }
+    started = writeLibraryArchive(res);
+    started.done.catch(err => {
+      logger.error({ err }, 'Export archive error');
+      if (!res.headersSent) res.status(500).json({ error: 'Export failed' });
+      else res.destroy(err);
     });
-
-    archive.pipe(res);
-
-    const exportedAssets = new Set();
-    for (const book of books) {
-      addLibraryAsset(archive, 'books', book.filename, exportedAssets);
-      if (book.cover_path) addLibraryAsset(archive, 'covers', book.cover_path, exportedAssets);
-    }
-
-    const dump = {
-      formatVersion: 2,
-      exportedAt: new Date().toISOString(),
-      // Identity mapping is used on import; never export a hash or role.
-      users: db.prepare('SELECT id, username FROM users').all(),
-      user_books: db.prepare('SELECT * FROM user_books').all(),
-      books,
-      bookmarks: db.prepare('SELECT * FROM bookmarks').all(),
-      highlights: db.prepare('SELECT * FROM highlights').all(),
-      reading_sessions: db.prepare('SELECT * FROM reading_sessions').all(),
-      collections: db.prepare('SELECT * FROM collections').all(),
-      book_collections: db.prepare('SELECT * FROM book_collections').all(),
-      settings: db.prepare(`
-        SELECT user_id, key, value
-        FROM settings
-        WHERE key NOT IN ('passphrase_hash', 'session_token')
-      `).all(),
-    };
-    archive.append(JSON.stringify(dump, null, 2), { name: 'database.json' });
-    archive.finalize();
   } catch (err) {
-    logger.error('Export error:', err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Export failed' });
-    } else {
-      res.destroy(err);
-    }
+    logger.error({ err }, 'Export error');
+    res.removeHeader('Content-Disposition');
+    if (!res.headersSent) res.status(err.status || 500).json({ error: err.status ? err.message : 'Export failed' });
+    else res.destroy(err);
   }
 });
 
@@ -783,6 +779,30 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, r
     validateArchiveAssets(files, dump, BOOKS_DIR, COVERS_DIR);
     const { userIds, unmatchedUsers } = createUserIdMap(dump.users);
 
+    // ?dry_run=1: report what an import would do, change nothing.
+    if (req.query.dry_run === '1') {
+      const existingBook = db.prepare('SELECT 1 FROM books WHERE id = ? OR filename = ?');
+      const existingCollection = db.prepare('SELECT 1 FROM collections WHERE id = ? OR lower(name) = lower(?)');
+      const newBooks = dump.books.filter(book => !existingBook.get(book.id, book.filename));
+      const preview = {
+        dry_run: true,
+        exported_at: typeof dump.exportedAt === 'string' ? dump.exportedAt : null,
+        books_total: dump.books.length,
+        books_new: newBooks.length,
+        books_already_here: dump.books.length - newBooks.length,
+        new_book_titles: newBooks.slice(0, 20).map(book => book.title),
+        collections_new: dump.collections.filter(item => !existingCollection.get(item.id, item.name)).length,
+        accounts_matched: dump.users.length - unmatchedUsers,
+        accounts_unmatched: unmatchedUsers,
+        personal_rows: dump.userBooks.length + dump.bookmarks.length + dump.highlights.length + dump.sessions.length,
+        files_in_archive: files.length,
+        adjustments: dump.adjustments,
+      };
+      zipfile.close();
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+      return res.json(preview);
+    }
+
     // Extract assets into an isolated stage first. No live library path is
     // modified until every archive entry has streamed and validated.
     stageDir = await fs.promises.mkdtemp(path.join(DATA_DIR, 'tmp', 'import-'));
@@ -824,7 +844,9 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, r
       stageDir = null;
     }
 
-    res.json({ ok: true, restored_files: restoredFiles, ...results });
+    // Restored books get their text indexed for search in the background.
+    require('./lib/searchIndex').backfillMissing().catch(err => logger.error({ err }, 'Search backfill failed'));
+    res.json({ ok: true, restored_files: restoredFiles, ...results, adjustments: dump.adjustments });
   } catch (err) {
     if (zipfile) zipfile.close();
     if (req.file && fs.existsSync(req.file.path)) {
@@ -833,17 +855,19 @@ app.post('/api/import', requireAdmin, importUpload.single('file'), async (req, r
     if (stageDir && path.resolve(stageDir).startsWith(path.resolve(path.join(DATA_DIR, 'tmp')) + path.sep)) {
       await fs.promises.rm(stageDir, { recursive: true, force: true }).catch(() => {});
     }
-    logger.error('Import error:', err);
+    logger.error({ err }, 'Import error');
     res.status(err.status || 500).json({ error: err.status ? err.message : 'Import failed' });
   }
 });
 
 // ---------- Static files (frontend) ----------
-const PUBLIC_DIR = path.resolve(__dirname, '../../public');
+if (!fs.existsSync(path.join(PUBLIC_DIR, 'index.html'))) {
+  logger.error({ publicDir: PUBLIC_DIR }, 'Frontend not found; set ENDPAPER_PUBLIC_DIR to the directory containing index.html');
+}
 app.use(express.static(PUBLIC_DIR));
 
-// SPA fallback: serve index.html for any non-API route (Express 4 syntax; change to '/*splat' if upgrading to Express 5)
-app.get('*', (req, res) => {
+// SPA fallback: serve index.html for any non-API route (Express 5 wildcard syntax).
+app.get('/{*splat}', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'Not found' });
   }
@@ -853,7 +877,7 @@ app.get('*', (req, res) => {
 // Keep errors from middleware (notably Multer) in the same JSON shape as the
 // rest of the API instead of returning Express's default HTML error page.
 app.use((err, req, res, next) => {
-  logger.error('Request error:', err);
+  logger.error({ err }, 'Request error');
   if (res.headersSent) return next(err);
   const isUploadError = err instanceof multer.MulterError;
   const status = err.status || (isUploadError ? 400 : 500);
@@ -864,20 +888,37 @@ app.use((err, req, res, next) => {
 });
 
 // ---------- Start ----------
+// Optional scheduled full backups: FULL_BACKUP_EVERY_DAYS=1 writes a restorable
+// ZIP of the whole library to data/backups/full every day, keeping FULL_BACKUP_KEEP.
+{
+  const everyDays = Number(process.env.FULL_BACKUP_EVERY_DAYS) || 0;
+  const keep = Math.max(1, Number(process.env.FULL_BACKUP_KEEP) || 3);
+  if (everyDays > 0) {
+    const run = () => writeFullBackup({ keep })
+      .then(result => logger.info({ path: result.path, books: result.bookCount, bytes: result.bytes }, 'Full library backup written'))
+      .catch(err => logger.error({ err }, 'Full library backup failed'));
+    setTimeout(run, 60_000).unref();
+    setInterval(run, everyDays * 24 * 60 * 60 * 1000).unref();
+  }
+}
+
+// Index text of books that predate full-text search, in the background.
+setTimeout(() => require('./lib/searchIndex').backfillMissing().catch(err => logger.error({ err }, 'Search backfill failed')), 2000).unref();
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`Endpaper server listening on http://0.0.0.0:${PORT}`);
 });
 
 // ---------- Graceful shutdown ----------
 function gracefulShutdown(signal) {
-  logger.info(`\\n${signal} received — shutting down gracefully…`);
+  logger.info(`${signal} received — shutting down gracefully…`);
   server.close(() => {
     try {
       db.pragma('wal_checkpoint(TRUNCATE)');
       db.close();
       logger.info('Database closed and WAL checkpointed.');
     } catch (e) {
-      logger.error('Error closing database:', e);
+      logger.error({ err: e }, 'Error closing database');
     }
     process.exit(0);
   });

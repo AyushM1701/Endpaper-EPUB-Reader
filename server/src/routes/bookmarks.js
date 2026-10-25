@@ -47,6 +47,25 @@ router.post('/api/books/:id/bookmarks', validateUuidParam('id'), (req, res) => {
 });
 
 /**
+ * PATCH /api/bookmarks/:id
+ * Body: { label?, note? } — rename a bookmark or attach a note.
+ */
+router.patch('/api/bookmarks/:id', validateUuidParam('id'), (req, res) => {
+  const updates = [];
+  const values = { id: req.params.id, user_id: req.user_id };
+  try {
+    if (req.body.label !== undefined) { values.label = text(req.body.label, { max: 500, field: 'label' }); updates.push('label = @label'); }
+    if (req.body.note !== undefined) { values.note = text(req.body.note, { max: 2000, field: 'note' }); updates.push('note = @note'); }
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No valid fields to update' });
+  const result = db.prepare(`UPDATE bookmarks SET ${updates.join(', ')} WHERE id = @id AND user_id = @user_id`).run(values);
+  if (result.changes === 0) return res.status(404).json({ error: 'Bookmark not found' });
+  res.json(db.prepare('SELECT * FROM bookmarks WHERE id = ?').get(req.params.id));
+});
+
+/**
  * DELETE /api/bookmarks/:id
  */
 router.delete('/api/bookmarks/:id', validateUuidParam('id'), (req, res) => {

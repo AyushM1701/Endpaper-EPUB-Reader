@@ -4,7 +4,7 @@
   "description": "Endpaper — self-hosted EPUB reader backend",
   "main": "src/index.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node src/index.js",
@@ -12,20 +12,22 @@
     "set-passphrase": "node src/lib/passphrase.js --set",
     "test": "node --test test/*.test.js",
     "test:e2e": "playwright test",
-    "reindex-books": "node src/lib/reindexWordCounts.js"
+    "reindex-books": "node src/lib/reindexWordCounts.js",
+    "import-folder": "node src/lib/importFolder.js",
+    "backup": "node src/lib/backupCli.js"
   },
   "dependencies": {
     "archiver": "^8.0.0",
     "bcrypt": "^6.0.0",
-    "better-sqlite3": "^11.3.0",
+    "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.6",
-    "express": "^4.21.0",
-    "express-rate-limit": "^7.4.0",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
     "fast-xml-parser": "^5.10.1",
     "multer": "^2.4.0",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
-    "sharp": "^0.35.4",
+    "sharp": "^0.35.5",
     "yauzl": "^3.4.0"
   },
   "devDependencies": {

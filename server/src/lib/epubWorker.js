@@ -34,7 +34,7 @@ const crypto = require('crypto');
 
   let meta;
   try {
-    meta = await extractMeta(workerData.destPath, workerData.id, workerData.coversDir);
+    meta = await extractMeta(workerData.destPath, workerData.id, workerData.coversDir, { collectText: true });
   } catch (e) {
     meta = { _extractError: e.message, title: '', author: '', series: null, seriesIndex: null, coverPath: null };
   }

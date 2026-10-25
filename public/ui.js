@@ -18,7 +18,12 @@ function navigateDesktop(page, value = null) {
   if (desktopSeries) { document.getElementById('shelf-search').value = ''; document.getElementById('shelf-filter').value = 'all'; }
   if (!isMobileShell()) history.pushState({ endpaperDesktop: { page: desktopPage, value } }, '', `#/${page}${value ? `/${encodeURIComponent(value)}` : ''}`);
   renderShelf();
-  document.getElementById('shelf-view').scrollTo(0, 0);
+  const view = document.getElementById('shelf-view');
+  view.scrollTo(0, 0);
+  // Replay the page entrance once; drop the class so later re-renders do not animate again.
+  view.classList.remove('route-enter'); void view.offsetWidth; view.classList.add('route-enter');
+  clearTimeout(navigateDesktop.enterTimer);
+  navigateDesktop.enterTimer = setTimeout(() => view.classList.remove('route-enter'), 700);
   if (page === 'search') document.getElementById('shelf-search').focus();
 }
 
@@ -32,7 +37,7 @@ function renderDesktopShell() {
   heading.textContent = titles[desktopPage] || 'Your reading';
   document.getElementById('desktop-topbar-title').textContent = desktopPage === 'home' ? 'Your library' : heading.textContent;
   document.getElementById('desktop-browse-library').hidden = desktopPage !== 'home';
-  document.getElementById('desktop-description').textContent = desktopPage === 'home' ? 'Pick up where you left off, or find your next book.' : catalogue ? `${library.length} book${library.length === 1 ? '' : 's'} in your shared library` : '';
+  document.getElementById('desktop-description').textContent = desktopPage === 'home' ? 'Pick up where you left off, or find your next book.' : catalogue ? 'Every book in your shared library. Reading progress and notes stay private to you.' : '';
   document.querySelectorAll('[data-desktop-page]').forEach(button => {
     const active = button.dataset.desktopPage === desktopPage || desktopPage === 'series' && button.dataset.desktopPage === 'library';
     button.setAttribute('aria-current', active ? 'page' : 'false');
@@ -59,6 +64,30 @@ function renderDesktopShell() {
 }
 window.renderDesktopShell = renderDesktopShell;
 
+// Reloading #/library, #/series/<name> or #/book/<id> returns to that page
+// once the library has loaded. Unknown routes and missing books fall back to home.
+const RESTORABLE_PAGES = new Set(['home', 'library', 'search', 'series', 'book', 'notebook', 'stats', 'goals', 'offline', 'more', 'preferences']);
+window.restoreRouteFromHash = function restoreRouteFromHash() {
+  const match = /^#\/([a-z]+)(?:\/(.+))?$/.exec(location.hash || '');
+  if (!match || !RESTORABLE_PAGES.has(match[1])) return;
+  let value = null;
+  try { value = match[2] ? decodeURIComponent(match[2]) : null; } catch (_) { return; }
+  const page = match[1];
+  if (page === 'book' && !library.some(entry => entry.id === value)) return;
+  if (isMobileShell()) {
+    mobileRoute = { page, value };
+    history.replaceState({ endpaperMobile: mobileRoute }, '', location.hash);
+    renderMobileShell();
+  } else if (page === 'book') {
+    openBookDetails(value).catch(() => {});
+  } else if (['home', 'library', 'search', 'series'].includes(page)) {
+    desktopPage = page === 'search' ? 'library' : page;
+    desktopSeries = page === 'series' ? value : null;
+    history.replaceState({ endpaperDesktop: { page: desktopPage, value } }, '', location.hash);
+    renderShelf();
+  }
+};
+
 document.querySelectorAll('[data-desktop-page]').forEach(button => button.addEventListener('click', () => navigateDesktop(button.dataset.desktopPage)));
 window.addEventListener('popstate', event => {
   if (isMobileShell()) return;
@@ -78,10 +107,13 @@ function openFormEditor({ title, fields, onSave, submitLabel = 'Save' }) {
   const inputs = new Map();
   for (const field of fields) {
     const label = mobileElement('label', 'editor-field', field.label);
-    const input = mobileElement(field.multiline ? 'textarea' : 'input');
+    const isSelect = field.type === 'select';
+    const input = mobileElement(isSelect ? 'select' : field.multiline ? 'textarea' : 'input');
+    if (isSelect) for (const option of field.options || []) input.appendChild(new Option(option.label, option.value));
     input.name = field.name; input.value = field.value || '';
-    if (!field.multiline) input.type = field.type || 'text';
+    if (!field.multiline && !isSelect) input.type = field.type || 'text';
     if (field.required) input.required = true;
+    if (field.autocomplete) input.autocomplete = field.autocomplete;
     if (field.type === 'number') input.step = 'any';
     if (field.multiline) input.rows = 4;
     label.appendChild(input); form.appendChild(label); inputs.set(field.name, input);
@@ -106,6 +138,194 @@ function openFormEditor({ title, fields, onSave, submitLabel = 'Save' }) {
     });
     dialog.showModal();
   });
+}
+
+/* ---------------- Account: passphrase and signed-in devices ---------------- */
+async function changeOwnPassphrase() {
+  const expectedAccountVersion = accountVersion;
+  let result = null;
+  let nextPassphrase = '';
+  await openFormEditor({ title: 'Change passphrase', submitLabel: 'Change passphrase', fields: [
+    { name: 'current', label: 'Current passphrase', type: 'password', autocomplete: 'current-password', required: true },
+    { name: 'next', label: 'New passphrase (at least 12 characters)', type: 'password', autocomplete: 'new-password', required: true },
+    { name: 'confirm', label: 'Confirm new passphrase', type: 'password', autocomplete: 'new-password', required: true },
+  ], onSave: async values => {
+    // Passphrases are compared exactly as typed, so never trim them here.
+    if (values.next.trim().length < 12) throw new Error('The new passphrase must be at least 12 characters.');
+    if (values.next !== values.confirm) throw new Error('The new passphrases do not match.');
+    if (values.next === values.current) throw new Error('Choose a passphrase different from your current one.');
+    result = await api.changeOwnPassphrase(values.current, values.next);
+    nextPassphrase = values.next;
+  }});
+  if (!result || accountVersion !== expectedAccountVersion) return false;
+  // The encrypted offline copy is keyed to the passphrase; re-key it so it unlocks with the new one.
+  initializeOfflineSnapshot(nextPassphrase).catch(error => console.warn('Could not re-key the offline snapshot:', error));
+  const others = result.signed_out_sessions || 0;
+  showToast(others ? `Passphrase changed. Signed out ${others} other device${others === 1 ? '' : 's'}.` : 'Passphrase changed.');
+  return true;
+}
+
+function formatLastActive(iso) {
+  const time = Date.parse(iso || '');
+  if (!Number.isFinite(time)) return 'Last active: unknown';
+  if (Date.now() - time < 10 * 60 * 1000) return 'Active now';
+  return `Last active ${new Date(time).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`;
+}
+
+// Two-step sign-in: an authenticator code after the passphrase.
+function twoStepSection(expectedAccountVersion) {
+  const section = mobileElement('section', 'reading-apps two-step');
+  section.appendChild(mobileElement('h3', 'account-devices-title', 'Two-step sign-in'));
+  const help = mobileElement('p', 'reading-apps-help', 'Checking…');
+  const actions = mobileElement('div', 'reading-apps-actions');
+  section.append(help, actions);
+  const render = state => {
+    actions.replaceChildren();
+    if (state.enabled) {
+      help.textContent = `On. Signing in asks for a code from your authenticator app. Recovery codes left: ${state.recovery_codes_left}.`;
+      actions.appendChild(mobileButton('Turn off', () => turnOffTwoStep(expectedAccountVersion).then(next => next && render(next)), 'account-device-revoke'));
+    } else {
+      help.textContent = 'Off. Turn it on to require a code from an authenticator app (such as 2FAS, Aegis, Google Authenticator or 1Password) after your passphrase. Recommended for admins.';
+      actions.appendChild(mobileButton('Turn on…', () => turnOnTwoStep(expectedAccountVersion).then(next => next && render(next)), 'account-security-change'));
+    }
+  };
+  api.fetch('/api/account/totp', { expectedAccountVersion }).then(res => res.json()).then(render).catch(() => { help.textContent = 'Two-step sign-in status is unavailable.'; });
+  return section;
+}
+
+async function turnOnTwoStep(expectedAccountVersion) {
+  let setup;
+  try { setup = await api.fetch('/api/account/totp/setup', { method: 'POST', expectedAccountVersion }).then(res => res.json()); }
+  catch (error) { showToast(error.message || 'Could not start setup.', 'error'); return null; }
+  let result = null;
+  await openFormEditor({ title: 'Turn on two-step sign-in', submitLabel: 'Turn on', fields: [
+    { name: 'secret', label: 'In your authenticator app, add an account with this setup key (or open the link below on your phone)', value: setup.secret.replace(/(.{4})/g, '$1 ').trim() },
+    { name: 'link', label: 'Setup link', value: setup.otpauth_url },
+    { name: 'code', label: 'Then enter the 6-digit code it shows', required: true, autocomplete: 'one-time-code' },
+    { name: 'passphrase', label: 'Your current passphrase', type: 'password', autocomplete: 'current-password', required: true },
+  ], onSave: async values => {
+    result = await api.fetch('/api/account/totp/enable', { method: 'POST', body: JSON.stringify({ code: values.code, passphrase: values.passphrase }), expectedAccountVersion }).then(res => res.json());
+  }});
+  if (!result) return null;
+  await openFormEditor({ title: 'Save your recovery codes', submitLabel: 'I saved them', fields: [
+    { name: 'codes', label: 'Each code works once if you lose your phone. Store them somewhere safe; they will not be shown again.', value: result.recovery_codes.join('\n'), multiline: true },
+  ], onSave: async () => {} });
+  showToast('Two-step sign-in is on.');
+  return { enabled: true, recovery_codes_left: result.recovery_codes.length };
+}
+
+async function turnOffTwoStep(expectedAccountVersion) {
+  let done = false;
+  await openFormEditor({ title: 'Turn off two-step sign-in', submitLabel: 'Turn off', fields: [
+    { name: 'code', label: 'Current code from your authenticator app, or a recovery code', required: true, autocomplete: 'one-time-code' },
+  ], onSave: async values => {
+    await api.fetch('/api/account/totp/disable', { method: 'POST', body: JSON.stringify({ code: values.code }), expectedAccountVersion });
+    done = true;
+  }});
+  if (!done) return null;
+  showToast('Two-step sign-in is off.');
+  return { enabled: false, recovery_codes_left: 0 };
+}
+
+// OPDS app key: lets reading apps such as KOReader browse and download books.
+function readingAppsSection(expectedAccountVersion) {
+  const section = mobileElement('section', 'reading-apps');
+  section.appendChild(mobileElement('h3', 'account-devices-title', 'Reading apps (OPDS)'));
+  const feedUrl = `${location.origin}/opds`;
+  section.appendChild(mobileElement('p', 'reading-apps-help', `Add this catalogue in KOReader, Moon+ Reader, Thorium or another OPDS app: ${feedUrl}. Sign in with your username and an app key. The key is not your passphrase and can be revoked at any time.`));
+  const keyRow = mobileElement('div', 'reading-apps-key'); keyRow.hidden = true;
+  const keyInput = mobileElement('input'); keyInput.readOnly = true; keyInput.setAttribute('aria-label', 'New app key');
+  const copy = mobileButton('Copy', async () => {
+    try { await navigator.clipboard.writeText(keyInput.value); showToast('App key copied.'); }
+    catch (_) { keyInput.select(); showToast('Select the key and copy it.'); }
+  }, 'account-device-revoke');
+  keyRow.append(keyInput, copy);
+  const keyNote = mobileElement('p', 'reading-apps-help', 'Copy this key now; it will not be shown again.'); keyNote.hidden = true;
+  const actions = mobileElement('div', 'reading-apps-actions');
+  const create = mobileButton('Create app key', async () => {
+    create.disabled = true;
+    try {
+      const result = await api.fetch('/api/account/opds', { method: 'POST', expectedAccountVersion }).then(res => res.json());
+      keyInput.value = result.key; keyRow.hidden = false; keyNote.hidden = false;
+      create.textContent = 'Replace app key'; revoke.hidden = false;
+      keyInput.focus(); keyInput.select();
+    } catch (error) { showToast(error.message || 'Could not create an app key.', 'error'); }
+    finally { create.disabled = false; }
+  }, 'account-security-change');
+  const revoke = mobileButton('Revoke app key', async () => {
+    try {
+      await api.fetch('/api/account/opds', { method: 'DELETE', expectedAccountVersion });
+      keyRow.hidden = true; keyNote.hidden = true; revoke.hidden = true; create.textContent = 'Create app key';
+      showToast('App key revoked. Reading apps will need a new key.');
+    } catch (error) { showToast(error.message || 'Could not revoke the app key.', 'error'); }
+  }, 'account-device-revoke');
+  revoke.hidden = true;
+  actions.append(create, revoke);
+  section.append(keyRow, keyNote, actions);
+  api.fetch('/api/account/opds', { expectedAccountVersion }).then(res => res.json()).then(state => {
+    if (state.enabled) { create.textContent = 'Replace app key'; revoke.hidden = false; }
+  }).catch(() => {});
+  return section;
+}
+
+async function openAccountSecurity() {
+  const expectedAccountVersion = accountVersion;
+  const dialog = mobileElement('dialog', 'form-editor account-security');
+  dialog.setAttribute('aria-labelledby', 'account-security-title');
+  const title = mobileElement('h2', '', 'Passphrase & devices'); title.id = 'account-security-title';
+  const intro = mobileElement('p', '', 'Change your passphrase, or sign out of devices you no longer use. Changing your passphrase signs out every other device.');
+  const changeButton = mobileButton('Change passphrase…', async () => {
+    dialog.close();
+    if (await changeOwnPassphrase()) openAccountSecurity();
+  }, 'account-security-change');
+  const devicesTitle = mobileElement('h3', 'account-devices-title', 'Signed-in devices');
+  const list = mobileElement('ul', 'account-device-list');
+  const status = mobileElement('p', 'editor-error'); status.setAttribute('role', 'alert');
+  const revokeOthers = mobileButton('Sign out all other devices', async () => {
+    revokeOthers.disabled = true; status.textContent = '';
+    try {
+      const outcome = await api.revokeOtherAccountSessions();
+      const count = outcome.signed_out_sessions || 0;
+      showToast(count ? `Signed out ${count} other device${count === 1 ? '' : 's'}.` : 'No other devices were signed in.');
+      await render();
+    } catch (error) { status.textContent = error.message || 'Could not sign out other devices.'; }
+    finally { revokeOthers.disabled = false; }
+  }, 'account-revoke-others');
+  const actions = mobileElement('div', 'editor-actions');
+  actions.appendChild(mobileButton('Done', () => dialog.close(), 'primary-action'));
+  const appsSection = readingAppsSection(expectedAccountVersion);
+  const twoStep = twoStepSection(expectedAccountVersion);
+  dialog.append(title, intro, changeButton, twoStep, devicesTitle, list, status, revokeOthers, appsSection, actions);
+
+  async function render() {
+    let sessions;
+    try { sessions = await api.getAccountSessions(); }
+    catch (error) { status.textContent = error.message || 'Could not load your devices.'; return; }
+    if (accountVersion !== expectedAccountVersion) { dialog.close(); return; }
+    list.replaceChildren(...sessions.map(session => {
+      const row = mobileElement('li', 'account-device');
+      const details = mobileElement('div', 'account-device-details');
+      details.append(mobileElement('strong', '', session.label), mobileElement('span', '', session.current ? 'This device' : formatLastActive(session.last_seen_at)));
+      row.appendChild(details);
+      if (!session.current) {
+        const revoke = mobileButton('Sign out', async () => {
+          revoke.disabled = true; status.textContent = '';
+          try { await api.revokeAccountSession(session.id); showToast(`Signed out ${session.label}.`); await render(); }
+          catch (error) { status.textContent = error.message || 'Could not sign out that device.'; revoke.disabled = false; }
+        }, 'account-device-revoke');
+        revoke.setAttribute('aria-label', `Sign out ${session.label}, ${formatLastActive(session.last_seen_at).toLocaleLowerCase()}`);
+        row.appendChild(revoke);
+      }
+      return row;
+    }));
+    revokeOthers.hidden = !sessions.some(session => !session.current);
+  }
+
+  document.body.appendChild(dialog);
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  dialog.addEventListener('keydown', event => event.stopPropagation());
+  dialog.showModal();
+  await render();
 }
 
 async function openAnnotation(item) {
@@ -170,7 +390,8 @@ accountSummary.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 24 24" aria-hi
 const accountActions = mobileElement('div', 'desktop-account-actions');
 desktopAccountMenu.append(accountSummary, accountActions);
 preserveActionMenuFocus(accountActions, accountSummary);
-for (const [id, label] of [['shell-theme-toggle', 'App appearance'], ['help-toggle', 'Keyboard shortcuts'], ['admin-toggle', 'People & permissions'], ['logout-btn', 'Log out']]) {
+document.getElementById('account-security-toggle')?.addEventListener('click', () => openAccountSecurity());
+for (const [id, label] of [['shell-theme-toggle', 'App appearance'], ['help-toggle', 'Keyboard shortcuts'], ['admin-toggle', 'People & permissions'], ['account-security-toggle', 'Passphrase & devices'], ['logout-btn', 'Log out']]) {
   const button = document.getElementById(id);
   if (!button) continue;
   button.appendChild(mobileElement('span', '', label));
@@ -477,3 +698,17 @@ for (const [buttonId, menuId, close] of [
   window.animateShellDestination('desktop', `${desktopPage}:${desktopSeries || ''}`);
   window.animateShellDestination('mobile', `${mobileRoute.page}:${mobileRoute.value || ''}`);
 })();
+
+// Skip link: move focus to the page content without changing the URL hash,
+// which the router uses for #/library-style routes.
+document.getElementById('skip-link')?.addEventListener('click', event => {
+  event.preventDefault();
+  const target = document.body.classList.contains('reader-active')
+    ? document.getElementById('viewer-wrap')
+    : document.getElementById(isMobileShell() ? 'mobile-content' : 'desktop-content')?.childElementCount
+      ? document.getElementById(isMobileShell() ? 'mobile-content' : 'desktop-content')
+      : document.getElementById('shelf-view');
+  if (!target) return;
+  if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+  target.focus({ preventScroll: false });
+});
